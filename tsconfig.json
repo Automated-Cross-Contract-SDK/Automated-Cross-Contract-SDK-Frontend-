@@ -7,8 +7,9 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "noEmit": true
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"]
   },
-  "include": ["packages/*/src"],
-  "references": [{ "path": "./packages/sdk" }, { "path": "./packages/react-hook" }]
+  "include": ["packages/*/src"]
 }

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderHook, act, waitFor } from '@testing-library/react'
-import React from 'react'
+import { renderHook, act } from '@testing-library/react'
 import { useSorobanResurrect } from '../useSorobanResurrect.js'
+import { SorobanResurrect } from '@soroban-resurrect/sdk'
 
 const mockOnStateChange = vi.fn()
 const mockReset = vi.fn()
@@ -75,28 +75,27 @@ describe('useSorobanResurrect', () => {
   })
 
   it('recreates SDK instance when config changes', () => {
-    const { SorobanResurrect } = require('@soroban-resurrect/sdk')
     const { rerender } = renderHook(
       (config: { rpcUrl: string }) => useSorobanResurrect({ config }),
       { initialProps: testConfig },
     )
-    const instance1 = (SorobanResurrect as ReturnType<typeof vi.fn>).mock.results[0].value
+    const SorobanResurrectMock = vi.mocked(SorobanResurrect)
+    const instance1 = SorobanResurrectMock.mock.results[0].value
 
     rerender({ rpcUrl: 'https://other-rpc.com' })
-    const instance2 = (SorobanResurrect as ReturnType<typeof vi.fn>).mock.results[1].value
+    const instance2 = SorobanResurrectMock.mock.results[1].value
 
     expect(instance1).not.toBe(instance2)
   })
 
   it('does not recreate SDK when config is unchanged', () => {
-    const { SorobanResurrect } = require('@soroban-resurrect/sdk')
     const { rerender } = renderHook(
       (config: { rpcUrl: string }) => useSorobanResurrect({ config }),
       { initialProps: testConfig },
     )
 
     rerender(testConfig)
-    expect(SorobanResurrect).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(SorobanResurrect)).toHaveBeenCalledTimes(1)
   })
 
   it('isProcessing reflects running states', () => {

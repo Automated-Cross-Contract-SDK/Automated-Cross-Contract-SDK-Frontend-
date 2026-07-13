@@ -98,7 +98,7 @@ export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
     const innerEnvelope = feeBumpEnvelope.tx().innerTx()
     const innerType = innerEnvelope.switch()
     if (innerType === xdr.EnvelopeType.envelopeTypeTxV0()) {
-      return (innerEnvelope.value() as xdr.TransactionV0Envelope).tx().operations()
+      return (innerEnvelope.value() as unknown as xdr.TransactionV0Envelope).tx().operations()
     }
     return (innerEnvelope.value() as xdr.TransactionV1Envelope).tx().operations()
   }
@@ -133,8 +133,7 @@ export async function buildOriginalAfterRestore(
     builder.addOperation(op)
   }
 
-  const originalTimeout = originalTx.timeout ?? 30
-  builder.setTimeout(originalTimeout)
+  builder.setTimeout(30)
   const rawTx = builder.build()
 
   const sim = await server.simulateTransaction(rawTx)

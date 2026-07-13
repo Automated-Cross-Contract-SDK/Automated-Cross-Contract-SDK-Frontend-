@@ -1,13 +1,6 @@
 import React, { useState, useCallback } from 'react'
 import { SorobanResurrectProvider, useSorobanResurrectContext } from '@soroban-resurrect/react-hook'
-import {
-  TransactionBuilder,
-  Account,
-  Operation,
-  Networks,
-  nativeToScVal,
-  rpc,
-} from '@stellar/stellar-sdk'
+import { TransactionBuilder, Operation, Networks, nativeToScVal, rpc } from '@stellar/stellar-sdk'
 
 const RPC_URL = import.meta.env.VITE_RPC_URL ?? 'https://soroban-testnet.stellar.org'
 const NETWORK = Networks.TESTNET

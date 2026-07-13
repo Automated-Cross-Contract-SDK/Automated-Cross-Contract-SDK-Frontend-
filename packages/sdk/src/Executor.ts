@@ -64,6 +64,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
     onRestoreSubmitted,
     onRestoreConfirmed,
     onOriginalSubmitted,
+    onRestoreFailed,
   } = params
 
   const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
