@@ -1,4 +1,4 @@
-import { rpc } from '@stellar/stellar-sdk'
+import { rpc, Account } from '@stellar/stellar-sdk'
 import { TransactionBuilder, Operation, Transaction, xdr } from '@stellar/stellar-sdk'
 import { SorobanResurrectConfig } from './types.js'
 import { DEFAULT_NETWORK_PASSPHRASE, RESTORE_FEE_MULTIPLIER } from './constants.js'
@@ -15,6 +15,8 @@ export interface BuildRestoreTxParams {
   minResourceFee: number
   /** SDK configuration. */
   config: SorobanResurrectConfig
+  /** Pre-fetched account (avoids sequence-number race when calling concurrently). */
+  account?: Account
 }
 
 /**
@@ -22,11 +24,11 @@ export interface BuildRestoreTxParams {
  * The fee is calculated as minResourceFee * RESTORE_FEE_MULTIPLIER.
  */
 export async function buildRestoreTransaction(params: BuildRestoreTxParams): Promise<Transaction> {
-  const { sourcePublicKey, transactionData, minResourceFee, config } = params
+  const { sourcePublicKey, transactionData, minResourceFee, config, account: preFetched } = params
 
   const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
 
-  const account = await params.server.getAccount(sourcePublicKey)
+  const account = preFetched ?? (await params.server.getAccount(sourcePublicKey))
 
   const restoreFee = (minResourceFee * RESTORE_FEE_MULTIPLIER).toString()
 
@@ -68,10 +70,9 @@ export async function waitForTransaction(
       return response
     }
 
-    // Exponential backoff with jitter: delay = min(base * 2^attempt, cap) * (0.5 + random * 0.5)
+    // Exponential backoff with jitter: delay = min(base * 2^attempt, pollIntervalMs) * (0.5 + random * 0.5)
     attempt++
-    const cap = Math.max(pollIntervalMs, 100)
-    const delay = Math.min(cap, 100 * Math.pow(2, attempt))
+    const delay = Math.min(pollIntervalMs, 100 * Math.pow(2, attempt))
     const jitter = delay * (0.5 + Math.random() * 0.5)
     await new Promise((resolve) => setTimeout(resolve, jitter))
   }
@@ -90,6 +91,16 @@ export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
   if (envelopeType === xdr.EnvelopeType.envelopeTypeTxV0()) {
     const v0Envelope = envelope.value() as xdr.TransactionV0Envelope
     return v0Envelope.tx().operations()
+  }
+
+  if (envelopeType === xdr.EnvelopeType.envelopeTypeTxFeeBump()) {
+    const feeBumpEnvelope = envelope.value() as xdr.FeeBumpTransactionEnvelope
+    const innerEnvelope = feeBumpEnvelope.tx().innerTx()
+    const innerType = innerEnvelope.switch()
+    if (innerType === xdr.EnvelopeType.envelopeTypeTxV0()) {
+      return (innerEnvelope.value() as xdr.TransactionV0Envelope).tx().operations()
+    }
+    return (innerEnvelope.value() as xdr.TransactionV1Envelope).tx().operations()
   }
 
   const v1Envelope = envelope.value() as xdr.TransactionV1Envelope
@@ -122,7 +133,8 @@ export async function buildOriginalAfterRestore(
     builder.addOperation(op)
   }
 
-  builder.setTimeout(30)
+  const originalTimeout = originalTx.timeout ?? 30
+  builder.setTimeout(originalTimeout)
   const rawTx = builder.build()
 
   const sim = await server.simulateTransaction(rawTx)
@@ -147,7 +159,6 @@ export async function buildOriginalAfterRestore(
 export async function prepareTransaction(
   server: rpc.Server,
   tx: Transaction,
-  _networkPassphrase: string,
 ): Promise<Transaction> {
   const sim = await server.simulateTransaction(tx)
 

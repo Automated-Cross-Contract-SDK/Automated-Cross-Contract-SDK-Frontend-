@@ -56,6 +56,13 @@ export function SorobanResurrectProvider({ config, children }: SorobanResurrectP
     message: '',
   })
 
+  const configStr = JSON.stringify(config)
+  const prevConfigStr = useRef(configStr)
+  if (configStr !== prevConfigStr.current) {
+    prevConfigStr.current = configStr
+    resurrectRef.current = new SorobanResurrect(config)
+  }
+
   if (!resurrectRef.current) {
     resurrectRef.current = new SorobanResurrect(config)
   }
@@ -64,12 +71,13 @@ export function SorobanResurrectProvider({ config, children }: SorobanResurrectP
     const r = resurrectRef.current
     if (!r) return
 
+    setState({ state: 'idle', message: '' })
     const unsubscribe = r.onStateChange((info: RestoreStateInfo) => {
       setState(info)
     })
 
     return unsubscribe
-  }, [])
+  }, [configStr])
 
   const submitWithRestore = useCallback(
     async (transaction: Transaction, wallet: WalletAdapter): Promise<ResurrectResult> => {

@@ -111,12 +111,14 @@ export async function detectArchivedEntries(
     const chunk = ledgerKeys.slice(i, i + chunkSize)
     try {
       const result = await server.getLedgerEntries(...chunk)
-      for (let j = 0; j < chunk.length; j++) {
-        const entry = result.entries?.[j]
-        if (!entry) {
+      const knownKeys = new Set(
+        (result.entries ?? []).map((e) => e.key.toXDR('base64')),
+      )
+      for (const key of chunk) {
+        if (!knownKeys.has(key.toXDR('base64'))) {
           archived.push({
-            key: chunk[j],
-            keyBase64: chunk[j].toXDR('base64'),
+            key,
+            keyBase64: key.toXDR('base64'),
           })
         }
       }

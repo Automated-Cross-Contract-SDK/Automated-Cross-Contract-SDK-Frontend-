@@ -6,6 +6,7 @@ import {
   Operation,
   Networks,
   nativeToScVal,
+  rpc,
 } from '@stellar/stellar-sdk'
 
 const RPC_URL = import.meta.env.VITE_RPC_URL ?? 'https://soroban-testnet.stellar.org'
@@ -13,6 +14,7 @@ const NETWORK = Networks.TESTNET
 const CONTRACT_ID =
   import.meta.env.VITE_CONTRACT_ID ?? 'CCJZ5DGASBWQXR5G4GXEJM2Q4FI5L3QJ6TQ3QFJTQH7GJ6KJ3J2Q2K2Q'
 const NETWORK_PASSPHRASE = import.meta.env.VITE_NETWORK_PASSPHRASE ?? NETWORK
+const server = new rpc.Server(RPC_URL)
 
 function getStellarWallet(): StellarWallet {
   if (typeof window === 'undefined' || !window.stellar) {
@@ -55,7 +57,7 @@ function WalletButton() {
 }
 
 function WithdrawButton() {
-  const { submitWithRestore, state, isProcessing, detectArchivedKeys, reset } =
+  const { submitWithRestore, state, isProcessing, detectArchivedKeys, reset, resurrect } =
     useSorobanResurrectContext()
 
   const [lastResult, setLastResult] = useState<string | null>(null)
@@ -63,7 +65,8 @@ function WithdrawButton() {
   const buildSampleTransaction = useCallback(async () => {
     const stellar = getStellarWallet()
     const pubKey = await stellar.getPublicKey()
-    const account = new Account(pubKey, '0')
+    const sdkServer = resurrect?.server ?? server
+    const account = await sdkServer.getAccount(pubKey)
 
     const tx = new TransactionBuilder(account, {
       fee: '100',

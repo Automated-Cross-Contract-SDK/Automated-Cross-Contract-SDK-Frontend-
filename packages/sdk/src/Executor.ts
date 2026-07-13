@@ -36,6 +36,8 @@ export interface ExecuteParams {
   onRestoreConfirmed?: (txHash: string) => void
   /** Called after the original transaction is submitted. */
   onOriginalSubmitted?: (txHash: string) => void
+  /** Called when the restore step of the workflow fails. */
+  onRestoreFailed?: (error: string) => void
 }
 
 /**
@@ -83,7 +85,19 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       const archivedKeys = extractArchivedKeys(simResponse)
       onRestoreNeeded?.(archivedKeys)
 
+      if (!(await wallet.isConnected())) {
+        const err = 'Wallet is not connected'
+        onRestoreFailed?.(err)
+        return {
+          success: false,
+          archivedKeysDetected: archivedKeys.length,
+          error: err,
+        }
+      }
+
       const publicKey = await wallet.getPublicKey()
+
+      const account = await server.getAccount(publicKey)
 
       const restoreTx = await buildRestoreTransaction({
         server,
@@ -91,6 +105,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
         transactionData: simResponse.transactionData.build(),
         minResourceFee: parseInt(simResponse.minResourceFee, 10),
         config,
+        account,
       })
 
       const signedRestoreXdr = await wallet.signTransaction(restoreTx.toXDR(), {
@@ -99,10 +114,12 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
 
       const signedRestoreTx = TransactionBuilder.fromXDR(signedRestoreXdr, networkPassphrase)
       if (!(signedRestoreTx instanceof Transaction)) {
+        const err = 'Failed to parse signed restore transaction'
+        onRestoreFailed?.(err)
         return {
           success: false,
           archivedKeysDetected: archivedKeys.length,
-          error: 'Failed to parse signed restore transaction',
+          error: err,
         }
       }
 
@@ -117,11 +134,13 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       )
 
       if (restoreStatus.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
+        const err = 'Restore transaction failed'
+        onRestoreFailed?.(err)
         return {
           success: false,
           archivedKeysDetected: archivedKeys.length,
           restoreTxHash: restoreResult.hash,
-          error: 'Restore transaction failed',
+          error: err,
         }
       }
 

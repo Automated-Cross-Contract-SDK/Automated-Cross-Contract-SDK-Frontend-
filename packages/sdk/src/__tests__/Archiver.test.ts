@@ -112,31 +112,34 @@ describe('Archiver', () => {
 
   describe('detectArchivedEntries', () => {
     it('returns empty array when all entries are live', async () => {
+      const key1 = { toXDR: () => 'base64-1' } as unknown as xdr.LedgerKey
+      const key2 = { toXDR: () => 'base64-2' } as unknown as xdr.LedgerKey
       const server = {
         getLedgerEntries: vi.fn().mockResolvedValue({
-          entries: [{ key: 'exists' }, { key: 'exists2' }],
+          entries: [{ key: key1 }, { key: key2 }],
         }),
       } as unknown as rpc.Server
 
-      const mockKey = { toXDR: () => 'base64-xdr' } as unknown as xdr.LedgerKey
-      const keys = [mockKey, mockKey]
+      const keys = [key1, key2]
 
       const result = await detectArchivedEntries(server, keys)
       expect(result).toEqual([])
     })
 
     it('detects archived entries when ledger entries are missing', async () => {
+      const existingKey = { toXDR: () => 'base64-1' } as unknown as xdr.LedgerKey
+      const missingKey = { toXDR: () => 'base64-2' } as unknown as xdr.LedgerKey
       const server = {
         getLedgerEntries: vi.fn().mockResolvedValue({
-          entries: [undefined, { key: 'exists' }],
+          entries: [{ key: existingKey }],
         }),
       } as unknown as rpc.Server
 
-      const mockKey = { toXDR: () => 'base64-xdr' } as unknown as xdr.LedgerKey
-      const keys = [mockKey, mockKey]
+      const keys = [existingKey, missingKey]
 
       const result = await detectArchivedEntries(server, keys)
       expect(result.length).toBe(1)
+      expect(result[0].keyBase64).toBe('base64-2')
     })
 
     it('treats all keys in a chunk as archived when the request fails', async () => {

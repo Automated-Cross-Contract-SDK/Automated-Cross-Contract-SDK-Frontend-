@@ -47,17 +47,25 @@ export function useSorobanResurrect(
     message: '',
   })
 
+  const configStr = JSON.stringify(config)
+  const prevConfigStr = useRef(configStr)
+  if (configStr !== prevConfigStr.current) {
+    prevConfigStr.current = configStr
+    resurrectRef.current = new SorobanResurrect(config)
+  }
+
   if (!resurrectRef.current) {
     resurrectRef.current = new SorobanResurrect(config)
   }
 
   useEffect(() => {
     const r = resurrectRef.current!
+    setState({ state: 'idle', message: '' })
     const unsub = r.onStateChange((info: RestoreStateInfo) => {
       setState(info)
     })
     return unsub
-  }, [])
+  }, [configStr])
 
   const submitWithRestore = useCallback(async (transaction: Transaction, wallet: WalletAdapter) => {
     return resurrectRef.current!.submitWithRestore({ transaction, wallet })

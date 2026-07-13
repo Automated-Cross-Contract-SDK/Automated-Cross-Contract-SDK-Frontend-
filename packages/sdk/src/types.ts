@@ -65,6 +65,8 @@ export interface SubmitWithRestoreOptions {
   onRestoreConfirmed?: (txHash: string) => void
   /** Called after the original transaction is submitted. */
   onOriginalSubmitted?: (txHash: string) => void
+  /** Called when the restore step of the workflow fails. */
+  onRestoreFailed?: (error: string) => void
 }
 
 /** Tracks the current stage of the restore-and-submit workflow. */
