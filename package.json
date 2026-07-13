@@ -1,0 +1,37 @@
+{
+  "name": "soroban-resurrect",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Automated Cross-Contract State Restoration SDK & Wallet Middleware for Soroban",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "examples/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w packages/sdk && npm run build -w packages/react-hook && npm run build -w examples/basic",
+    "build:sdk": "npm run build -w packages/sdk",
+    "build:hook": "npm run build -w packages/react-hook",
+    "dev:example": "npm run dev -w examples/basic",
+    "typecheck": "tsc --noEmit --composite false",
+    "lint": "eslint 'packages/*/src/**/*.{ts,tsx}' 'examples/*/src/**/*.{ts,tsx}'",
+    "lint:fix": "eslint --fix 'packages/*/src/**/*.{ts,tsx}' 'examples/*/src/**/*.{ts,tsx}'",
+    "format": "prettier --check '**/*.{ts,tsx,json,md}' --ignore-path .gitignore",
+    "format:fix": "prettier --write '**/*.{ts,tsx,json,md}' --ignore-path .gitignore",
+    "test": "npm run test -w packages/sdk",
+    "test:watch": "npm run test:watch -w packages/sdk",
+    "clean": "npm run clean --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.7.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.5",
+    "typescript": "^5.5.0",
+    "typescript-eslint": "^8.63.0"
+  }
+}
