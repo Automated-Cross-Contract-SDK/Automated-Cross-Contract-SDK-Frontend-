@@ -38,6 +38,9 @@ export class SorobanResurrect {
   private _lastArchivedKeys: ArchivedLedgerEntry[] = []
   private _listeners: Array<(info: RestoreStateInfo) => void> = []
 
+  /**
+   * @param config - SDK configuration. See {@link SorobanResurrectConfig} for defaults.
+   */
   constructor(config: SorobanResurrectConfig) {
     this.server = new rpc.Server(config.rpcUrl)
     const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
@@ -125,6 +128,9 @@ export class SorobanResurrect {
   /**
    * Simulates a transaction on the Soroban RPC endpoint.
    * Updates internal state to 'simulating'.
+   *
+   * @param transaction - The transaction to simulate.
+   * @returns The raw simulation response.
    */
   async simulate(transaction: Transaction) {
     this.setState('simulating', 'Simulating transaction...')
@@ -141,6 +147,9 @@ export class SorobanResurrect {
    *
    * If archiveDetectionMethod is 'direct', queries the ledger directly for
    * keys that appear in the transaction footprint.
+   *
+   * @param transaction - The transaction to check for archived entries.
+   * @returns The archived ledger entries detected, or an empty array if none.
    */
   async detectArchivedKeys(transaction: Transaction): Promise<ArchivedLedgerEntry[]> {
     const method = (this.config as Required<typeof this.config>).archiveDetectionMethod ?? 'simulation'
@@ -197,6 +206,9 @@ export class SorobanResurrect {
   /**
    * Convenience method — returns true if the transaction requires
    * archive restoration before it can be submitted.
+   *
+   * @param transaction - The transaction to check.
+   * @returns Whether the transaction requires restoration.
    */
   needsRestore(transaction: Transaction): Promise<boolean> {
     return this.detectArchivedKeys(transaction).then((keys) => keys.length > 0)
@@ -217,6 +229,8 @@ export class SorobanResurrect {
    * @param sourcePublicKey - The source account public key
    * @param transaction - The transaction to build a restore for
    * @param simulationResponse - Optional pre-computed simulation response (to avoid state side-effects)
+   * @returns The unsigned restore transaction.
+   * @throws If the simulation does not indicate a restore is needed.
    */
   async buildRestoreTx(
     sourcePublicKey: string,
@@ -245,6 +259,9 @@ export class SorobanResurrect {
    * is built, signed, submitted, and confirmed before the original
    * transaction is rebuilt and submitted. State transitions are
    * published to all registered listeners.
+   *
+   * @param options - See {@link SubmitWithRestoreOptions}.
+   * @returns A structured result describing success/failure and any transaction hashes involved.
    */
   async submitWithRestore(options: SubmitWithRestoreOptions): Promise<ResurrectResult> {
     const { transaction, wallet, onRestoreFailed, onSigningRestore, onSubmittingRestore, onSigningOriginal, ...callbacks } = options

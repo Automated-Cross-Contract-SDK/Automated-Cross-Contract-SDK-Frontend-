@@ -5,6 +5,8 @@ import { ArchivedLedgerEntry, SimulateResponse } from './types.js'
 /**
  * Type guard — returns true if the simulation response indicates archived
  * ledger entries that need restoration.
+ *
+ * @param response - The simulation response to check.
  */
 export function isRestoreResponse(
   response: SimulateResponse,
@@ -15,6 +17,8 @@ export function isRestoreResponse(
 /**
  * Type guard — returns true if the simulation response indicates a
  * successful simulation with no restore required.
+ *
+ * @param response - The simulation response to check.
  */
 export function isSuccessResponse(
   response: SimulateResponse,
@@ -24,6 +28,8 @@ export function isSuccessResponse(
 
 /**
  * Type guard — returns true if the simulation response indicates an error.
+ *
+ * @param response - The simulation response to check.
  */
 export function isErrorResponse(
   response: SimulateResponse,
@@ -35,6 +41,9 @@ export function isErrorResponse(
  * Extracts the list of archived ledger keys from a restore simulation response.
  * The read-write entries in the transaction footprint represent the keys that
  * need to be restored.
+ *
+ * @param response - A restore-required simulation response.
+ * @returns The archived ledger entries found in the response's footprint.
  */
 export function extractArchivedKeys(
   response: rpc.Api.SimulateTransactionRestoreResponse,
@@ -69,6 +78,9 @@ export function extractArchivedKeys(
 /**
  * Extracts the read-only and read-write ledger keys from a success simulation
  * response footprint.
+ *
+ * @param response - A successful simulation response.
+ * @returns The read-only and read-write ledger keys from the response's footprint.
  */
 export function extractFootprintFromSuccess(response: rpc.Api.SimulateTransactionSuccessResponse): {
   readOnly: xdr.LedgerKey[]
@@ -99,6 +111,10 @@ export function extractFootprintFromSuccess(response: rpc.Api.SimulateTransactio
  * Keys are fetched in chunks of 50. If a chunk request fails (network error,
  * rate-limit, etc.), every key in that chunk is conservatively treated as
  * archived to avoid false negatives.
+ *
+ * @param server - Soroban RPC server instance.
+ * @param ledgerKeys - The ledger keys to check.
+ * @returns The subset of `ledgerKeys` that are archived.
  */
 export async function detectArchivedEntries(
   server: rpc.Server,
@@ -145,6 +161,10 @@ export async function detectArchivedEntries(
 /**
  * Detects archived keys by simulating the transaction and extracting
  * archived entries from the footprint.
+ *
+ * @param server - Soroban RPC server instance.
+ * @param transaction - The transaction to simulate.
+ * @returns The archived ledger entries detected, or an empty array if none.
  */
 export async function detectArchivedKeysViaSimulation(
   server: rpc.Server,
@@ -168,6 +188,11 @@ export async function detectArchivedKeysViaSimulation(
  * which ones are archived.
  *
  * Throws an error if the simulation fails or indicates archived entries.
+ *
+ * @param server - Soroban RPC server instance.
+ * @param transaction - The transaction to simulate and check.
+ * @returns The archived ledger entries found among the transaction's footprint keys.
+ * @throws If the simulation errors, or already indicates a restore is needed.
  */
 export async function detectArchivedKeysViaDirect(
   server: rpc.Server,

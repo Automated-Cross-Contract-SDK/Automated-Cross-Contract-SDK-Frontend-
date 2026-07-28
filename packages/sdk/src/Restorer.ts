@@ -32,6 +32,9 @@ export interface BuildRestoreTxParams {
  * concurrently for the same source, provide either the `account` or `sequenceNumber`
  * parameter. If neither is provided, this function will fetch the account from RPC,
  * which may cause the second concurrent call to get an out-of-sync sequence number.
+ *
+ * @param params - See {@link BuildRestoreTxParams}.
+ * @returns The unsigned restore transaction, ready to be signed and submitted.
  */
 export async function buildRestoreTransaction(params: BuildRestoreTxParams): Promise<Transaction> {
   const { sourcePublicKey, transactionData, minResourceFee, config, account: preFetched, sequenceNumber } = params
@@ -68,6 +71,13 @@ export async function buildRestoreTransaction(params: BuildRestoreTxParams): Pro
  * Uses exponential backoff with jitter between polls to avoid hammering
  * the RPC endpoint. Delay starts at 100ms and doubles on each retry, capped at
  * pollIntervalMs, with random jitter of ±50%.
+ *
+ * @param server - Soroban RPC server instance.
+ * @param hash - Hash of the transaction to poll for.
+ * @param pollIntervalMs - Maximum delay between polls, in ms (default: 1000).
+ * @param pollTimeoutMs - Total time to poll before giving up, in ms (default: 60000).
+ * @returns The terminal `getTransaction` response (SUCCESS or FAILED).
+ * @throws If the transaction does not reach a terminal status within `pollTimeoutMs`.
  */
 export async function waitForTransaction(
   server: rpc.Server,
@@ -105,6 +115,9 @@ export async function waitForTransaction(
  *
  * Fee-bump transactions wrap an inner transaction. This function extracts
  * the operations from the inner transaction regardless of envelope format.
+ *
+ * @param tx - The transaction to extract operations from.
+ * @returns The list of XDR operations from the (inner) transaction.
  */
 export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
   const envelope = tx.toEnvelope()
@@ -146,6 +159,13 @@ export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
  * Reuses the original transaction's timeout if set, otherwise defaults to 30 seconds.
  *
  * Throws if the re-simulation still indicates archived entries or an error.
+ *
+ * @param server - Soroban RPC server instance.
+ * @param originalTx - The user's original transaction (pre-restore).
+ * @param networkPassphrase - Network passphrase to build the rebuilt transaction with.
+ * @param fee - Fee (in stroops) to use for the rebuilt transaction.
+ * @returns The rebuilt, simulation-assembled transaction, ready to sign and submit.
+ * @throws If re-simulation indicates archived entries are still present, or fails.
  */
 export async function buildOriginalAfterRestore(
   server: rpc.Server,
@@ -200,6 +220,11 @@ export async function buildOriginalAfterRestore(
 /**
  * Simulates a transaction and assembles it with the resulting footprint.
  * Throws if the simulation returns an error or indicates archived entries.
+ *
+ * @param server - Soroban RPC server instance.
+ * @param tx - The transaction to simulate and assemble.
+ * @returns The simulation-assembled transaction, ready to sign and submit.
+ * @throws If the simulation errors, or indicates archived entries need restoring.
  */
 export async function prepareTransaction(
   server: rpc.Server,

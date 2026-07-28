@@ -68,6 +68,9 @@ export interface ExecuteParams {
  * - onRestoreFailed is called for any errors during or after restore initiation
  * - onOriginalSubmitted is only called if the original tx is successfully submitted
  * - onRestoreNeeded is called before any restore attempt
+ *
+ * @param params - See {@link ExecuteParams}.
+ * @returns A structured result describing success/failure and any transaction hashes involved.
  */
 export async function executeWithRestore(params: ExecuteParams): Promise<ResurrectResult> {
   const {
