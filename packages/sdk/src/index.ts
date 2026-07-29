@@ -20,6 +20,9 @@ export {
 export type {
   SorobanResurrectConfig,
   WalletAdapter,
+  HardwareWalletAdapter,
+  LedgerAdapterConfig,
+  TrezorAdapterConfig,
   ArchivedLedgerEntry,
   SimulateResponse,
   ResurrectResult,
@@ -27,3 +30,8 @@ export type {
   RestoreState,
   RestoreStateInfo,
 } from './types.js'
+
+export {
+  createLedgerAdapter,
+  createTrezorAdapter,
+} from './HardwareWalletAdapters.js'

@@ -30,6 +30,71 @@ export interface WalletAdapter {
   ): Promise<string>
 }
 
+/**
+ * Extended wallet interface for hardware wallet devices (Ledger, Trezor).
+ * Adds lifecycle methods for connection management and app version querying.
+ */
+export interface HardwareWalletAdapter extends WalletAdapter {
+  /** Identifies the hardware wallet type. */
+  readonly type: 'ledger' | 'trezor'
+  /** Opens a connection to the hardware wallet device. */
+  connect(): Promise<void>
+  /** Closes the connection to the hardware wallet device. */
+  disconnect(): Promise<void>
+  /** Returns the version string of the Stellar app installed on the device. */
+  getAppVersion(): Promise<string>
+}
+
+/**
+ * Configuration for the Ledger hardware wallet adapter.
+ *
+ * @example
+ * ```typescript
+ * import TransportWebUSB from '@ledgerhq/hw-transport-webusb'
+ * import { createLedgerAdapter } from '@soroban-resurrect/sdk'
+ *
+ * const transport = await TransportWebUSB.create()
+ * const adapter = createLedgerAdapter({ transport, accountIndex: 0 })
+ * ```
+ */
+export interface LedgerAdapterConfig {
+  /** BIP32 account index used to derive the Stellar key path m/44'/148'/accountIndex'. Defaults to 0. */
+  accountIndex?: number
+  /**
+   * A Ledger transport instance (e.g. from `@ledgerhq/hw-transport-webusb`).
+   * The transport must expose `send(cla, ins, p1, p2, data)` and `close()`.
+   * Pass this in so you can use any transport without the SDK depending on the package directly.
+   */
+  transport?: unknown
+}
+
+/**
+ * Configuration for the Trezor hardware wallet adapter.
+ *
+ * @example
+ * ```typescript
+ * import TrezorConnect from '@trezor/connect-web'
+ * import { createTrezorAdapter } from '@soroban-resurrect/sdk'
+ *
+ * const adapter = createTrezorAdapter({
+ *   trezorConnect: TrezorConnect,
+ *   manifest: { email: 'you@example.com', appUrl: 'https://your-app.com' },
+ *   accountIndex: 0,
+ * })
+ * ```
+ */
+export interface TrezorAdapterConfig {
+  /** BIP32 account index used to derive the Stellar key path m/44'/148'/accountIndex'/0/0. Defaults to 0. */
+  accountIndex?: number
+  /** Required by Trezor Connect to identify your application. */
+  manifest: { email: string; appUrl: string }
+  /**
+   * A TrezorConnect instance (e.g. from `@trezor/connect-web` or `trezor-connect`).
+   * Pass this in so you can use any Trezor Connect package without the SDK depending on it directly.
+   */
+  trezorConnect?: unknown
+}
+
 /** Represents a single ledger entry that has been archived (expired TTL). */
 export interface ArchivedLedgerEntry {
   /** The raw ledger key. */
