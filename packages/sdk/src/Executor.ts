@@ -190,6 +190,9 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
   // Signal workflow start
   onRestoreStart?.()
 
+  // Signal workflow start
+  onRestoreStart?.()
+
   try {
     const simResponse = await simulateWithCache(server, originalTx, simulationCache)
 
