@@ -13,9 +13,9 @@
     "examples/*"
   ],
   "scripts": {
-    "build": "npm run build -w packages/sdk && npm run build -w packages/react-hook && npm run build -w examples/basic",
+    "build": "npm run build -w packages/sdk && npm run build -w packages/react-hook && npm run build -w packages/vue-hook && npm run build -w packages/svelte-hook && npm run build -w examples/basic",
     "build:sdk": "npm run build -w packages/sdk",
-    "build:hook": "npm run build -w packages/react-hook",
+    "build:hook": "npm run build -w packages/react-hook && npm run build -w packages/vue-hook && npm run build -w packages/svelte-hook",
     "dev:example": "npm run dev -w examples/basic",
     "typecheck": "tsc --noEmit --composite false",
     "lint": "eslint 'packages/*/src/**/*.{ts,tsx}' 'examples/*/src/**/*.{ts,tsx}'",

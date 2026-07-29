@@ -30,10 +30,12 @@ Soroban-Resurrect solves the "archived ledger entry" problem for Soroban dApps. 
 
 ## Packages
 
-| Package                         | Description                                                                                            |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `@soroban-resurrect/sdk`        | Core TypeScript SDK — wraps Soroban RPC, detects archived keys, builds & executes restore transactions |
-| `@soroban-resurrect/react-hook` | React context provider + hook for easy dApp integration                                                |
+| Package                          | Description                                                                                            |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `@soroban-resurrect/sdk`         | Core TypeScript SDK — wraps Soroban RPC, detects archived keys, builds & executes restore transactions |
+| `@soroban-resurrect/react-hook`  | React context provider + hook for easy dApp integration (also React Native compatible)                 |
+| `@soroban-resurrect/vue-hook`    | Vue 3 composable for easy dApp integration                                                             |
+| `@soroban-resurrect/svelte-hook` | Svelte store for easy dApp integration                                                                 |
 
 ## Quick Start
 
@@ -129,6 +131,47 @@ function WithdrawButton() {
 }
 ```
 
+### 4. Vue 3 Composable
+
+```vue
+<script setup lang="ts">
+import { ref } from 'vue'
+import { useSorobanResurrect } from '@soroban-resurrect/vue-hook'
+
+const config = ref({ rpcUrl: 'https://soroban-testnet.stellar.org' })
+const { state, isProcessing, submitWithRestore, reset } = useSorobanResurrect(config)
+</script>
+
+<template>
+  <button @click="reset()" :disabled="isProcessing">
+    {{ isProcessing ? state.message : 'Withdraw' }}
+  </button>
+</template>
+```
+
+### 5. Svelte Store
+
+```svelte
+<script>
+  import { onDestroy } from 'svelte'
+  import { writable } from 'svelte/store'
+  import { createSorobanResurrect } from '@soroban-resurrect/svelte-hook'
+
+  const config = writable({ rpcUrl: 'https://soroban-testnet.stellar.org' })
+  const { state, isProcessing, submitWithRestore, destroy } = createSorobanResurrect(config)
+
+  onDestroy(destroy)
+</script>
+
+<button on:click={() => submitWithRestore(tx, wallet)} disabled={$isProcessing}>
+  {$state.message || 'Withdraw'}
+</button>
+```
+
+### React Native
+
+All hooks in `@soroban-resurrect/react-hook` use only standard React APIs (`useState`, `useCallback`, `useRef`, `useEffect`) and contain no browser-specific code, making them fully compatible with React Native out of the box. See `examples/react-native/` for a complete example.
+
 ---
 
 ## Architecture
@@ -173,7 +216,9 @@ simulate(transaction: Transaction): Promise<SimulateResponse>
 detectArchivedKeys(transaction: Transaction): Promise<ArchivedLedgerEntry[]>
 needsRestore(transaction: Transaction): Promise<boolean>
 buildRestoreTx(sourcePublicKey: string, transaction: Transaction): Promise<Transaction>
+estimateRestoreCost(transaction: Transaction): Promise<RestoreCostEstimate>
 submitWithRestore(options: SubmitWithRestoreOptions): Promise<ResurrectResult>
+reset(fromState?: RestoreState): void
 onStateChange(listener: (info: RestoreStateInfo) => void): () => void  // unsubscribe
 ```
 
@@ -193,7 +238,7 @@ useSorobanResurrectContext(): {
   isProcessing: boolean
   submitWithRestore(tx, wallet): Promise<ResurrectResult>
   detectArchivedKeys(tx): Promise<ArchivedLedgerEntry[]>
-  reset(): void
+  reset(fromState?: RestoreState): void
 }
 
 // Standalone Hook
