@@ -29,18 +29,10 @@ export interface ExecuteParams {
   wallet: WalletAdapter
   /** SDK configuration. */
   config: SorobanResurrectConfig
-  /**
-   * When true, all simulation steps are performed but no transactions are
-   * signed or submitted. The returned `ResurrectResult` will have
-   * `dryRun: true` and a populated `dryRunResult`.
-   */
-  dryRun?: boolean
-  /** Called when restore transaction is ready to be signed. */
+  /** Called when the wallet is prompted to sign the restore transaction. */
   onSigningRestore?: () => void
   /** Called after restore transaction is signed and being submitted. */
   onSubmittingRestore?: () => void
-  /** Called after restore transaction is confirmed and original is ready to sign. */
-  onSigningOriginal?: () => void
   /** Called when archived entries are detected. */
   onRestoreNeeded?: (archivedKeys: ArchivedLedgerEntry[]) => void
   /** Called after the restore transaction is submitted. */
@@ -67,6 +59,17 @@ export interface ExecuteParams {
  *
  * All errors (simulation, signing, network) are caught and returned as
  * structured `ResurrectResult` objects — never thrown.
+ *
+ * Callbacks are invoked consistently for all error paths where applicable:
+ * - onRestoreFailed is called for any errors during or after restore initiation
+ * - onOriginalSubmitted is only called if the original tx is successfully submitted
+ * - onRestoreNeeded is called before any restore attempt
+ *
+ * @param params - See {@link ExecuteParams}.
+ * @returns A {@link ResurrectResult} describing the outcome. `success` is
+ *   `false` for every failure path; this function itself does not throw.
+ * @see {@link SorobanResurrect.submitWithRestore} — the public, stateful
+ *   wrapper around this function used by SDK consumers.
  */
 export async function executeWithRestore(params: ExecuteParams): Promise<ResurrectResult> {
   const {
@@ -74,10 +77,6 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
     transaction: originalTx,
     wallet,
     config,
-    dryRun,
-    onSigningRestore,
-    onSubmittingRestore,
-    onSigningOriginal,
     onRestoreNeeded,
     onRestoreSubmitted,
     onRestoreConfirmed,
@@ -162,22 +161,16 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       const publicKey = await wallet.getPublicKey()
       const account = await server.getAccount(publicKey)
 
-      let restoreTx: Transaction
-      try {
-        restoreTx = await buildRestoreTransaction({
-          server,
-          sourcePublicKey: publicKey,
-          transactionData: simResponse.transactionData.build(),
-          minResourceFee: parseInt(simResponse.minResourceFee, 10),
-          config,
-          account,
-        })
-      } catch (buildErr) {
-        const err = buildErr instanceof Error ? buildErr.message : String(buildErr)
-        onRestoreFailed?.(err)
-        return { success: false, archivedKeysDetected: archivedKeys.length, error: err }
-      }
+      const restoreTx = await buildRestoreTransaction({
+        server,
+        sourcePublicKey: publicKey,
+        transactionData: simResponse.transactionData.build(),
+        minResourceFee: parseInt(simResponse.minResourceFee, 10),
+        config,
+        account,
+      })
 
+      // Defer onRestoreNeeded until after restore tx is built
       onRestoreNeeded?.(archivedKeys)
 
       onSigningRestore?.()
@@ -189,7 +182,11 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       if (!(signedRestoreTx instanceof Transaction)) {
         const err = 'Failed to parse signed restore transaction'
         onRestoreFailed?.(err)
-        return { success: false, archivedKeysDetected: archivedKeys.length, error: err }
+        return {
+          success: false,
+          archivedKeysDetected: archivedKeys.length,
+          error: err,
+        }
       }
 
       onSubmittingRestore?.()
@@ -230,11 +227,12 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
 
       const signedOriginalTx = TransactionBuilder.fromXDR(signedOriginalXdr, networkPassphrase)
       if (!(signedOriginalTx instanceof Transaction)) {
+        const err = 'Failed to parse signed original transaction'
+        onRestoreFailed?.(err)
         return {
           success: false,
           archivedKeysDetected: archivedKeys.length,
-          restoreTxHash: restoreResult.hash,
-          error: 'Failed to parse signed original transaction',
+          error: message,
         }
       }
 
