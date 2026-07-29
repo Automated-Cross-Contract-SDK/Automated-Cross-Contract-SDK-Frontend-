@@ -32,6 +32,10 @@ export interface SorobanResurrectConfig {
   restoreFeeMultiplier?: number
   /** Method for detecting archived keys: 'simulation' (default) or 'direct'. */
   archiveDetectionMethod?: 'simulation' | 'direct'
+  /** Enable simulation cache to reuse results and reduce RPC calls (default: false). */
+  enableSimulationCache?: boolean
+  /** Use SSE-based transaction status waiting when available (default: false). */
+  useSSE?: boolean
 }
 
 /**

@@ -8,7 +8,7 @@ import {
   SubmitWithRestoreOptions,
   SorobanResurrectEvents,
 } from './types.js'
-import { executeWithRestore } from './Executor.js'
+import { executeWithRestore, sendTransaction } from './Executor.js'
 import { isRestoreResponse, extractArchivedKeys } from './Archiver.js'
 import { buildRestoreTransaction } from './Restorer.js'
 import {
@@ -69,8 +69,12 @@ export class SorobanResurrect {
    */
   constructor(config: SorobanResurrectConfig) {
     this.server = new rpc.Server(config.rpcUrl)
-    const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
-    
+
+    const networkPassphrase =
+      config.networkPassphrase ??
+      resolveNetworkPassphrase(config.rpcUrl) ??
+      DEFAULT_NETWORK_PASSPHRASE
+
     // Validate network passphrase against known networks
     if (!KNOWN_NETWORK_PASSPHRASES.includes(networkPassphrase)) {
       const knownNetworks = KNOWN_NETWORK_PASSPHRASES.map((p) => `"${p}"`).join(', ')
@@ -80,7 +84,12 @@ export class SorobanResurrect {
         `A typo in the passphrase will cause cryptic transaction failures.`
       throw new Error(message)
     }
-    
+
+    // Initialize the simulation cache if enabled
+    if (config.enableSimulationCache) {
+      this._simulationCache = new SimulationCache()
+    }
+
     this.config = {
       rpcUrl: config.rpcUrl,
       networkPassphrase,
@@ -88,7 +97,9 @@ export class SorobanResurrect {
       pollTimeoutMs: config.pollTimeoutMs ?? POLL_TIMEOUT_MS,
       restoreFeeMultiplier: config.restoreFeeMultiplier ?? RESTORE_FEE_MULTIPLIER,
       archiveDetectionMethod: config.archiveDetectionMethod ?? 'simulation',
-    }
+      enableSimulationCache: config.enableSimulationCache ?? false,
+      useSSE: config.useSSE ?? false,
+    } as Required<SorobanResurrectConfig>
   }
 
   /** Current workflow state. */
@@ -213,7 +224,20 @@ export class SorobanResurrect {
    */
   async simulate(transaction: Transaction) {
     this.setState('simulating', 'Simulating transaction...')
+
+    if (this._simulationCache) {
+      const cached = this._simulationCache.get(transaction)
+      if (cached) {
+        return cached
+      }
+    }
+
     const response = await this.server.simulateTransaction(transaction)
+
+    if (this._simulationCache) {
+      this._simulationCache.set(transaction, response)
+    }
+
     return response
   }
 
@@ -365,6 +389,24 @@ export class SorobanResurrect {
       minResourceFee: parseInt(response.minResourceFee, 10),
       config: this.config,
     })
+  }
+
+  /**
+   * Signs and submits a transaction directly, without automatic archive
+   * restoration. This is a lighter-weight alternative to `submitWithRestore`
+   * for transactions known not to require restoration.
+   *
+   * If you want automatic detection and restoration, use `submitWithRestore`.
+   *
+   * @param transaction - The Soroban transaction to sign and submit
+   * @param wallet - Wallet adapter used for signing
+   * @returns A result object with the transaction hash on success
+   */
+  async sendTransaction(
+    transaction: Transaction,
+    wallet: WalletAdapter,
+  ): Promise<ResurrectResult> {
+    return sendTransaction(this.server, transaction, wallet, this.config)
   }
 
   /**
