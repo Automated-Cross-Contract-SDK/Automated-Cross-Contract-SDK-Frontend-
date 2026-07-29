@@ -6,11 +6,12 @@ import {
   ArchivedLedgerEntry,
   ResurrectResult,
   SubmitWithRestoreOptions,
+  RestoreCostEstimate,
 } from './types.js'
 import { executeWithRestore } from './Executor.js'
 import { isRestoreResponse, extractArchivedKeys } from './Archiver.js'
 import { buildRestoreTransaction } from './Restorer.js'
-import { DEFAULT_NETWORK_PASSPHRASE, POLL_INTERVAL_MS, POLL_TIMEOUT_MS, KNOWN_NETWORK_PASSPHRASES } from './constants.js'
+import { DEFAULT_NETWORK_PASSPHRASE, POLL_INTERVAL_MS, POLL_TIMEOUT_MS, RESTORE_FEE_MULTIPLIER, KNOWN_NETWORK_PASSPHRASES } from './constants.js'
 
 /**
  * Main facade for the Soroban-Resurrect SDK.
@@ -115,8 +116,14 @@ export class SorobanResurrect {
   /**
    * Resets the instance back to idle state, clearing any archived keys
    * and error messages from previous workflows.
+   *
+   * If a state is provided, reset only proceeds if the current state matches.
+   * For example, `reset('error')` only resets if currently in the error state.
+   *
+   * @param fromState - Optional. If provided, only reset when current state matches.
    */
-  reset() {
+  reset(fromState?: RestoreState): void {
+    if (fromState !== undefined && this._state !== fromState) return
     this._lastError = undefined
     this._lastArchivedKeys = []
     this.setState('idle', '')
@@ -239,6 +246,47 @@ export class SorobanResurrect {
   }
 
   /**
+   * Estimates the cost of restoring archived ledger entries for a given
+   * transaction without actually submitting anything to the network.
+   *
+   * Simulates the transaction and, if archived entries are detected, returns
+   * the estimated restore fee. This allows dApps to show users the cost
+   * before they commit to the transaction.
+   *
+   * The estimated fee is calculated as `minResourceFee × restoreFeeMultiplier`.
+   *
+   * @param transaction - The transaction to estimate restore costs for.
+   * @returns A `RestoreCostEstimate` with the estimated fee and key count.
+   */
+  async estimateRestoreCost(transaction: Transaction): Promise<RestoreCostEstimate> {
+    try {
+      const response = await this.server.simulateTransaction(transaction)
+
+      if (isRestoreResponse(response)) {
+        const archivedKeys = extractArchivedKeys(response)
+        const restoreFeeMultiplier =
+          this.config.restoreFeeMultiplier ?? RESTORE_FEE_MULTIPLIER
+        const minResourceFee = parseInt(response.minResourceFee, 10)
+        const estimatedFee = (minResourceFee * restoreFeeMultiplier).toString()
+
+        return {
+          restoreNeeded: true,
+          estimatedFee,
+          archivedKeyCount: archivedKeys.length,
+        }
+      }
+
+      return {
+        restoreNeeded: false,
+        archivedKeyCount: 0,
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      throw new Error(`Failed to estimate restore cost: ${message}`)
+    }
+  }
+
+  /**
    * Submits a transaction with automatic archive restoration.
    *
    * If the simulation detects archived entries, a restore transaction
@@ -255,7 +303,7 @@ export class SorobanResurrect {
       wallet,
       config: this.config,
       onSigningRestore: () => {
-        this.setState('signing_restore', 'Signing restore transaction...')
+        this.setState('signing_restore', 'Awaiting wallet signature for restore transaction...')
         onSigningRestore?.()
       },
       onSubmittingRestore: () => {
@@ -266,11 +314,6 @@ export class SorobanResurrect {
         this._lastArchivedKeys = keys
         this.setState('restore_needed', `Detected ${keys.length} archived ledger entries`)
         callbacks.onRestoreNeeded?.(keys)
-      },
-      // Wallet is about to prompt the user to sign the restore tx —
-      // surface this so the UI can show a signing indicator.
-      onSigningRestore: () => {
-        this.setState('signing_restore', 'Awaiting wallet signature for restore transaction...')
       },
       onRestoreSubmitted: (txHash) => {
         this.setState('confirming_restore', 'Waiting for restore confirmation...')

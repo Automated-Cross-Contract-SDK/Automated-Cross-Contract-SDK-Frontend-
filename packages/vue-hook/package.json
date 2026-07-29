@@ -1,5 +1,5 @@
 {
-  "name": "@soroban-resurrect/react-hook",
+  "name": "@soroban-resurrect/vue-hook",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -15,29 +15,17 @@
   ],
   "scripts": {
     "build": "tsc",
-    "clean": "rm -rf dist",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "clean": "rm -rf dist"
   },
   "dependencies": {
     "@soroban-resurrect/sdk": "^0.1.0"
   },
   "peerDependencies": {
     "@stellar/stellar-sdk": "^12.0.0",
-    "react": "^18.0.0"
-  },
-  "peerDependenciesMeta": {
-    "react-native": {
-      "optional": true
-    }
+    "vue": "^3.0.0"
   },
   "devDependencies": {
-    "@testing-library/dom": "^10.4.0",
-    "@testing-library/react": "^16.3.2",
-    "@types/react": "^18.3.0",
-    "jsdom": "^29.1.1",
-    "react": "^18.3.0",
     "typescript": "^5.5.0",
-    "vitest": "^2.1.9"
+    "vue": "^3.0.0"
   }
 }

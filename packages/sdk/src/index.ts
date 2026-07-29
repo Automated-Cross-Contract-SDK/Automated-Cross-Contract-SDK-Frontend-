@@ -26,4 +26,5 @@ export type {
   SubmitWithRestoreOptions,
   RestoreState,
   RestoreStateInfo,
+  RestoreCostEstimate,
 } from './types.js'

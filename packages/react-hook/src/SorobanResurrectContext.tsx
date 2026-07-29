@@ -14,6 +14,7 @@ import {
   type RestoreStateInfo,
   type ArchivedLedgerEntry,
   type ResurrectResult,
+  type RestoreState,
 } from '@soroban-resurrect/sdk'
 import type { Transaction } from '@stellar/stellar-sdk'
 
@@ -31,7 +32,7 @@ interface SorobanResurrectContextValue {
   /** Check if a transaction requires archive restoration. */
   detectArchivedKeys: (transaction: Transaction) => Promise<ArchivedLedgerEntry[]>
   /** Reset state back to idle. */
-  reset: () => void
+  reset: (fromState?: RestoreState) => void
 }
 
 const SorobanResurrectContext = createContext<SorobanResurrectContextValue | null>(null)
@@ -101,9 +102,8 @@ export function SorobanResurrectProvider({ config, children }: SorobanResurrectP
     [],
   )
 
-  const reset = useCallback(() => {
-    resurrectRef.current?.reset()
-    setState({ state: 'idle', message: '' })
+  const reset = useCallback((fromState?: RestoreState) => {
+    resurrectRef.current?.reset(fromState)
   }, [])
 
   const isProcessing =

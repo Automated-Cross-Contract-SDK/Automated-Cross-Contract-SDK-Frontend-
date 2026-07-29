@@ -103,3 +103,13 @@ export interface RestoreStateInfo {
   /** Error message (only set in error state). */
   error?: string
 }
+
+/** Result returned from `estimateRestoreCost()`. */
+export interface RestoreCostEstimate {
+  /** Whether a restore transaction is needed. */
+  restoreNeeded: boolean
+  /** Estimated fee in stroops (minResourceFee × restoreFeeMultiplier). Only set if restoreNeeded. */
+  estimatedFee?: string
+  /** Number of archived ledger entries detected. */
+  archivedKeyCount: number
+}
