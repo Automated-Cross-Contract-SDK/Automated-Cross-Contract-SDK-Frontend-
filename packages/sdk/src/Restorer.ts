@@ -1,6 +1,6 @@
-import { rpc, Account } from '@stellar/stellar-sdk'
-import { TransactionBuilder, Operation, Transaction, xdr } from '@stellar/stellar-sdk'
-import { SorobanResurrectConfig } from './types.js'
+import { rpc, Account, Keypair } from '@stellar/stellar-sdk'
+import { TransactionBuilder, Operation, Transaction, xdr, FeeBumpTransaction } from '@stellar/stellar-sdk'
+import { SorobanResurrectConfig, FeeBumpSponsor } from './types.js'
 import { DEFAULT_NETWORK_PASSPHRASE, RESTORE_FEE_MULTIPLIER } from './constants.js'
 
 /** Parameters for building a restore transaction. */
@@ -218,4 +218,65 @@ export async function prepareTransaction(
   const assembled = rpc.assembleTransaction(tx, sim)
   assembled.setTimeout(30)
   return assembled.build()
+}
+
+/**
+ * Wraps a signed inner transaction in a fee-bump envelope signed by the sponsor.
+ * The sponsor pays the transaction fees on behalf of the user.
+ *
+ * @param innerTxXdr - The signed inner transaction XDR (user-signed).
+ * @param sponsor - The fee-bump sponsor who will sign and pay fees.
+ * @param networkPassphrase - Stellar network passphrase.
+ * @param feeBumpFee - Optional custom fee for the fee-bump wrapper (in stroops).
+ * @returns The fully signed fee-bump transaction XDR string, ready for submission.
+ */
+export async function buildFeeBumpTransaction(
+  innerTxXdr: string,
+  sponsor: FeeBumpSponsor,
+  networkPassphrase: string,
+  feeBumpFee?: string,
+): Promise<string> {
+  const sponsorPublicKey = await sponsor.getPublicKey()
+
+  const innerTx = TransactionBuilder.fromXDR(innerTxXdr, networkPassphrase)
+  if (!(innerTx instanceof Transaction)) {
+    throw new Error('Failed to parse inner transaction XDR')
+  }
+
+  const fee = feeBumpFee ?? innerTx.fee
+
+  const feeBumpTx = TransactionBuilder.buildFeeBumpTransaction(
+    Keypair.fromPublicKey(sponsorPublicKey),
+    fee,
+    innerTx,
+    networkPassphrase,
+  )
+
+  if (!(feeBumpTx instanceof FeeBumpTransaction)) {
+    throw new Error('Failed to build fee-bump transaction')
+  }
+
+  const signedFeeBumpXdr = await sponsor.signFeeBump(feeBumpTx.toXDR(), {
+    networkPassphrase,
+  })
+
+  return signedFeeBumpXdr
+}
+
+/**
+ * Submits a fee-bump transaction to the network.
+ * Deserializes the XDR string and sends it via the RPC server.
+ *
+ * @returns The send transaction response with the hash.
+ */
+export async function submitFeeBumpTransaction(
+  server: rpc.Server,
+  feeBumpXdr: string,
+  networkPassphrase: string,
+): Promise<rpc.Api.SendTransactionResponse> {
+  const parsed = TransactionBuilder.fromXDR(feeBumpXdr, networkPassphrase)
+  if (!(parsed instanceof FeeBumpTransaction)) {
+    throw new Error('Failed to parse fee-bump transaction XDR')
+  }
+  return server.sendTransaction(parsed)
 }
