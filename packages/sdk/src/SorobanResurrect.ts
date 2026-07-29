@@ -206,7 +206,8 @@ export class SorobanResurrect {
    * console.log(resurrect.state) // 'idle'
    * ```
    */
-  reset() {
+  reset(fromState?: RestoreState): void {
+    if (fromState !== undefined && this._state !== fromState) return
     this._lastError = undefined
     this._lastArchivedKeys = []
     this.setState('idle', '')

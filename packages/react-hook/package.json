@@ -26,6 +26,11 @@
     "@stellar/stellar-sdk": "^12.0.0",
     "react": "^18.0.0"
   },
+  "peerDependenciesMeta": {
+    "react-native": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@testing-library/dom": "^10.4.0",
     "@testing-library/react": "^16.3.2",
