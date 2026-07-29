@@ -28,6 +28,31 @@ export interface ExecuteParams {
   wallet: WalletAdapter
   /** SDK configuration. */
   config: SorobanResurrectConfig
+  /**
+   * Called at the very beginning of the restore workflow, before simulation.
+   * Useful for showing a loading indicator immediately when the user triggers an action.
+   */
+  onRestoreStart?: () => void
+  /**
+   * Called when the entire restore-and-submit workflow completes successfully.
+   * Fired after the original transaction has been submitted and confirmed.
+   */
+  onRestoreComplete?: (result: { restoreTxHash: string; originalTxHash: string }) => void
+  /**
+   * Called just before the original transaction is rebuilt after a successful
+   * restore confirmation.
+   */
+  onOriginalRebuilding?: () => void
+  /**
+   * Called after the original transaction has been successfully rebuilt and
+   * assembled with fresh simulation data, ready for signing.
+   */
+  onOriginalRebuilt?: () => void
+  /**
+   * Called on each polling tick while waiting for a transaction to confirm.
+   * Receives the transaction hash and attempt number (1-indexed).
+   */
+  onConfirming?: (txHash: string, attempt: number) => void
   /** Called when restore transaction is ready to be signed. */
   onSigningRestore?: () => void
   /** Called after restore transaction is signed and being submitted. */
@@ -36,14 +61,10 @@ export interface ExecuteParams {
   onSigningOriginal?: () => void
   /** Called when archived entries are detected. */
   onRestoreNeeded?: (archivedKeys: ArchivedLedgerEntry[]) => void
-  /** Called when the wallet is prompted to sign the restore transaction. */
-  onSigningRestore?: () => void
   /** Called after the restore transaction is submitted. */
   onRestoreSubmitted?: (txHash: string) => void
   /** Called after the restore transaction is confirmed. */
   onRestoreConfirmed?: (txHash: string) => void
-  /** Called when the wallet is prompted to sign the original transaction. */
-  onSigningOriginal?: () => void
   /** Called after the original transaction is submitted. */
   onOriginalSubmitted?: (txHash: string) => void
   /** Called when the restore step of the workflow fails. */
@@ -68,6 +89,10 @@ export interface ExecuteParams {
  * - onRestoreFailed is called for any errors during or after restore initiation
  * - onOriginalSubmitted is only called if the original tx is successfully submitted
  * - onRestoreNeeded is called before any restore attempt
+ * - onRestoreStart is called at the very beginning
+ * - onRestoreComplete is called only when the full workflow succeeds with restore
+ * - onOriginalRebuilding / onOriginalRebuilt bracket the re-build step
+ * - onConfirming fires on each poll tick while awaiting confirmation
  */
 export async function executeWithRestore(params: ExecuteParams): Promise<ResurrectResult> {
   const {
@@ -75,14 +100,17 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
     transaction: originalTx,
     wallet,
     config,
+    onRestoreStart,
+    onRestoreComplete,
+    onOriginalRebuilding,
+    onOriginalRebuilt,
+    onConfirming,
     onSigningRestore,
     onSubmittingRestore,
     onSigningOriginal,
     onRestoreNeeded,
-    onSigningRestore,
     onRestoreSubmitted,
     onRestoreConfirmed,
-    onSigningOriginal,
     onOriginalSubmitted,
     onRestoreFailed,
   } = params
@@ -90,6 +118,9 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
   const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
   const pollInterval = config.pollIntervalMs ?? POLL_INTERVAL_MS
   const pollTimeout = config.pollTimeoutMs ?? POLL_TIMEOUT_MS
+
+  // Signal workflow start
+  onRestoreStart?.()
 
   try {
     const simResponse = await server.simulateTransaction(originalTx)
@@ -120,7 +151,6 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       }
 
       const publicKey = await wallet.getPublicKey()
-
       const account = await server.getAccount(publicKey)
 
       try {
@@ -156,11 +186,13 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
         const restoreResult = await server.sendTransaction(signedRestoreTx)
         onRestoreSubmitted?.(restoreResult.hash)
 
-        const restoreStatus = await waitForTransaction(
+        // Poll for restore confirmation, firing onConfirming each tick
+        const restoreStatus = await waitForTransactionWithCallbacks(
           server,
           restoreResult.hash,
           pollInterval,
           pollTimeout,
+          onConfirming,
         )
 
         if (restoreStatus.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
@@ -176,12 +208,15 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
 
         onRestoreConfirmed?.(restoreResult.hash)
 
+        // Rebuild original transaction after successful restore
+        onOriginalRebuilding?.()
         const preparedTx = await buildOriginalAfterRestore(
           server,
           originalTx,
           networkPassphrase,
           originalTx.fee,
         )
+        onOriginalRebuilt?.()
 
         onSigningOriginal?.()
         const signedOriginalXdr = await wallet.signTransaction(preparedTx.toXDR(), {
@@ -190,16 +225,23 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
 
         const signedOriginalTx = TransactionBuilder.fromXDR(signedOriginalXdr, networkPassphrase)
         if (!(signedOriginalTx instanceof Transaction)) {
+          const err = 'Failed to parse signed original transaction'
           return {
             success: false,
             archivedKeysDetected: archivedKeys.length,
             restoreTxHash: restoreResult.hash,
-            error: 'Failed to parse signed original transaction',
+            error: err,
           }
         }
 
         const originalResult = await server.sendTransaction(signedOriginalTx)
         onOriginalSubmitted?.(originalResult.hash)
+
+        // Signal full workflow completion
+        onRestoreComplete?.({
+          restoreTxHash: restoreResult.hash,
+          originalTxHash: originalResult.hash,
+        })
 
         return {
           success: true,
@@ -207,30 +249,13 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
           restoreTxHash: restoreResult.hash,
           archivedKeysDetected: archivedKeys.length,
         }
-      }
-
-      onRestoreConfirmed?.(restoreResult.hash)
-
-      const preparedTx = await buildOriginalAfterRestore(
-        server,
-        originalTx,
-        networkPassphrase,
-        originalTx.fee,
-      )
-
-      onSigningOriginal?.()
-      const signedOriginalXdr = await wallet.signTransaction(preparedTx.toXDR(), {
-        networkPassphrase,
-      })
-
-      const signedOriginalTx = TransactionBuilder.fromXDR(signedOriginalXdr, networkPassphrase)
-      if (!(signedOriginalTx instanceof Transaction)) {
-        const err = 'Failed to parse signed original transaction'
+      } catch (innerErr) {
+        const message = innerErr instanceof Error ? innerErr.message : String(innerErr)
+        onRestoreFailed?.(message)
         return {
           success: false,
           archivedKeysDetected: archivedKeys.length,
-          restoreTxHash: restoreResult.hash,
-          error: err,
+          error: message,
         }
       }
     }
@@ -251,12 +276,13 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       const sendResult = await server.sendTransaction(parsedTx)
       onOriginalSubmitted?.(sendResult.hash)
 
-      // Wait for confirmation on success path for consistency with restore path
-      const txStatus = await waitForTransaction(
+      // Poll for confirmation on success path, firing onConfirming each tick
+      const txStatus = await waitForTransactionWithCallbacks(
         server,
         sendResult.hash,
         pollInterval,
         pollTimeout,
+        onConfirming,
       )
 
       if (txStatus.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
@@ -290,4 +316,42 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       error: message,
     }
   }
+}
+
+/**
+ * Internal wrapper around `waitForTransaction` that fires `onConfirming` on
+ * each poll attempt. Delegates polling logic to the core `waitForTransaction`
+ * helper from Restorer.ts but adds callback support.
+ */
+async function waitForTransactionWithCallbacks(
+  server: rpc.Server,
+  hash: string,
+  pollIntervalMs: number,
+  pollTimeoutMs: number,
+  onConfirming?: (txHash: string, attempt: number) => void,
+): Promise<rpc.Api.GetTransactionResponse> {
+  const startTime = Date.now()
+  let attempt = 0
+
+  while (Date.now() - startTime < pollTimeoutMs) {
+    const response = await server.getTransaction(hash)
+
+    if (
+      response.status === rpc.Api.GetTransactionStatus.SUCCESS ||
+      response.status === rpc.Api.GetTransactionStatus.FAILED
+    ) {
+      return response
+    }
+
+    attempt++
+    onConfirming?.(hash, attempt)
+
+    // Exponential backoff with jitter: delay = min(100ms * 2^attempt, pollIntervalMs) * (0.5 + random * 0.5)
+    const exponentialDelay = 100 * Math.pow(2, attempt)
+    const delay = Math.min(exponentialDelay, pollIntervalMs)
+    const jitter = delay * (0.5 + Math.random() * 0.5)
+    await new Promise((resolve) => setTimeout(resolve, jitter))
+  }
+
+  throw new Error(`Transaction ${hash} did not complete within ${pollTimeoutMs}ms`)
 }
