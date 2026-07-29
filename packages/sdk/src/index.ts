@@ -23,6 +23,7 @@ export type {
   ArchivedLedgerEntry,
   SimulateResponse,
   ResurrectResult,
+  DryRunResult,
   SubmitWithRestoreOptions,
   RestoreState,
   RestoreStateInfo,
