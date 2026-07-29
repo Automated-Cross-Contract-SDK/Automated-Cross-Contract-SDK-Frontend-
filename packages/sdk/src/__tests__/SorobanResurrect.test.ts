@@ -247,10 +247,46 @@ describe('SorobanResurrect', () => {
     })
   })
 
+  describe('config option: networkPassphrase validation', () => {
+    it('accepts known network passphrases', () => {
+      const testnet = new SorobanResurrect({ ...testConfig, networkPassphrase: Networks.TESTNET })
+      expect(testnet.config.networkPassphrase).toBe(Networks.TESTNET)
+
+      const mainnet = new SorobanResurrect({ ...testConfig, networkPassphrase: Networks.PUBLIC })
+      expect(mainnet.config.networkPassphrase).toBe(Networks.PUBLIC)
+
+      const futurenet = new SorobanResurrect({ ...testConfig, networkPassphrase: Networks.FUTURENET })
+      expect(futurenet.config.networkPassphrase).toBe(Networks.FUTURENET)
+    })
+
+    it('throws on invalid network passphrase', () => {
+      expect(() => {
+        new SorobanResurrect({
+          ...testConfig,
+          networkPassphrase: 'Invalid Network ; September 2015',
+        })
+      }).toThrow(/Invalid network passphrase/)
+    })
+
+    it('throws on typo in network passphrase', () => {
+      expect(() => {
+        new SorobanResurrect({
+          ...testConfig,
+          networkPassphrase: 'Test SDF Network ; September 2016', // typo: 2016 instead of 2015
+        })
+      }).toThrow(/Invalid network passphrase/)
+    })
+
+    it('uses Testnet by default when no passphrase provided', () => {
+      const r = new SorobanResurrect({ rpcUrl: 'https://soroban-testnet.stellar.org' })
+      expect(r.config.networkPassphrase).toBe(Networks.TESTNET)
+    })
+  })
+
   describe('config option: restoreFeeMultiplier', () => {
-    it('defaults to 100', () => {
+    it('defaults to 3', () => {
       const r = new SorobanResurrect(testConfig)
-      expect(r.config.restoreFeeMultiplier).toBe(100)
+      expect(r.config.restoreFeeMultiplier).toBe(3)
     })
 
     it('accepts custom restoreFeeMultiplier', () => {
