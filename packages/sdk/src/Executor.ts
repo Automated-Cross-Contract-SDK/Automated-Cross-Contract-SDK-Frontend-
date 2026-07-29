@@ -28,16 +28,12 @@ export interface ExecuteParams {
   wallet: WalletAdapter
   /** SDK configuration. */
   config: SorobanResurrectConfig
-  /** Called when restore transaction is ready to be signed. */
-  onSigningRestore?: () => void
-  /** Called after restore transaction is signed and being submitted. */
-  onSubmittingRestore?: () => void
-  /** Called after restore transaction is confirmed and original is ready to sign. */
-  onSigningOriginal?: () => void
   /** Called when archived entries are detected. */
   onRestoreNeeded?: (archivedKeys: ArchivedLedgerEntry[]) => void
   /** Called when the wallet is prompted to sign the restore transaction. */
   onSigningRestore?: () => void
+  /** Called after restore transaction is signed and being submitted. */
+  onSubmittingRestore?: () => void
   /** Called after the restore transaction is submitted. */
   onRestoreSubmitted?: (txHash: string) => void
   /** Called after the restore transaction is confirmed. */
@@ -75,11 +71,9 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
     transaction: originalTx,
     wallet,
     config,
-    onSigningRestore,
-    onSubmittingRestore,
-    onSigningOriginal,
     onRestoreNeeded,
     onSigningRestore,
+    onSubmittingRestore,
     onRestoreSubmitted,
     onRestoreConfirmed,
     onSigningOriginal,
@@ -119,11 +113,11 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
         }
       }
 
-      const publicKey = await wallet.getPublicKey()
-
-      const account = await server.getAccount(publicKey)
-
+      let restoreResult: rpc.Api.SendTransactionResponse | undefined
       try {
+        const publicKey = await wallet.getPublicKey()
+        const account = await server.getAccount(publicKey)
+
         const restoreTx = await buildRestoreTransaction({
           server,
           sourcePublicKey: publicKey,
@@ -133,7 +127,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
           account,
         })
 
-        // Defer onRestoreNeeded until after restore tx is built
+        // Notify that restore is needed
         onRestoreNeeded?.(archivedKeys)
 
         onSigningRestore?.()
@@ -153,7 +147,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
         }
 
         onSubmittingRestore?.()
-        const restoreResult = await server.sendTransaction(signedRestoreTx)
+        restoreResult = await server.sendTransaction(signedRestoreTx)
         onRestoreSubmitted?.(restoreResult.hash)
 
         const restoreStatus = await waitForTransaction(
@@ -175,7 +169,19 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
         }
 
         onRestoreConfirmed?.(restoreResult.hash)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        onRestoreFailed?.(message)
+        return {
+          success: false,
+          archivedKeysDetected: archivedKeys.length,
+          restoreTxHash: restoreResult?.hash,
+          error: message,
+        }
+      }
 
+      // After successful restore, rebuild and submit the original transaction
+      try {
         const preparedTx = await buildOriginalAfterRestore(
           server,
           originalTx,
@@ -190,11 +196,12 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
 
         const signedOriginalTx = TransactionBuilder.fromXDR(signedOriginalXdr, networkPassphrase)
         if (!(signedOriginalTx instanceof Transaction)) {
+          const err = 'Failed to parse signed original transaction'
           return {
             success: false,
             archivedKeysDetected: archivedKeys.length,
-            restoreTxHash: restoreResult.hash,
-            error: 'Failed to parse signed original transaction',
+            restoreTxHash: restoreResult?.hash,
+            error: err,
           }
         }
 
@@ -204,33 +211,16 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
         return {
           success: true,
           originalTxHash: originalResult.hash,
-          restoreTxHash: restoreResult.hash,
+          restoreTxHash: restoreResult?.hash,
           archivedKeysDetected: archivedKeys.length,
         }
-      }
-
-      onRestoreConfirmed?.(restoreResult.hash)
-
-      const preparedTx = await buildOriginalAfterRestore(
-        server,
-        originalTx,
-        networkPassphrase,
-        originalTx.fee,
-      )
-
-      onSigningOriginal?.()
-      const signedOriginalXdr = await wallet.signTransaction(preparedTx.toXDR(), {
-        networkPassphrase,
-      })
-
-      const signedOriginalTx = TransactionBuilder.fromXDR(signedOriginalXdr, networkPassphrase)
-      if (!(signedOriginalTx instanceof Transaction)) {
-        const err = 'Failed to parse signed original transaction'
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
         return {
           success: false,
           archivedKeysDetected: archivedKeys.length,
-          restoreTxHash: restoreResult.hash,
-          error: err,
+          restoreTxHash: restoreResult?.hash,
+          error: message,
         }
       }
     }
