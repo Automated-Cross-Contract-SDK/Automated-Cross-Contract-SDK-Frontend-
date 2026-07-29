@@ -17,6 +17,14 @@ export {
   prepareTransaction,
   extractXdrOperations,
 } from './Restorer.js'
+export {
+  queryLedgerTTL,
+  queryLedgerEntryTTL,
+  getExpiringSoonEntries,
+  getArchivedEntries,
+  LEDGER_CLOSE_TIME_SECONDS,
+} from './TTLHelpers.js'
+export type { LedgerEntryTTLInfo, TTLQueryResult } from './TTLHelpers.js'
 export type {
   SorobanResurrectConfig,
   WalletAdapter,

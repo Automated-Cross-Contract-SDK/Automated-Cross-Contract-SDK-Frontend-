@@ -1,4 +1,4 @@
-import { rpc, Transaction } from '@stellar/stellar-sdk'
+import { rpc, Transaction, xdr } from '@stellar/stellar-sdk'
 import {
   SorobanResurrectConfig,
   RestoreState,
@@ -10,7 +10,20 @@ import {
 import { executeWithRestore } from './Executor.js'
 import { isRestoreResponse, extractArchivedKeys } from './Archiver.js'
 import { buildRestoreTransaction } from './Restorer.js'
-import { DEFAULT_NETWORK_PASSPHRASE, POLL_INTERVAL_MS, POLL_TIMEOUT_MS, KNOWN_NETWORK_PASSPHRASES } from './constants.js'
+import {
+  DEFAULT_NETWORK_PASSPHRASE,
+  POLL_INTERVAL_MS,
+  POLL_TIMEOUT_MS,
+  RESTORE_FEE_MULTIPLIER,
+  KNOWN_NETWORK_PASSPHRASES,
+} from './constants.js'
+import {
+  queryLedgerTTL as _queryLedgerTTL,
+  queryLedgerEntryTTL as _queryLedgerEntryTTL,
+  getExpiringSoonEntries as _getExpiringSoonEntries,
+  type LedgerEntryTTLInfo,
+  type TTLQueryResult,
+} from './TTLHelpers.js'
 
 /**
  * Main facade for the Soroban-Resurrect SDK.
@@ -41,16 +54,15 @@ export class SorobanResurrect {
   constructor(config: SorobanResurrectConfig) {
     this.server = new rpc.Server(config.rpcUrl)
     const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
-    
-    // Validate network passphrase against known networks
+
     if (!KNOWN_NETWORK_PASSPHRASES.includes(networkPassphrase)) {
       console.warn(
         `Warning: Unknown network passphrase "${networkPassphrase}". ` +
-        `Known networks: ${KNOWN_NETWORK_PASSPHRASES.join(', ')}. ` +
-        `Transactions may fail with cryptic errors if the passphrase is incorrect.`,
+          `Known networks: ${KNOWN_NETWORK_PASSPHRASES.join(', ')}. ` +
+          `Transactions may fail with cryptic errors if the passphrase is incorrect.`,
       )
     }
-    
+
     this.config = {
       rpcUrl: config.rpcUrl,
       networkPassphrase,
@@ -78,9 +90,6 @@ export class SorobanResurrect {
 
   /**
    * Registers a listener for state changes. Returns an unsubscribe function.
-   *
-   * @param listener - Callback invoked on every state transition.
-   * @returns Function that removes the listener when called.
    */
   onStateChange(listener: (info: RestoreStateInfo) => void): () => void {
     this._listeners.push(listener)
@@ -134,16 +143,9 @@ export class SorobanResurrect {
 
   /**
    * Detects archived ledger entries using the configured detection method.
-   * Returns the list of archived keys, or an empty array if none.
-   *
-   * If archiveDetectionMethod is 'simulation', uses the simulation-based approach
-   * (extracting archived keys from the restore response).
-   *
-   * If archiveDetectionMethod is 'direct', queries the ledger directly for
-   * keys that appear in the transaction footprint.
    */
   async detectArchivedKeys(transaction: Transaction): Promise<ArchivedLedgerEntry[]> {
-    const method = (this.config as Required<typeof this.config>).archiveDetectionMethod ?? 'simulation'
+    const method = this.config.archiveDetectionMethod ?? 'simulation'
 
     let keys: ArchivedLedgerEntry[] = []
 
@@ -162,34 +164,19 @@ export class SorobanResurrect {
     return keys
   }
 
-  /**
-   * Detects archived keys using simulation-based approach.
-   * This simulates the transaction and extracts archived keys from
-   * the restore response if one is returned.
-   *
-   * @private
-   */
-  private async detectArchivedKeysViaSimulation(transaction: Transaction): Promise<ArchivedLedgerEntry[]> {
+  private async detectArchivedKeysViaSimulation(
+    transaction: Transaction,
+  ): Promise<ArchivedLedgerEntry[]> {
     const response = await this.simulate(transaction)
-
     if (isRestoreResponse(response)) {
       return extractArchivedKeys(response)
     }
-
     return []
   }
 
-  /**
-   * Detects archived keys using direct ledger query.
-   * This simulates the transaction in success mode, extracts the footprint keys,
-   * then queries the ledger to find which ones are archived.
-   *
-   * This approach avoids triggering a restore response and can be useful for
-   * monitoring or diagnostics.
-   *
-   * @private
-   */
-  private async detectArchivedKeysViaDirect(transaction: Transaction): Promise<ArchivedLedgerEntry[]> {
+  private async detectArchivedKeysViaDirect(
+    transaction: Transaction,
+  ): Promise<ArchivedLedgerEntry[]> {
     const { detectArchivedKeysViaDirect: detect } = await import('./Archiver.js')
     return detect(this.server, transaction)
   }
@@ -204,19 +191,6 @@ export class SorobanResurrect {
 
   /**
    * Builds a restore transaction for the given source account and transaction.
-   *
-   * If simulationResponse is provided, it is used directly and no simulation
-   * is performed. This avoids state changes and is useful when called during
-   * or alongside the submitWithRestore workflow.
-   *
-   * If simulationResponse is not provided, the transaction is simulated first.
-   * This will update internal state to 'simulating'.
-   *
-   * Throws if the simulation does not indicate a restore is needed.
-   *
-   * @param sourcePublicKey - The source account public key
-   * @param transaction - The transaction to build a restore for
-   * @param simulationResponse - Optional pre-computed simulation response (to avoid state side-effects)
    */
   async buildRestoreTx(
     sourcePublicKey: string,
@@ -238,6 +212,75 @@ export class SorobanResurrect {
     })
   }
 
+  // ---------------------------------------------------------------------------
+  // TTL / expiry helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Queries the current TTL information for one or more ledger keys.
+   *
+   * Uses the Soroban RPC `getLedgerEntries` and `getLatestLedger` calls to
+   * determine how many ledgers remain until each entry expires. Keys not found
+   * on-chain are reported as archived.
+   *
+   * @param keys - Ledger keys to query.
+   * @returns Aggregated TTL result with per-entry info and query metadata.
+   *
+   * @example
+   * ```ts
+   * const result = await resurrect.queryLedgerTTL([ledgerKey])
+   * console.log(result.entries[0].ttlLedgers) // ledgers remaining
+   * ```
+   */
+  async queryLedgerTTL(keys: xdr.LedgerKey[]): Promise<TTLQueryResult> {
+    return _queryLedgerTTL(this.server, keys)
+  }
+
+  /**
+   * Queries the current TTL information for a single ledger key.
+   *
+   * @param key - The ledger key to query.
+   * @returns TTL info for the requested entry.
+   *
+   * @example
+   * ```ts
+   * const info = await resurrect.queryLedgerEntryTTL(ledgerKey)
+   * if (info.ttlLedgers < 10_000) {
+   *   console.warn('Entry expiring soon!')
+   * }
+   * ```
+   */
+  async queryLedgerEntryTTL(key: xdr.LedgerKey): Promise<LedgerEntryTTLInfo> {
+    return _queryLedgerEntryTTL(this.server, key)
+  }
+
+  /**
+   * Returns ledger entries that are expiring within `ledgersThreshold` ledgers,
+   * including entries that are already archived.
+   *
+   * Useful for proactively warning users before their on-chain data expires so
+   * they can extend TTL before a transaction fails.
+   *
+   * @param keys              - Ledger keys to query.
+   * @param ledgersThreshold  - Maximum ledgers remaining to be considered "expiring soon"
+   *                            (defaults to 100,000 ledgers ≈ ~5.8 days at 5 s/ledger).
+   * @returns Entries expiring within the threshold (or already archived).
+   *
+   * @example
+   * ```ts
+   * const expiring = await resurrect.getExpiringSoonEntries([key], 17_280) // ~24 h
+   * if (expiring.length > 0) {
+   *   showWarning('Your position is expiring soon!')
+   * }
+   * ```
+   */
+  async getExpiringSoonEntries(
+    keys: xdr.LedgerKey[],
+    ledgersThreshold = 100_000,
+  ): Promise<LedgerEntryTTLInfo[]> {
+    return _getExpiringSoonEntries(this.server, keys, ledgersThreshold)
+  }
+
   /**
    * Submits a transaction with automatic archive restoration.
    *
@@ -247,7 +290,15 @@ export class SorobanResurrect {
    * published to all registered listeners.
    */
   async submitWithRestore(options: SubmitWithRestoreOptions): Promise<ResurrectResult> {
-    const { transaction, wallet, onRestoreFailed, onSigningRestore, onSubmittingRestore, onSigningOriginal, ...callbacks } = options
+    const {
+      transaction,
+      wallet,
+      onRestoreFailed,
+      onSigningRestore,
+      onSubmittingRestore,
+      onSigningOriginal,
+      ...callbacks
+    } = options
 
     const result = await executeWithRestore({
       server: this.server,
@@ -255,7 +306,7 @@ export class SorobanResurrect {
       wallet,
       config: this.config,
       onSigningRestore: () => {
-        this.setState('signing_restore', 'Signing restore transaction...')
+        this.setState('signing_restore', 'Awaiting wallet signature for restore transaction...')
         onSigningRestore?.()
       },
       onSubmittingRestore: () => {
@@ -267,20 +318,12 @@ export class SorobanResurrect {
         this.setState('restore_needed', `Detected ${keys.length} archived ledger entries`)
         callbacks.onRestoreNeeded?.(keys)
       },
-      // Wallet is about to prompt the user to sign the restore tx —
-      // surface this so the UI can show a signing indicator.
-      onSigningRestore: () => {
-        this.setState('signing_restore', 'Awaiting wallet signature for restore transaction...')
-      },
       onRestoreSubmitted: (txHash) => {
         this.setState('confirming_restore', 'Waiting for restore confirmation...')
         callbacks.onRestoreSubmitted?.(txHash)
       },
       onRestoreConfirmed: (txHash) => {
-        this.setState(
-          'submitting_original',
-          'Restore confirmed. Preparing original transaction...',
-        )
+        this.setState('submitting_original', 'Restore confirmed. Preparing original transaction...')
         callbacks.onRestoreConfirmed?.(txHash)
       },
       onSigningOriginal: () => {
