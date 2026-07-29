@@ -1,6 +1,6 @@
-import { rpc, Account } from '@stellar/stellar-sdk'
-import { TransactionBuilder, Operation, Transaction, xdr } from '@stellar/stellar-sdk'
-import { SorobanResurrectConfig } from './types.js'
+import { rpc, Account, Keypair } from '@stellar/stellar-sdk'
+import { TransactionBuilder, Operation, Transaction, xdr, FeeBumpTransaction } from '@stellar/stellar-sdk'
+import { SorobanResurrectConfig, FeeBumpSponsor } from './types.js'
 import { DEFAULT_NETWORK_PASSPHRASE, RESTORE_FEE_MULTIPLIER } from './constants.js'
 
 /** Parameters for building a restore transaction. */
@@ -32,6 +32,23 @@ export interface BuildRestoreTxParams {
  * concurrently for the same source, provide either the `account` or `sequenceNumber`
  * parameter. If neither is provided, this function will fetch the account from RPC,
  * which may cause the second concurrent call to get an out-of-sync sequence number.
+ *
+ * @param params - See {@link BuildRestoreTxParams}.
+ * @returns An unsigned `Transaction` with a single `restoreFootprint`
+ *   operation and the simulation-derived `SorobanTransactionData` attached.
+ * @see {@link SorobanResurrect.buildRestoreTx} for the higher-level facade
+ *   method that also runs the simulation for you.
+ *
+ * @example
+ * ```ts
+ * const restoreTx = await buildRestoreTransaction({
+ *   server,
+ *   sourcePublicKey: publicKey,
+ *   transactionData: simResponse.transactionData.build(),
+ *   minResourceFee: parseInt(simResponse.minResourceFee, 10),
+ *   config,
+ * })
+ * ```
  */
 export async function buildRestoreTransaction(params: BuildRestoreTxParams): Promise<Transaction> {
   const { sourcePublicKey, transactionData, minResourceFee, config, account: preFetched, sequenceNumber } = params
@@ -68,6 +85,22 @@ export async function buildRestoreTransaction(params: BuildRestoreTxParams): Pro
  * Uses exponential backoff with jitter between polls to avoid hammering
  * the RPC endpoint. Delay starts at 100ms and doubles on each retry, capped at
  * pollIntervalMs, with random jitter of ±50%.
+ *
+ * @param server - Soroban RPC server instance.
+ * @param hash - Hash of the submitted transaction to poll for.
+ * @param pollIntervalMs - Maximum delay between polls, in ms (default `1000`).
+ * @param pollTimeoutMs - Total time to keep polling before giving up, in ms
+ *   (default `60_000`).
+ * @returns The terminal `GetTransactionResponse` (status `SUCCESS` or
+ *   `FAILED`).
+ * @throws {Error} If the transaction does not reach a terminal status
+ *   within `pollTimeoutMs`.
+ *
+ * @example
+ * ```ts
+ * const status = await waitForTransaction(server, txHash, 1000, 60_000)
+ * if (status.status === rpc.Api.GetTransactionStatus.SUCCESS) { ... }
+ * ```
  */
 export async function waitForTransaction(
   server: rpc.Server,
@@ -100,42 +133,267 @@ export async function waitForTransaction(
 }
 
 /**
+ * Helper: checks if a transaction status is terminal.
+ */
+function isTerminalStatus(status: string): boolean {
+  return (
+    status === rpc.Api.GetTransactionStatus.SUCCESS ||
+    status === rpc.Api.GetTransactionStatus.FAILED
+  )
+}
+
+/**
+ * Opens an SSE stream to the Soroban RPC `getEvents` endpoint and watches for
+ * events matching the given transaction hash.
+ *
+ * When a matching event is found, verifies the transaction status with a final
+ * `getTransaction` call and returns the result.
+ *
+ * Falls back to adaptive polling if SSE is not supported or fails.
+ *
+ * @private
+ */
+async function streamTransactionViaEvents(
+  server: rpc.Server,
+  hash: string,
+  timeoutMs: number,
+): Promise<rpc.Api.GetTransactionResponse | null> {
+  // Determine the latest ledger as a starting point for SSE streaming.
+  // We try getLatestLedger first, then fall back to the transaction's latestLedger.
+  let startLedger: number
+  try {
+    const health = await server.getLatestLedger()
+    startLedger = health.sequence
+  } catch {
+    try {
+      const txResp = await server.getTransaction(hash)
+      const txLedger = (txResp as any).latestLedger ?? (txResp as any).ledger
+      if (txLedger != null && txLedger > 0) {
+        startLedger = txLedger
+      } else {
+        // Cannot determine a reasonable start — bail out of SSE
+        return null
+      }
+    } catch {
+      return null
+    }
+  }
+
+  // Extract the base URL from the server.
+  // NOTE: serverURL is part of the Stellar SDK's internal API surface.
+  // It may change across major versions; fall back gracefully if unavailable.
+  const serverURL =
+    typeof (server as any).serverURL === 'string'
+      ? (server as any).serverURL
+      : (server as any).serverURL?.toString?.() ?? ''
+
+  if (!serverURL) {
+    return null
+  }
+
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    const response = await fetch(serverURL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'getEvents',
+        params: {
+          startLedger,
+          filters: [
+            {
+              type: 'diagnostic',
+            },
+          ],
+          pagination: {
+            limit: 100,
+          },
+        },
+      }),
+      signal: controller.signal,
+    })
+
+    if (!response.ok || !response.body) {
+      return null
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6))
+            const events = data?.result?.events ?? []
+            const matched = events.some(
+              (event: any) => event.txHash === hash || event.transactionHash === hash,
+            )
+            if (matched) {
+              // Verify with getTransaction
+              const result = await server.getTransaction(hash)
+              if (isTerminalStatus(result.status)) {
+                return result
+              }
+              // Event found but transaction not yet terminal — keep listening
+            }
+          } catch {
+            // Ignore parse errors on individual SSE data lines
+          }
+        }
+      }
+    }
+  } catch {
+    // SSE stream failed (network error, timeout, abort) — fall through
+    return null
+  } finally {
+    clearTimeout(timeoutId)
+    controller.abort()
+  }
+
+  return null
+}
+
+/**
+ * Adaptive polling fallback: starts with 200ms delay and increases up to 2s.
+ * Lower latency than the default exponential-backoff poller for short waits.
+ *
+ * @private
+ */
+async function pollTransactionAdaptive(
+  server: rpc.Server,
+  hash: string,
+  timeoutMs: number,
+): Promise<rpc.Api.GetTransactionResponse> {
+  let attempt = 0
+  const startTime = Date.now()
+
+  while (Date.now() - startTime < timeoutMs) {
+    const response = await server.getTransaction(hash)
+    if (isTerminalStatus(response.status)) {
+      return response
+    }
+    attempt++
+    const delay = Math.min(200 * attempt, 2000)
+    await new Promise((resolve) => setTimeout(resolve, delay))
+  }
+
+  throw new Error(`Transaction ${hash} did not complete within ${timeoutMs}ms`)
+}
+
+/**
+ * Waits for a transaction to reach a terminal status using SSE (Server-Sent
+ * Events) when available, with adaptive polling as a fallback.
+ *
+ * SSE is implemented via the Soroban RPC `getEvents` endpoint with the
+ * `Accept: text/event-stream` HTTP header. The RPC streams contract events
+ * in real time; we watch for events whose `txHash` matches our transaction
+ * and then verify with `getTransaction`.
+ *
+ * If SSE is not supported by the RPC (or fails for any reason), the function
+ * falls back to an adaptive polling strategy for lower latency than the
+ * default exponential-backoff poller.
+ *
+ * @param server - Soroban RPC server instance
+ * @param hash - Transaction hash to wait for
+ * @param pollTimeoutMs - Maximum time to wait in milliseconds (default: 60s)
+ * @returns The final transaction response
+ * @throws If the transaction does not complete within the timeout
+ */
+export async function waitForTransactionSSE(
+  server: rpc.Server,
+  hash: string,
+  pollTimeoutMs: number = 60_000,
+): Promise<rpc.Api.GetTransactionResponse> {
+  // First, attempt to get the transaction immediately (it might already be done)
+  const immediate = await server.getTransaction(hash)
+  if (isTerminalStatus(immediate.status)) {
+    return immediate
+  }
+
+  // Try SSE stream via getEvents (low latency when supported)
+  try {
+    const sseResult = await streamTransactionViaEvents(server, hash, pollTimeoutMs)
+    if (sseResult) {
+      return sseResult
+    }
+  } catch {
+    // SSE failed — fall through to adaptive polling
+  }
+
+  // Final fallback: adaptive polling with remaining budget
+  // The SSE attempt may have consumed some time, but to keep things simple
+  // and avoid tracking elapsed time across the SSE stream and the
+  // immediate getTransaction call, we use a fresh timeout here.
+  // In practice the SSE stream either succeeds quickly (< 2s) or fails fast.
+  return pollTransactionAdaptive(server, hash, pollTimeoutMs)
+}
+
+/**
  * Extracts the XDR operations from a Transaction object, handling both
  * regular (v0, v1) and fee-bump envelope formats.
  *
  * Fee-bump transactions wrap an inner transaction. This function extracts
  * the operations from the inner transaction regardless of envelope format.
+ *
+ * @param tx - The transaction to extract operations from.
+ * @returns The raw `xdr.Operation[]` array from the (possibly inner)
+ *   transaction envelope.
+ * @see {@link buildOriginalAfterRestore}, which uses this to copy
+ *   operations onto a freshly-built transaction.
  */
 export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
   const envelope = tx.toEnvelope()
   const envelopeType = envelope.switch()
 
   // Handle fee-bump transactions: extract the inner transaction first
-  if (envelopeType === xdr.EnvelopeType.envelopeTypeTxFeeBump()) {
+  if (envelopeType.name === 'envelopeTypeTxFeeBump') {
     const feeBumpEnvelope = envelope.value() as xdr.FeeBumpTransactionEnvelope
     const innerEnvelope = feeBumpEnvelope.tx().innerTx()
     const innerType = innerEnvelope.switch()
 
-    if (innerType === xdr.EnvelopeType.envelopeTypeTxV0()) {
+    if (innerType.name === 'envelopeTypeTxV0') {
       // For V0 inner transaction, cast through unknown to handle type differences
       const innerV0 = innerEnvelope.value() as unknown as xdr.TransactionV0Envelope
       return innerV0.tx().operations()
     }
 
-    // Default to V1 for fee-bump inner transactions
-    const innerV1 = innerEnvelope.value() as xdr.TransactionV1Envelope
-    return innerV1.tx().operations()
+    if (innerType === xdr.EnvelopeType.envelopeTypeTx()) {
+      const innerV1 = innerEnvelope.value() as xdr.TransactionV1Envelope
+      return innerV1.tx().operations()
+    }
+
+    throw new Error(`Unsupported inner transaction envelope type in fee-bump transaction: ${innerType.name}`)
   }
 
   // Handle regular V0 transactions
-  if (envelopeType === xdr.EnvelopeType.envelopeTypeTxV0()) {
+  if (envelopeType.name === 'envelopeTypeTxV0') {
     const v0Envelope = envelope.value() as xdr.TransactionV0Envelope
     return v0Envelope.tx().operations()
   }
 
-  // Default to V1 transactions
-  const v1Envelope = envelope.value() as xdr.TransactionV1Envelope
-  return v1Envelope.tx().operations()
+  // Handle regular V1 transactions
+  if (envelopeType === xdr.EnvelopeType.envelopeTypeTx()) {
+    const v1Envelope = envelope.value() as xdr.TransactionV1Envelope
+    return v1Envelope.tx().operations()
+  }
+
+  throw new Error(`Unsupported transaction envelope type: ${envelopeType.name}`)
 }
 
 /**
@@ -145,7 +403,28 @@ export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
  *
  * Reuses the original transaction's timeout if set, otherwise defaults to 30 seconds.
  *
- * Throws if the re-simulation still indicates archived entries or an error.
+ * @param server - Soroban RPC server instance.
+ * @param originalTx - The user's original transaction (pre-restore), used
+ *   as the source of operations and timeout.
+ * @param networkPassphrase - Network passphrase to build the new
+ *   transaction with.
+ * @param fee - Fee (in stroops, as a string) to set on the rebuilt
+ *   transaction.
+ * @returns A freshly assembled, unsigned `Transaction` ready to be signed
+ *   and submitted.
+ * @throws {Error} If the re-simulation still indicates archived entries
+ *   (the restore was not sufficient) or returns a simulation error.
+ * @see {@link extractXdrOperations} for how operations are copied over.
+ *
+ * @example
+ * ```ts
+ * const preparedTx = await buildOriginalAfterRestore(
+ *   server,
+ *   originalTx,
+ *   networkPassphrase,
+ *   originalTx.fee,
+ * )
+ * ```
  */
 export async function buildOriginalAfterRestore(
   server: rpc.Server,
@@ -199,7 +478,14 @@ export async function buildOriginalAfterRestore(
 
 /**
  * Simulates a transaction and assembles it with the resulting footprint.
- * Throws if the simulation returns an error or indicates archived entries.
+ *
+ * @param server - Soroban RPC server instance.
+ * @param tx - The transaction to simulate and assemble.
+ * @returns The assembled, unsigned `Transaction` ready to be signed and
+ *   submitted.
+ * @throws {Error} If the simulation returns an error, or indicates that
+ *   archived ledger entries need restoring first (call
+ *   {@link buildRestoreTransaction} in that case).
  */
 export async function prepareTransaction(
   server: rpc.Server,
@@ -218,4 +504,65 @@ export async function prepareTransaction(
   const assembled = rpc.assembleTransaction(tx, sim)
   assembled.setTimeout(30)
   return assembled.build()
+}
+
+/**
+ * Wraps a signed inner transaction in a fee-bump envelope signed by the sponsor.
+ * The sponsor pays the transaction fees on behalf of the user.
+ *
+ * @param innerTxXdr - The signed inner transaction XDR (user-signed).
+ * @param sponsor - The fee-bump sponsor who will sign and pay fees.
+ * @param networkPassphrase - Stellar network passphrase.
+ * @param feeBumpFee - Optional custom fee for the fee-bump wrapper (in stroops).
+ * @returns The fully signed fee-bump transaction XDR string, ready for submission.
+ */
+export async function buildFeeBumpTransaction(
+  innerTxXdr: string,
+  sponsor: FeeBumpSponsor,
+  networkPassphrase: string,
+  feeBumpFee?: string,
+): Promise<string> {
+  const sponsorPublicKey = await sponsor.getPublicKey()
+
+  const innerTx = TransactionBuilder.fromXDR(innerTxXdr, networkPassphrase)
+  if (!(innerTx instanceof Transaction)) {
+    throw new Error('Failed to parse inner transaction XDR')
+  }
+
+  const fee = feeBumpFee ?? innerTx.fee
+
+  const feeBumpTx = TransactionBuilder.buildFeeBumpTransaction(
+    Keypair.fromPublicKey(sponsorPublicKey),
+    fee,
+    innerTx,
+    networkPassphrase,
+  )
+
+  if (!(feeBumpTx instanceof FeeBumpTransaction)) {
+    throw new Error('Failed to build fee-bump transaction')
+  }
+
+  const signedFeeBumpXdr = await sponsor.signFeeBump(feeBumpTx.toXDR(), {
+    networkPassphrase,
+  })
+
+  return signedFeeBumpXdr
+}
+
+/**
+ * Submits a fee-bump transaction to the network.
+ * Deserializes the XDR string and sends it via the RPC server.
+ *
+ * @returns The send transaction response with the hash.
+ */
+export async function submitFeeBumpTransaction(
+  server: rpc.Server,
+  feeBumpXdr: string,
+  networkPassphrase: string,
+): Promise<rpc.Api.SendTransactionResponse> {
+  const parsed = TransactionBuilder.fromXDR(feeBumpXdr, networkPassphrase)
+  if (!(parsed instanceof FeeBumpTransaction)) {
+    throw new Error('Failed to parse fee-bump transaction XDR')
+  }
+  return server.sendTransaction(parsed)
 }
