@@ -17,6 +17,8 @@ export {
   prepareTransaction,
   extractXdrOperations,
 } from './Restorer.js'
+export { TransactionHistory } from './TransactionHistory.js'
+export type { TransactionHistoryEntry, TransactionAttemptStatus } from './TransactionHistory.js'
 export type {
   SorobanResurrectConfig,
   WalletAdapter,
