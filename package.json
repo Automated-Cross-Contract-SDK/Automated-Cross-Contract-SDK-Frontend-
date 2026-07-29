@@ -26,7 +26,7 @@
     "lint:fix": "eslint --fix 'packages/*/src/**/*.{ts,tsx}' 'examples/*/src/**/*.{ts,tsx}'",
     "format": "prettier --check '**/*.{ts,tsx,json,md}' --ignore-path .gitignore",
     "format:fix": "prettier --write '**/*.{ts,tsx,json,md}' --ignore-path .gitignore",
-    "test": "npm run test -w packages/sdk",
+    "test": "npm run test -w packages/sdk && npm run test -w packages/react-hook",
     "test:watch": "npm run test:watch -w packages/sdk",
     "clean": "npm run clean --workspaces --if-present"
   },

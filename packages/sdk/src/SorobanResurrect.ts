@@ -73,11 +73,12 @@ export class SorobanResurrect {
     
     // Validate network passphrase against known networks
     if (!KNOWN_NETWORK_PASSPHRASES.includes(networkPassphrase)) {
-      console.warn(
-        `Warning: Unknown network passphrase "${networkPassphrase}". ` +
-        `Known networks: ${KNOWN_NETWORK_PASSPHRASES.join(', ')}. ` +
-        `Transactions may fail with cryptic errors if the passphrase is incorrect.`,
-      )
+      const knownNetworks = KNOWN_NETWORK_PASSPHRASES.map((p) => `"${p}"`).join(', ')
+      const message =
+        `Invalid network passphrase: "${networkPassphrase}". ` +
+        `Must be one of: ${knownNetworks}. ` +
+        `A typo in the passphrase will cause cryptic transaction failures.`
+      throw new Error(message)
     }
     
     this.config = {

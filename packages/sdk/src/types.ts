@@ -23,7 +23,12 @@ export interface SorobanResurrectConfig {
   pollIntervalMs?: number
   /** Timeout in ms when waiting for transaction confirmation. */
   pollTimeoutMs?: number
-  /** Multiplier applied to minResourceFee when building a restore transaction (defaults to 100). */
+  /**
+   * Multiplier applied to minResourceFee when building a restore transaction.
+   * Defaults to 3 (3x the base fee). Use higher values (e.g. 5) if restore tx
+   * fails to include during congestion, or lower values (e.g. 2) for lower fees.
+   * Must be >= 1.
+   */
   restoreFeeMultiplier?: number
   /** Method for detecting archived keys: 'simulation' (default) or 'direct'. */
   archiveDetectionMethod?: 'simulation' | 'direct'

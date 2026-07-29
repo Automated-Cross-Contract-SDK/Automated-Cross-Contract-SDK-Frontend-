@@ -77,9 +77,6 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
     transaction: originalTx,
     wallet,
     config,
-    onSigningRestore,
-    onSubmittingRestore,
-    onSigningOriginal,
     onRestoreNeeded,
     onRestoreSubmitted,
     onRestoreConfirmed,
@@ -194,8 +191,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
         return {
           success: false,
           archivedKeysDetected: archivedKeys.length,
-          restoreTxHash: restoreResult.hash,
-          error: err,
+          error: message,
         }
       }
 
