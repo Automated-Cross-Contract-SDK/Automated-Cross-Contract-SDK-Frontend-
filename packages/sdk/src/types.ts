@@ -1,7 +1,19 @@
 import { Transaction, xdr } from '@stellar/stellar-sdk'
 import { rpc } from '@stellar/stellar-sdk'
 
-/** Configuration options for creating a SorobanResurrect instance. */
+/**
+ * Configuration options for creating a SorobanResurrect instance.
+ *
+ * @see {@link SorobanResurrect} — the class this config is passed to.
+ *
+ * @example
+ * ```ts
+ * const config: SorobanResurrectConfig = {
+ *   rpcUrl: 'https://soroban-testnet.stellar.org',
+ *   networkPassphrase: Networks.TESTNET,
+ * }
+ * ```
+ */
 export interface SorobanResurrectConfig {
   /** URL of the Soroban RPC endpoint. */
   rpcUrl: string
@@ -11,13 +23,31 @@ export interface SorobanResurrectConfig {
   pollIntervalMs?: number
   /** Timeout in ms when waiting for transaction confirmation. */
   pollTimeoutMs?: number
-  /** Multiplier applied to minResourceFee when building a restore transaction (defaults to 100). */
+  /**
+   * Multiplier applied to minResourceFee when building a restore transaction.
+   * Defaults to 3 (3x the base fee). Use higher values (e.g. 5) if restore tx
+   * fails to include during congestion, or lower values (e.g. 2) for lower fees.
+   * Must be >= 1.
+   */
   restoreFeeMultiplier?: number
   /** Method for detecting archived keys: 'simulation' (default) or 'direct'. */
   archiveDetectionMethod?: 'simulation' | 'direct'
 }
 
-/** Wallet interface that wraps browser or extension wallets (e.g. Freighter). */
+/**
+ * Wallet interface that wraps browser or extension wallets (e.g. Freighter).
+ *
+ * @see {@link SubmitWithRestoreOptions.wallet}
+ *
+ * @example
+ * ```ts
+ * const wallet: WalletAdapter = {
+ *   isConnected: async () => freighter.isConnected(),
+ *   getPublicKey: async () => (await freighter.getAddress()).address,
+ *   signTransaction: (xdr, opts) => freighter.signTransaction(xdr, opts),
+ * }
+ * ```
+ */
 export interface WalletAdapter {
   /** Returns whether the wallet is connected. */
   isConnected(): Promise<boolean>
@@ -75,7 +105,11 @@ export interface ArchivedLedgerEntry {
 /** Convenience alias for the Soroban RPC simulate response type. */
 export type SimulateResponse = rpc.Api.SimulateTransactionResponse
 
-/** Result returned from the restore-and-submit workflow. */
+/**
+ * Result returned from the restore-and-submit workflow.
+ *
+ * @see {@link SorobanResurrect.submitWithRestore}
+ */
 export interface ResurrectResult {
   /** Whether the full transaction lifecycle succeeded. */
   success: boolean
@@ -118,7 +152,13 @@ export interface SubmitWithRestoreOptions {
   onRestoreFailed?: (error: string) => void
 }
 
-/** Tracks the current stage of the restore-and-submit workflow. */
+/**
+ * Tracks the current stage of the restore-and-submit workflow.
+ *
+ * See {@link SorobanResurrect.onStateChange} for how to subscribe to
+ * transitions between these states, and `ARCHITECTURE.md` in the repo
+ * root for the full state diagram.
+ */
 export type RestoreState =
   | 'idle'
   | 'simulating'
@@ -141,4 +181,25 @@ export interface RestoreStateInfo {
   archivedKeys?: ArchivedLedgerEntry[]
   /** Error message (only set in error state). */
   error?: string
+}
+
+/**
+ * Typed events emitted by SorobanResurrect for specific workflow transitions,
+ * in addition to the general-purpose `onStateChange` observer.
+ */
+export interface SorobanResurrectEvents {
+  /** Fired on every state transition (mirrors `onStateChange`). */
+  stateChange: RestoreStateInfo
+  /** Fired when archived entries are detected and restoration is required. */
+  restoreNeeded: ArchivedLedgerEntry[]
+  /** Fired after the restore transaction is submitted, with its tx hash. */
+  restoreSubmitted: string
+  /** Fired after the restore transaction is confirmed on-chain, with its tx hash. */
+  restoreConfirmed: string
+  /** Fired after the original transaction is submitted, with its tx hash. */
+  originalSubmitted: string
+  /** Fired once the full restore-and-submit workflow finishes, with the result. */
+  restoreComplete: ResurrectResult
+  /** Fired when the workflow fails, with the error message. */
+  error: string
 }
