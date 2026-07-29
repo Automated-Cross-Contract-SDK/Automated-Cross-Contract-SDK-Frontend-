@@ -1,0 +1,18 @@
+{
+  "name": "@soroban-resurrect/example-vanilla-js",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@soroban-resurrect/sdk": "^0.1.0",
+    "@stellar/stellar-sdk": "^12.0.0"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0"
+  }
+}

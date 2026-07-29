@@ -32,6 +32,23 @@ export interface BuildRestoreTxParams {
  * concurrently for the same source, provide either the `account` or `sequenceNumber`
  * parameter. If neither is provided, this function will fetch the account from RPC,
  * which may cause the second concurrent call to get an out-of-sync sequence number.
+ *
+ * @param params - See {@link BuildRestoreTxParams}.
+ * @returns An unsigned `Transaction` with a single `restoreFootprint`
+ *   operation and the simulation-derived `SorobanTransactionData` attached.
+ * @see {@link SorobanResurrect.buildRestoreTx} for the higher-level facade
+ *   method that also runs the simulation for you.
+ *
+ * @example
+ * ```ts
+ * const restoreTx = await buildRestoreTransaction({
+ *   server,
+ *   sourcePublicKey: publicKey,
+ *   transactionData: simResponse.transactionData.build(),
+ *   minResourceFee: parseInt(simResponse.minResourceFee, 10),
+ *   config,
+ * })
+ * ```
  */
 export async function buildRestoreTransaction(params: BuildRestoreTxParams): Promise<Transaction> {
   const { sourcePublicKey, transactionData, minResourceFee, config, account: preFetched, sequenceNumber } = params
@@ -68,6 +85,22 @@ export async function buildRestoreTransaction(params: BuildRestoreTxParams): Pro
  * Uses exponential backoff with jitter between polls to avoid hammering
  * the RPC endpoint. Delay starts at 100ms and doubles on each retry, capped at
  * pollIntervalMs, with random jitter of ±50%.
+ *
+ * @param server - Soroban RPC server instance.
+ * @param hash - Hash of the submitted transaction to poll for.
+ * @param pollIntervalMs - Maximum delay between polls, in ms (default `1000`).
+ * @param pollTimeoutMs - Total time to keep polling before giving up, in ms
+ *   (default `60_000`).
+ * @returns The terminal `GetTransactionResponse` (status `SUCCESS` or
+ *   `FAILED`).
+ * @throws {Error} If the transaction does not reach a terminal status
+ *   within `pollTimeoutMs`.
+ *
+ * @example
+ * ```ts
+ * const status = await waitForTransaction(server, txHash, 1000, 60_000)
+ * if (status.status === rpc.Api.GetTransactionStatus.SUCCESS) { ... }
+ * ```
  */
 export async function waitForTransaction(
   server: rpc.Server,
@@ -106,7 +139,11 @@ export async function waitForTransaction(
  * Fee-bump transactions wrap an inner transaction. This function extracts
  * the operations from the inner transaction regardless of envelope format.
  *
- * Throws an error if an unknown or unsupported envelope type is encountered.
+ * @param tx - The transaction to extract operations from.
+ * @returns The raw `xdr.Operation[]` array from the (possibly inner)
+ *   transaction envelope.
+ * @see {@link buildOriginalAfterRestore}, which uses this to copy
+ *   operations onto a freshly-built transaction.
  */
 export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
   const envelope = tx.toEnvelope()
@@ -124,16 +161,12 @@ export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
       return innerV0.tx().operations()
     }
 
-    if (innerType.name === 'envelopeTypeTx') {
+    if (innerType === xdr.EnvelopeType.envelopeTypeTx()) {
       const innerV1 = innerEnvelope.value() as xdr.TransactionV1Envelope
       return innerV1.tx().operations()
     }
 
-    // Unknown inner envelope type
-    throw new Error(
-      `Unknown or unsupported inner envelope type in fee-bump transaction: ${innerType.name}. ` +
-        `Expected envelopeTypeTxV0 or envelopeTypeTx.`,
-    )
+    throw new Error(`Unsupported inner transaction envelope type in fee-bump transaction: ${innerType.name}`)
   }
 
   // Handle regular V0 transactions
@@ -142,17 +175,13 @@ export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
     return v0Envelope.tx().operations()
   }
 
-  // Handle regular V1 transactions (typically "envelopeTypeTx")
-  if (envelopeType.name === 'envelopeTypeTx') {
+  // Handle regular V1 transactions
+  if (envelopeType === xdr.EnvelopeType.envelopeTypeTx()) {
     const v1Envelope = envelope.value() as xdr.TransactionV1Envelope
     return v1Envelope.tx().operations()
   }
 
-  // Unknown envelope type
-  throw new Error(
-    `Unknown or unsupported envelope type: ${envelopeType.name}. ` +
-      `Expected envelopeTypeTxV0, envelopeTypeTx, or envelopeTypeTxFeeBump.`,
-  )
+  throw new Error(`Unsupported transaction envelope type: ${envelopeType.name}`)
 }
 
 /**
@@ -162,7 +191,28 @@ export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
  *
  * Reuses the original transaction's timeout if set, otherwise defaults to 30 seconds.
  *
- * Throws if the re-simulation still indicates archived entries or an error.
+ * @param server - Soroban RPC server instance.
+ * @param originalTx - The user's original transaction (pre-restore), used
+ *   as the source of operations and timeout.
+ * @param networkPassphrase - Network passphrase to build the new
+ *   transaction with.
+ * @param fee - Fee (in stroops, as a string) to set on the rebuilt
+ *   transaction.
+ * @returns A freshly assembled, unsigned `Transaction` ready to be signed
+ *   and submitted.
+ * @throws {Error} If the re-simulation still indicates archived entries
+ *   (the restore was not sufficient) or returns a simulation error.
+ * @see {@link extractXdrOperations} for how operations are copied over.
+ *
+ * @example
+ * ```ts
+ * const preparedTx = await buildOriginalAfterRestore(
+ *   server,
+ *   originalTx,
+ *   networkPassphrase,
+ *   originalTx.fee,
+ * )
+ * ```
  */
 export async function buildOriginalAfterRestore(
   server: rpc.Server,
@@ -216,7 +266,14 @@ export async function buildOriginalAfterRestore(
 
 /**
  * Simulates a transaction and assembles it with the resulting footprint.
- * Throws if the simulation returns an error or indicates archived entries.
+ *
+ * @param server - Soroban RPC server instance.
+ * @param tx - The transaction to simulate and assemble.
+ * @returns The assembled, unsigned `Transaction` ready to be signed and
+ *   submitted.
+ * @throws {Error} If the simulation returns an error, or indicates that
+ *   archived ledger entries need restoring first (call
+ *   {@link buildRestoreTransaction} in that case).
  */
 export async function prepareTransaction(
   server: rpc.Server,
