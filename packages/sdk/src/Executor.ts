@@ -28,16 +28,12 @@ export interface ExecuteParams {
   wallet: WalletAdapter
   /** SDK configuration. */
   config: SorobanResurrectConfig
-  /** Called when restore transaction is ready to be signed. */
-  onSigningRestore?: () => void
-  /** Called after restore transaction is signed and being submitted. */
-  onSubmittingRestore?: () => void
-  /** Called after restore transaction is confirmed and original is ready to sign. */
-  onSigningOriginal?: () => void
   /** Called when archived entries are detected. */
   onRestoreNeeded?: (archivedKeys: ArchivedLedgerEntry[]) => void
   /** Called when the wallet is prompted to sign the restore transaction. */
   onSigningRestore?: () => void
+  /** Called after restore transaction is signed and being submitted. */
+  onSubmittingRestore?: () => void
   /** Called after the restore transaction is submitted. */
   onRestoreSubmitted?: (txHash: string) => void
   /** Called after the restore transaction is confirmed. */
@@ -75,11 +71,9 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
     transaction: originalTx,
     wallet,
     config,
-    onSigningRestore,
-    onSubmittingRestore,
-    onSigningOriginal,
     onRestoreNeeded,
     onSigningRestore,
+    onSubmittingRestore,
     onRestoreSubmitted,
     onRestoreConfirmed,
     onSigningOriginal,
@@ -207,30 +201,13 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
           restoreTxHash: restoreResult.hash,
           archivedKeysDetected: archivedKeys.length,
         }
-      }
-
-      onRestoreConfirmed?.(restoreResult.hash)
-
-      const preparedTx = await buildOriginalAfterRestore(
-        server,
-        originalTx,
-        networkPassphrase,
-        originalTx.fee,
-      )
-
-      onSigningOriginal?.()
-      const signedOriginalXdr = await wallet.signTransaction(preparedTx.toXDR(), {
-        networkPassphrase,
-      })
-
-      const signedOriginalTx = TransactionBuilder.fromXDR(signedOriginalXdr, networkPassphrase)
-      if (!(signedOriginalTx instanceof Transaction)) {
-        const err = 'Failed to parse signed original transaction'
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        onRestoreFailed?.(message)
         return {
           success: false,
           archivedKeysDetected: archivedKeys.length,
-          restoreTxHash: restoreResult.hash,
-          error: err,
+          error: message,
         }
       }
     }
