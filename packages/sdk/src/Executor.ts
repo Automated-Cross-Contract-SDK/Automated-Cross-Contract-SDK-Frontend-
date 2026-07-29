@@ -199,26 +199,17 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
     if (isErrorResponse(simResponse)) {
       const err = `Simulation error: ${simResponse.error}`
       onRestoreFailed?.(err)
-      return {
-        success: false,
-        archivedKeysDetected: 0,
-        error: err,
-      }
+      return { success: false, archivedKeysDetected: 0, error: err }
     }
 
     if (isRestoreResponse(simResponse)) {
       const archivedKeys = extractArchivedKeys(simResponse)
 
-      // Check wallet connection before attempting to get public key
       const isConnected = await wallet.isConnected()
       if (!isConnected) {
         const err = 'Wallet is not connected'
         onRestoreFailed?.(err)
-        return {
-          success: false,
-          archivedKeysDetected: archivedKeys.length,
-          error: err,
-        }
+        return { success: false, archivedKeysDetected: archivedKeys.length, error: err }
       }
 
       const publicKey = await wallet.getPublicKey()
@@ -327,11 +318,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       const txStatus = await waitForTx(server, sendResult.hash, config)
 
       if (txStatus.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
-        return {
-          success: false,
-          archivedKeysDetected: 0,
-          error: 'Transaction failed to confirm',
-        }
+        return { success: false, archivedKeysDetected: 0, error: 'Transaction failed to confirm' }
       }
 
       return {
@@ -343,19 +330,11 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
 
     const err = 'Unexpected simulation response type'
     onRestoreFailed?.(err)
-    return {
-      success: false,
-      archivedKeysDetected: 0,
-      error: err,
-    }
+    return { success: false, archivedKeysDetected: 0, error: err }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     onRestoreFailed?.(message)
-    return {
-      success: false,
-      archivedKeysDetected: 0,
-      error: message,
-    }
+    return { success: false, archivedKeysDetected: 0, error: message }
   }
 }
 
