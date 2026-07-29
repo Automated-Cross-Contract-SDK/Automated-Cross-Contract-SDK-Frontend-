@@ -105,37 +105,54 @@ export async function waitForTransaction(
  *
  * Fee-bump transactions wrap an inner transaction. This function extracts
  * the operations from the inner transaction regardless of envelope format.
+ *
+ * Throws an error if an unknown or unsupported envelope type is encountered.
  */
 export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
   const envelope = tx.toEnvelope()
   const envelopeType = envelope.switch()
 
   // Handle fee-bump transactions: extract the inner transaction first
-  if (envelopeType === xdr.EnvelopeType.envelopeTypeTxFeeBump()) {
+  if (envelopeType.name === 'envelopeTypeTxFeeBump') {
     const feeBumpEnvelope = envelope.value() as xdr.FeeBumpTransactionEnvelope
     const innerEnvelope = feeBumpEnvelope.tx().innerTx()
     const innerType = innerEnvelope.switch()
 
-    if (innerType === xdr.EnvelopeType.envelopeTypeTxV0()) {
+    if (innerType.name === 'envelopeTypeTxV0') {
       // For V0 inner transaction, cast through unknown to handle type differences
       const innerV0 = innerEnvelope.value() as unknown as xdr.TransactionV0Envelope
       return innerV0.tx().operations()
     }
 
-    // Default to V1 for fee-bump inner transactions
-    const innerV1 = innerEnvelope.value() as xdr.TransactionV1Envelope
-    return innerV1.tx().operations()
+    if (innerType.name === 'envelopeTypeTx') {
+      const innerV1 = innerEnvelope.value() as xdr.TransactionV1Envelope
+      return innerV1.tx().operations()
+    }
+
+    // Unknown inner envelope type
+    throw new Error(
+      `Unknown or unsupported inner envelope type in fee-bump transaction: ${innerType.name}. ` +
+        `Expected envelopeTypeTxV0 or envelopeTypeTx.`,
+    )
   }
 
   // Handle regular V0 transactions
-  if (envelopeType === xdr.EnvelopeType.envelopeTypeTxV0()) {
+  if (envelopeType.name === 'envelopeTypeTxV0') {
     const v0Envelope = envelope.value() as xdr.TransactionV0Envelope
     return v0Envelope.tx().operations()
   }
 
-  // Default to V1 transactions
-  const v1Envelope = envelope.value() as xdr.TransactionV1Envelope
-  return v1Envelope.tx().operations()
+  // Handle regular V1 transactions (typically "envelopeTypeTx")
+  if (envelopeType.name === 'envelopeTypeTx') {
+    const v1Envelope = envelope.value() as xdr.TransactionV1Envelope
+    return v1Envelope.tx().operations()
+  }
+
+  // Unknown envelope type
+  throw new Error(
+    `Unknown or unsupported envelope type: ${envelopeType.name}. ` +
+      `Expected envelopeTypeTxV0, envelopeTypeTx, or envelopeTypeTxFeeBump.`,
+  )
 }
 
 /**
