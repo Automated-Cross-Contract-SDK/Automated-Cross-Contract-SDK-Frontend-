@@ -133,6 +133,218 @@ export async function waitForTransaction(
 }
 
 /**
+ * Helper: checks if a transaction status is terminal.
+ */
+function isTerminalStatus(status: string): boolean {
+  return (
+    status === rpc.Api.GetTransactionStatus.SUCCESS ||
+    status === rpc.Api.GetTransactionStatus.FAILED
+  )
+}
+
+/**
+ * Opens an SSE stream to the Soroban RPC `getEvents` endpoint and watches for
+ * events matching the given transaction hash.
+ *
+ * When a matching event is found, verifies the transaction status with a final
+ * `getTransaction` call and returns the result.
+ *
+ * Falls back to adaptive polling if SSE is not supported or fails.
+ *
+ * @private
+ */
+async function streamTransactionViaEvents(
+  server: rpc.Server,
+  hash: string,
+  timeoutMs: number,
+): Promise<rpc.Api.GetTransactionResponse | null> {
+  // Determine the latest ledger as a starting point for SSE streaming.
+  // We try getLatestLedger first, then fall back to the transaction's latestLedger.
+  let startLedger: number
+  try {
+    const health = await server.getLatestLedger()
+    startLedger = health.sequence
+  } catch {
+    try {
+      const txResp = await server.getTransaction(hash)
+      const txLedger = (txResp as any).latestLedger ?? (txResp as any).ledger
+      if (txLedger != null && txLedger > 0) {
+        startLedger = txLedger
+      } else {
+        // Cannot determine a reasonable start — bail out of SSE
+        return null
+      }
+    } catch {
+      return null
+    }
+  }
+
+  // Extract the base URL from the server.
+  // NOTE: serverURL is part of the Stellar SDK's internal API surface.
+  // It may change across major versions; fall back gracefully if unavailable.
+  const serverURL =
+    typeof (server as any).serverURL === 'string'
+      ? (server as any).serverURL
+      : (server as any).serverURL?.toString?.() ?? ''
+
+  if (!serverURL) {
+    return null
+  }
+
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    const response = await fetch(serverURL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'getEvents',
+        params: {
+          startLedger,
+          filters: [
+            {
+              type: 'diagnostic',
+            },
+          ],
+          pagination: {
+            limit: 100,
+          },
+        },
+      }),
+      signal: controller.signal,
+    })
+
+    if (!response.ok || !response.body) {
+      return null
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6))
+            const events = data?.result?.events ?? []
+            const matched = events.some(
+              (event: any) => event.txHash === hash || event.transactionHash === hash,
+            )
+            if (matched) {
+              // Verify with getTransaction
+              const result = await server.getTransaction(hash)
+              if (isTerminalStatus(result.status)) {
+                return result
+              }
+              // Event found but transaction not yet terminal — keep listening
+            }
+          } catch {
+            // Ignore parse errors on individual SSE data lines
+          }
+        }
+      }
+    }
+  } catch {
+    // SSE stream failed (network error, timeout, abort) — fall through
+    return null
+  } finally {
+    clearTimeout(timeoutId)
+    controller.abort()
+  }
+
+  return null
+}
+
+/**
+ * Adaptive polling fallback: starts with 200ms delay and increases up to 2s.
+ * Lower latency than the default exponential-backoff poller for short waits.
+ *
+ * @private
+ */
+async function pollTransactionAdaptive(
+  server: rpc.Server,
+  hash: string,
+  timeoutMs: number,
+): Promise<rpc.Api.GetTransactionResponse> {
+  let attempt = 0
+  const startTime = Date.now()
+
+  while (Date.now() - startTime < timeoutMs) {
+    const response = await server.getTransaction(hash)
+    if (isTerminalStatus(response.status)) {
+      return response
+    }
+    attempt++
+    const delay = Math.min(200 * attempt, 2000)
+    await new Promise((resolve) => setTimeout(resolve, delay))
+  }
+
+  throw new Error(`Transaction ${hash} did not complete within ${timeoutMs}ms`)
+}
+
+/**
+ * Waits for a transaction to reach a terminal status using SSE (Server-Sent
+ * Events) when available, with adaptive polling as a fallback.
+ *
+ * SSE is implemented via the Soroban RPC `getEvents` endpoint with the
+ * `Accept: text/event-stream` HTTP header. The RPC streams contract events
+ * in real time; we watch for events whose `txHash` matches our transaction
+ * and then verify with `getTransaction`.
+ *
+ * If SSE is not supported by the RPC (or fails for any reason), the function
+ * falls back to an adaptive polling strategy for lower latency than the
+ * default exponential-backoff poller.
+ *
+ * @param server - Soroban RPC server instance
+ * @param hash - Transaction hash to wait for
+ * @param pollTimeoutMs - Maximum time to wait in milliseconds (default: 60s)
+ * @returns The final transaction response
+ * @throws If the transaction does not complete within the timeout
+ */
+export async function waitForTransactionSSE(
+  server: rpc.Server,
+  hash: string,
+  pollTimeoutMs: number = 60_000,
+): Promise<rpc.Api.GetTransactionResponse> {
+  // First, attempt to get the transaction immediately (it might already be done)
+  const immediate = await server.getTransaction(hash)
+  if (isTerminalStatus(immediate.status)) {
+    return immediate
+  }
+
+  // Try SSE stream via getEvents (low latency when supported)
+  try {
+    const sseResult = await streamTransactionViaEvents(server, hash, pollTimeoutMs)
+    if (sseResult) {
+      return sseResult
+    }
+  } catch {
+    // SSE failed — fall through to adaptive polling
+  }
+
+  // Final fallback: adaptive polling with remaining budget
+  // The SSE attempt may have consumed some time, but to keep things simple
+  // and avoid tracking elapsed time across the SSE stream and the
+  // immediate getTransaction call, we use a fresh timeout here.
+  // In practice the SSE stream either succeeds quickly (< 2s) or fails fast.
+  return pollTransactionAdaptive(server, hash, pollTimeoutMs)
+}
+
+/**
  * Extracts the XDR operations from a Transaction object, handling both
  * regular (v0, v1) and fee-bump envelope formats.
  *

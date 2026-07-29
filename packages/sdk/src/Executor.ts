@@ -14,8 +14,10 @@ import {
 import {
   buildRestoreTransaction,
   waitForTransaction,
+  waitForTransactionSSE,
   buildOriginalAfterRestore,
 } from './Restorer.js'
+import { SimulationCache } from './SimulationCache.js'
 import { DEFAULT_NETWORK_PASSPHRASE, POLL_INTERVAL_MS, POLL_TIMEOUT_MS } from './constants.js'
 
 /** Parameters for the full restore-and-submit execution flow. */
@@ -44,6 +46,48 @@ export interface ExecuteParams {
   onOriginalSubmitted?: (txHash: string) => void
   /** Called when the restore step of the workflow fails. */
   onRestoreFailed?: (error: string) => void
+}
+
+/**
+ * Helper: simulates a transaction with optional cache.
+ *
+ * If a SimulationCache is provided, checks the cache first and stores
+ * results on cache miss, reducing RPC calls for repeated simulations
+ * of transactions that differ only by sequence number.
+ */
+async function simulateWithCache(
+  server: rpc.Server,
+  tx: Transaction,
+  cache?: SimulationCache,
+): Promise<rpc.Api.SimulateTransactionResponse> {
+  if (cache) {
+    const cached = cache.get(tx)
+    if (cached) {
+      return cached as rpc.Api.SimulateTransactionResponse
+    }
+    const response = await server.simulateTransaction(tx)
+    cache.set(tx, response)
+    return response
+  }
+  return server.simulateTransaction(tx)
+}
+
+/**
+ * Helper: waits for a transaction using SSE if configured, otherwise polls.
+ */
+async function waitForTx(
+  server: rpc.Server,
+  hash: string,
+  config: SorobanResurrectConfig,
+): Promise<rpc.Api.GetTransactionResponse> {
+  const pollTimeout = config.pollTimeoutMs ?? POLL_TIMEOUT_MS
+
+  if (config.useSSE) {
+    return waitForTransactionSSE(server, hash, pollTimeout)
+  }
+
+  const pollInterval = config.pollIntervalMs ?? POLL_INTERVAL_MS
+  return waitForTransaction(server, hash, pollInterval, pollTimeout)
 }
 
 /**
@@ -85,11 +129,9 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
   } = params
 
   const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
-  const pollInterval = config.pollIntervalMs ?? POLL_INTERVAL_MS
-  const pollTimeout = config.pollTimeoutMs ?? POLL_TIMEOUT_MS
 
   try {
-    const simResponse = await server.simulateTransaction(originalTx)
+    const simResponse = await simulateWithCache(server, originalTx, simulationCache)
 
     if (isErrorResponse(simResponse)) {
       const err = `Simulation error: ${simResponse.error}`
@@ -223,12 +265,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       onOriginalSubmitted?.(sendResult.hash)
 
       // Wait for confirmation on success path for consistency with restore path
-      const txStatus = await waitForTransaction(
-        server,
-        sendResult.hash,
-        pollInterval,
-        pollTimeout,
-      )
+      const txStatus = await waitForTx(server, sendResult.hash, config)
 
       if (txStatus.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
         return {
@@ -255,6 +292,59 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     onRestoreFailed?.(message)
+    return {
+      success: false,
+      archivedKeysDetected: 0,
+      error: message,
+    }
+  }
+}
+
+/**
+ * Signs and submits a single transaction using the wallet adapter, without
+ * any automatic archive restoration. This is a lightweight alternative to
+ * `submitWithRestore` for transactions known not to require restoration.
+ *
+ * Returns a `ResurrectResult` with the transaction hash on success.
+ */
+export async function sendTransaction(
+  server: rpc.Server,
+  transaction: Transaction,
+  wallet: WalletAdapter,
+  config: SorobanResurrectConfig,
+): Promise<ResurrectResult> {
+  const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
+
+  try {
+    const isConnected = await wallet.isConnected()
+    if (!isConnected) {
+      return {
+        success: false,
+        archivedKeysDetected: 0,
+        error: 'Wallet is not connected',
+      }
+    }
+
+    const signedXdr = await wallet.signTransaction(transaction.toXDR(), { networkPassphrase })
+
+    const signedTx = TransactionBuilder.fromXDR(signedXdr, networkPassphrase)
+    if (!(signedTx instanceof Transaction)) {
+      return {
+        success: false,
+        archivedKeysDetected: 0,
+        error: 'Failed to parse signed transaction',
+      }
+    }
+
+    const result = await server.sendTransaction(signedTx)
+
+    return {
+      success: true,
+      originalTxHash: result.hash,
+      archivedKeysDetected: 0,
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
     return {
       success: false,
       archivedKeysDetected: 0,
