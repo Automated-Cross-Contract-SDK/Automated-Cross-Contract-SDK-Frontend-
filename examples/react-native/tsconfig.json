@@ -1,10 +1,6 @@
 {
-  "extends": "../../tsconfig.base.json",
+  "extends": "@react-native/typescript-config/tsconfig.json",
   "compilerOptions": {
-    "outDir": "./dist",
-    "rootDir": ".",
-    "jsx": "react-native",
-    "lib": ["ES2022"]
-  },
-  "include": ["App.tsx"]
+    "jsx": "react-native"
+  }
 }

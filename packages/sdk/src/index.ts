@@ -26,5 +26,6 @@ export type {
   SubmitWithRestoreOptions,
   RestoreState,
   RestoreStateInfo,
-  RestoreCostEstimate,
+  SorobanResurrectEvents,
 } from './types.js'
+export { TypedEventEmitter } from './EventEmitter.js'

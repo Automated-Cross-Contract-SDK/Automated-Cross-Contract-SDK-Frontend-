@@ -10,19 +10,23 @@
   "type": "module",
   "workspaces": [
     "packages/*",
-    "examples/*"
+    "examples/*",
+    "docs"
   ],
   "scripts": {
     "build": "npm run build -w packages/sdk && npm run build -w packages/react-hook && npm run build -w packages/vue-hook && npm run build -w packages/svelte-hook && npm run build -w examples/basic",
     "build:sdk": "npm run build -w packages/sdk",
     "build:hook": "npm run build -w packages/react-hook && npm run build -w packages/vue-hook && npm run build -w packages/svelte-hook",
     "dev:example": "npm run dev -w examples/basic",
+    "docs:dev": "npm run dev -w docs",
+    "docs:build": "npm run build -w docs",
+    "docs:preview": "npm run preview -w docs",
     "typecheck": "tsc --noEmit --composite false",
     "lint": "eslint 'packages/*/src/**/*.{ts,tsx}' 'examples/*/src/**/*.{ts,tsx}'",
     "lint:fix": "eslint --fix 'packages/*/src/**/*.{ts,tsx}' 'examples/*/src/**/*.{ts,tsx}'",
     "format": "prettier --check '**/*.{ts,tsx,json,md}' --ignore-path .gitignore",
     "format:fix": "prettier --write '**/*.{ts,tsx,json,md}' --ignore-path .gitignore",
-    "test": "npm run test -w packages/sdk",
+    "test": "npm run test -w packages/sdk && npm run test -w packages/react-hook",
     "test:watch": "npm run test:watch -w packages/sdk",
     "clean": "npm run clean --workspaces --if-present"
   },

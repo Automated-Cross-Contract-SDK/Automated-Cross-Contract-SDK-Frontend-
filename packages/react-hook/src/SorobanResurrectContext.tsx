@@ -52,6 +52,23 @@ export interface SorobanResurrectProviderProps {
  *
  * When the config prop changes, a new SDK instance is created and
  * state is reset to idle.
+ *
+ * @param props - See {@link SorobanResurrectProviderProps}.
+ * @see {@link useSorobanResurrectContext} to consume the value from a
+ *   descendant component.
+ * @see {@link useSorobanResurrect} for a standalone alternative that
+ *   doesn't require a provider.
+ *
+ * @example
+ * ```tsx
+ * function App() {
+ *   return (
+ *     <SorobanResurrectProvider config={{ rpcUrl: 'https://soroban-testnet.stellar.org' }}>
+ *       <WithdrawButton />
+ *     </SorobanResurrectProvider>
+ *   )
+ * }
+ * ```
  */
 export function SorobanResurrectProvider({ config, children }: SorobanResurrectProviderProps) {
   const resurrectRef = useRef<SorobanResurrect | null>(null)
@@ -132,6 +149,19 @@ export function SorobanResurrectProvider({ config, children }: SorobanResurrectP
 /**
  * Hook to access the `SorobanResurrect` API from within a
  * `<SorobanResurrectProvider>`. Throws if used outside the provider.
+ *
+ * @returns The current `SorobanResurrectContextValue` (SDK instance,
+ *   state, and bound action methods).
+ * @throws {Error} If called from a component not wrapped in
+ *   {@link SorobanResurrectProvider}.
+ *
+ * @example
+ * ```tsx
+ * function WithdrawButton() {
+ *   const { submitWithRestore, state, isProcessing } = useSorobanResurrectContext()
+ *   // ...
+ * }
+ * ```
  */
 export function useSorobanResurrectContext(): SorobanResurrectContextValue {
   const ctx = useContext(SorobanResurrectContext)

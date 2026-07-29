@@ -40,6 +40,27 @@ export interface UseSorobanResurrectReturn {
  *
  * When the config prop changes, a new SDK instance is created and
  * state is reset to idle.
+ *
+ * @param options - See {@link UseSorobanResurrectOptions}.
+ * @returns See {@link UseSorobanResurrectReturn}.
+ * @see {@link SorobanResurrectProvider} / `useSorobanResurrectContext` for
+ *   the context-based alternative, useful when multiple components need
+ *   access to the same SDK instance.
+ *
+ * @example
+ * ```tsx
+ * function WithdrawButton() {
+ *   const { submitWithRestore, state, isProcessing } = useSorobanResurrect({
+ *     config: { rpcUrl: 'https://soroban-testnet.stellar.org' },
+ *   })
+ *
+ *   return (
+ *     <button onClick={() => submitWithRestore(tx, wallet)} disabled={isProcessing}>
+ *       {isProcessing ? state.message : 'Withdraw'}
+ *     </button>
+ *   )
+ * }
+ * ```
  */
 export function useSorobanResurrect(
   options: UseSorobanResurrectOptions,
