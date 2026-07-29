@@ -193,6 +193,9 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
   // Signal workflow start
   onRestoreStart?.()
 
+  // Signal workflow start
+  onRestoreStart?.()
+
   try {
     const simResponse = await simulateWithCache(server, originalTx, simulationCache)
 
@@ -389,4 +392,42 @@ export async function sendTransaction(
       error: message,
     }
   }
+}
+
+/**
+ * Internal wrapper around `waitForTransaction` that fires `onConfirming` on
+ * each poll attempt. Delegates polling logic to the core `waitForTransaction`
+ * helper from Restorer.ts but adds callback support.
+ */
+async function waitForTransactionWithCallbacks(
+  server: rpc.Server,
+  hash: string,
+  pollIntervalMs: number,
+  pollTimeoutMs: number,
+  onConfirming?: (txHash: string, attempt: number) => void,
+): Promise<rpc.Api.GetTransactionResponse> {
+  const startTime = Date.now()
+  let attempt = 0
+
+  while (Date.now() - startTime < pollTimeoutMs) {
+    const response = await server.getTransaction(hash)
+
+    if (
+      response.status === rpc.Api.GetTransactionStatus.SUCCESS ||
+      response.status === rpc.Api.GetTransactionStatus.FAILED
+    ) {
+      return response
+    }
+
+    attempt++
+    onConfirming?.(hash, attempt)
+
+    // Exponential backoff with jitter: delay = min(100ms * 2^attempt, pollIntervalMs) * (0.5 + random * 0.5)
+    const exponentialDelay = 100 * Math.pow(2, attempt)
+    const delay = Math.min(exponentialDelay, pollIntervalMs)
+    const jitter = delay * (0.5 + Math.random() * 0.5)
+    await new Promise((resolve) => setTimeout(resolve, jitter))
+  }
+
+  throw new Error(`Transaction ${hash} did not complete within ${pollTimeoutMs}ms`)
 }

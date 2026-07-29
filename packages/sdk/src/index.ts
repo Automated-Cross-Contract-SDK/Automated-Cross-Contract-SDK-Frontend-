@@ -1,6 +1,20 @@
 export { SorobanResurrect } from './SorobanResurrect.js'
 export { executeWithRestore, sendTransaction } from './Executor.js'
 export {
+  categorizeAuthEntries,
+  signAuthorizationEntries,
+  attachAuthorizationEntries,
+  hashAuthorizationEntry,
+  requiresAddressAuthorization,
+  getAddressAuthEntries,
+} from './Authorization.js'
+export type {
+  CategorizedAuthEntry,
+  AuthorizationWalletAdapter,
+  AttachAuthorizationOptions,
+  SignAuthorizationEntriesOptions,
+} from './Authorization.js'
+export {
   isRestoreResponse,
   isSuccessResponse,
   isErrorResponse,
