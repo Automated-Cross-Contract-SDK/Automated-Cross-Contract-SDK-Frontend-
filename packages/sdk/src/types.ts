@@ -15,6 +15,19 @@ export interface SorobanResurrectConfig {
   restoreFeeMultiplier?: number
   /** Method for detecting archived keys: 'simulation' (default) or 'direct'. */
   archiveDetectionMethod?: 'simulation' | 'direct'
+  /**
+   * Whether to enable CAP-0046 fine-grained authorization support.
+   *
+   * When `true`, the SDK will inspect simulation results for address-based
+   * `SorobanAuthorizationEntry` items and call the wallet's `signAuthEntry`
+   * method (if provided) for each one before assembling the final transaction.
+   *
+   * Defaults to `false` for backwards compatibility. Enable this for contracts
+   * that use cross-contract calls with fine-grained authorization.
+   *
+   * @see https://github.com/stellar/stellar-protocol/blob/master/core/cap-0046.md
+   */
+  enableFineGrainedAuth?: boolean
 }
 
 /** Wallet interface that wraps browser or extension wallets (e.g. Freighter). */
@@ -61,6 +74,31 @@ export interface SubmitWithRestoreOptions {
   transaction: Transaction
   /** Wallet adapter used for signing. */
   wallet: WalletAdapter
+  /**
+   * Called at the very beginning of the restore workflow, before simulation.
+   * Useful for showing a loading indicator immediately when the user triggers an action.
+   */
+  onRestoreStart?: () => void
+  /**
+   * Called when the entire restore-and-submit workflow completes successfully.
+   * Fired after the original transaction has been submitted and confirmed.
+   */
+  onRestoreComplete?: (result: { restoreTxHash: string; originalTxHash: string }) => void
+  /**
+   * Called just before the original transaction is rebuilt after a successful
+   * restore confirmation. Useful for showing a "rebuilding transaction…" status.
+   */
+  onOriginalRebuilding?: () => void
+  /**
+   * Called after the original transaction has been successfully rebuilt and
+   * assembled with fresh simulation data, ready for signing.
+   */
+  onOriginalRebuilt?: () => void
+  /**
+   * Called on each polling tick while waiting for a transaction to confirm.
+   * Receives the transaction hash and attempt number (1-indexed).
+   */
+  onConfirming?: (txHash: string, attempt: number) => void
   /** Called when restore transaction is ready to be signed. */
   onSigningRestore?: () => void
   /** Called after restore transaction is signed and being submitted. */

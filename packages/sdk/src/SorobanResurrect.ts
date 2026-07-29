@@ -10,7 +10,7 @@ import {
 import { executeWithRestore } from './Executor.js'
 import { isRestoreResponse, extractArchivedKeys } from './Archiver.js'
 import { buildRestoreTransaction } from './Restorer.js'
-import { DEFAULT_NETWORK_PASSPHRASE, POLL_INTERVAL_MS, POLL_TIMEOUT_MS, KNOWN_NETWORK_PASSPHRASES } from './constants.js'
+import { DEFAULT_NETWORK_PASSPHRASE, POLL_INTERVAL_MS, POLL_TIMEOUT_MS, KNOWN_NETWORK_PASSPHRASES, RESTORE_FEE_MULTIPLIER } from './constants.js'
 
 /**
  * Main facade for the Soroban-Resurrect SDK.
@@ -58,6 +58,7 @@ export class SorobanResurrect {
       pollTimeoutMs: config.pollTimeoutMs ?? POLL_TIMEOUT_MS,
       restoreFeeMultiplier: config.restoreFeeMultiplier ?? RESTORE_FEE_MULTIPLIER,
       archiveDetectionMethod: config.archiveDetectionMethod ?? 'simulation',
+      enableFineGrainedAuth: config.enableFineGrainedAuth ?? false,
     }
   }
 
@@ -247,13 +248,44 @@ export class SorobanResurrect {
    * published to all registered listeners.
    */
   async submitWithRestore(options: SubmitWithRestoreOptions): Promise<ResurrectResult> {
-    const { transaction, wallet, onRestoreFailed, onSigningRestore, onSubmittingRestore, onSigningOriginal, ...callbacks } = options
+    const {
+      transaction,
+      wallet,
+      onRestoreStart,
+      onRestoreComplete,
+      onOriginalRebuilding,
+      onOriginalRebuilt,
+      onConfirming,
+      onRestoreFailed,
+      onSigningRestore,
+      onSubmittingRestore,
+      onSigningOriginal,
+      ...callbacks
+    } = options
 
     const result = await executeWithRestore({
       server: this.server,
       transaction,
       wallet,
       config: this.config,
+      onRestoreStart: () => {
+        this.setState('simulating', 'Starting restore workflow...')
+        onRestoreStart?.()
+      },
+      onRestoreComplete: (info) => {
+        onRestoreComplete?.(info)
+      },
+      onOriginalRebuilding: () => {
+        this.setState('signing_original', 'Rebuilding original transaction...')
+        onOriginalRebuilding?.()
+      },
+      onOriginalRebuilt: () => {
+        onOriginalRebuilt?.()
+      },
+      onConfirming: (txHash, attempt) => {
+        this.setState('confirming_restore', `Confirming transaction (attempt ${attempt})...`)
+        onConfirming?.(txHash, attempt)
+      },
       onSigningRestore: () => {
         this.setState('signing_restore', 'Signing restore transaction...')
         onSigningRestore?.()
@@ -266,11 +298,6 @@ export class SorobanResurrect {
         this._lastArchivedKeys = keys
         this.setState('restore_needed', `Detected ${keys.length} archived ledger entries`)
         callbacks.onRestoreNeeded?.(keys)
-      },
-      // Wallet is about to prompt the user to sign the restore tx —
-      // surface this so the UI can show a signing indicator.
-      onSigningRestore: () => {
-        this.setState('signing_restore', 'Awaiting wallet signature for restore transaction...')
       },
       onRestoreSubmitted: (txHash) => {
         this.setState('confirming_restore', 'Waiting for restore confirmation...')
