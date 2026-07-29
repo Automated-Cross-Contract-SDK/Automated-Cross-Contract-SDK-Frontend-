@@ -408,7 +408,18 @@ export class SorobanResurrect {
    * ```
    */
   async submitWithRestore(options: SubmitWithRestoreOptions): Promise<ResurrectResult> {
-    const { transaction, wallet, onRestoreFailed, onSigningRestore, onSubmittingRestore, onSigningOriginal, ...callbacks } = options
+    const {
+      transaction,
+      wallet,
+      onRestoreNeeded,
+      onSigningRestore,
+      onSubmittingRestore,
+      onRestoreSubmitted,
+      onRestoreConfirmed,
+      onSigningOriginal,
+      onOriginalSubmitted,
+      onRestoreFailed,
+    } = options
 
     const result = await executeWithRestore({
       server: this.server,

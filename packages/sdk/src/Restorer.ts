@@ -150,12 +150,12 @@ export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
   const envelopeType = envelope.switch()
 
   // Handle fee-bump transactions: extract the inner transaction first
-  if (envelopeType === xdr.EnvelopeType.envelopeTypeTxFeeBump()) {
+  if (envelopeType.name === 'envelopeTypeTxFeeBump') {
     const feeBumpEnvelope = envelope.value() as xdr.FeeBumpTransactionEnvelope
     const innerEnvelope = feeBumpEnvelope.tx().innerTx()
     const innerType = innerEnvelope.switch()
 
-    if (innerType === xdr.EnvelopeType.envelopeTypeTxV0()) {
+    if (innerType.name === 'envelopeTypeTxV0') {
       // For V0 inner transaction, cast through unknown to handle type differences
       const innerV0 = innerEnvelope.value() as unknown as xdr.TransactionV0Envelope
       return innerV0.tx().operations()
@@ -170,7 +170,7 @@ export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
   }
 
   // Handle regular V0 transactions
-  if (envelopeType === xdr.EnvelopeType.envelopeTypeTxV0()) {
+  if (envelopeType.name === 'envelopeTypeTxV0') {
     const v0Envelope = envelope.value() as xdr.TransactionV0Envelope
     return v0Envelope.tx().operations()
   }
