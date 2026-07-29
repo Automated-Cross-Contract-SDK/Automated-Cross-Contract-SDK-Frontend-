@@ -9,6 +9,9 @@ export {
   detectArchivedEntries,
   detectArchivedKeysViaSimulation,
   detectArchivedKeysViaDirect,
+  buildContractDataKey,
+  checkArchivedContractData,
+  getContractDataEntry,
 } from './Archiver.js'
 export {
   buildRestoreTransaction,
@@ -17,6 +20,8 @@ export {
   waitForTransactionSSE,
   prepareTransaction,
   extractXdrOperations,
+  buildFeeBumpTransaction,
+  submitFeeBumpTransaction,
 } from './Restorer.js'
 export { SimulationCache } from './SimulationCache.js'
 export {
@@ -31,6 +36,8 @@ export {
 export type {
   SorobanResurrectConfig,
   WalletAdapter,
+  FeeBumpSponsor,
+  FeeBumpConfig,
   ArchivedLedgerEntry,
   SimulateResponse,
   ResurrectResult,

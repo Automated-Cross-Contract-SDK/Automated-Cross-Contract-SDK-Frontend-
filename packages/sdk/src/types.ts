@@ -64,6 +64,40 @@ export interface WalletAdapter {
   ): Promise<string>
 }
 
+/**
+ * Sponsor interface for fee-bump transactions.
+ * A fee-bump sponsor pays the transaction fees on behalf of the user
+ * by wrapping the inner (user-signed) transaction in a fee-bump envelope.
+ */
+export interface FeeBumpSponsor {
+  /** Returns the sponsor's public key (the account that pays the fee). */
+  getPublicKey(): Promise<string>
+  /**
+   * Signs a fee-bump transaction XDR string.
+   * The provided XDR is a fully constructed FeeBumpTransaction envelope
+   * wrapping the user-signed inner transaction.
+   */
+  signFeeBump(
+    txXdr: string,
+    opts?: { networkPassphrase?: string },
+  ): Promise<string>
+}
+
+/**
+ * Configuration for fee-bump transactions.
+ * When provided, the restore and/or original transactions will be wrapped
+ * in fee-bump envelopes so the sponsor pays the fees.
+ */
+export interface FeeBumpConfig {
+  /** The fee-bump sponsor who will sign and pay the fees. */
+  sponsor: FeeBumpSponsor
+  /**
+   * Optional custom fee for the fee-bump wrapper (in stroops).
+   * If not provided, defaults to the inner transaction's fee.
+   */
+  feeBumpFee?: string
+}
+
 /** Represents a single ledger entry that has been archived (expired TTL). */
 export interface ArchivedLedgerEntry {
   /** The raw ledger key. */
@@ -99,6 +133,11 @@ export interface SubmitWithRestoreOptions {
   transaction: Transaction
   /** Wallet adapter used for signing. */
   wallet: WalletAdapter
+  /**
+   * Optional fee-bump configuration. When provided, transactions are wrapped
+   * in fee-bump envelopes so the sponsor pays fees on behalf of the user.
+   */
+  feeBumpConfig?: FeeBumpConfig
   /** Called when restore transaction is ready to be signed. */
   onSigningRestore?: () => void
   /** Called after restore transaction is signed and being submitted. */

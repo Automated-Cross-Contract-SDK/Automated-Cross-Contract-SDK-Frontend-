@@ -510,6 +510,9 @@ export class SorobanResurrect {
         this._emitter.emit('error', error)
         onRestoreFailed?.(error)
       },
+      onSigningFeeBump: () => {
+        this.setState('signing_restore', 'Awaiting sponsor signature for fee-bump...')
+      },
     })
 
     if (!result.success) {
