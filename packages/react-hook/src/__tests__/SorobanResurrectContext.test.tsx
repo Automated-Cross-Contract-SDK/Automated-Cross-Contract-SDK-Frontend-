@@ -170,6 +170,18 @@ describe('SorobanResurrectProvider', () => {
     expect(result.current.resurrect).not.toBeNull()
   })
 
+  it('passes the exact SDK instance created for the provider to consumers', () => {
+    const { result } = renderHook(() => useSorobanResurrectContext(), {
+      wrapper: ({ children }) => (
+        <SorobanResurrectProvider config={testConfig}>{children}</SorobanResurrectProvider>
+      ),
+    })
+
+    const mockedConstructor = vi.mocked(SorobanResurrect)
+    expect(mockedConstructor).toHaveBeenCalledWith(testConfig)
+    expect(result.current.resurrect).toBe(mockedConstructor.mock.results[0].value)
+  })
+
   it('exposes submitWithRestore method', async () => {
     mockSubmitWithRestore.mockResolvedValue({
       success: true,

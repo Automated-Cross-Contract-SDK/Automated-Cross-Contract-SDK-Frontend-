@@ -1,7 +1,19 @@
 import { Transaction, xdr } from '@stellar/stellar-sdk'
 import { rpc } from '@stellar/stellar-sdk'
 
-/** Configuration options for creating a SorobanResurrect instance. */
+/**
+ * Configuration options for creating a SorobanResurrect instance.
+ *
+ * @see {@link SorobanResurrect} — the class this config is passed to.
+ *
+ * @example
+ * ```ts
+ * const config: SorobanResurrectConfig = {
+ *   rpcUrl: 'https://soroban-testnet.stellar.org',
+ *   networkPassphrase: Networks.TESTNET,
+ * }
+ * ```
+ */
 export interface SorobanResurrectConfig {
   /** URL of the Soroban RPC endpoint. */
   rpcUrl: string
@@ -11,26 +23,35 @@ export interface SorobanResurrectConfig {
   pollIntervalMs?: number
   /** Timeout in ms when waiting for transaction confirmation. */
   pollTimeoutMs?: number
-  /** Multiplier applied to minResourceFee when building a restore transaction (defaults to 100). */
+  /**
+   * Multiplier applied to minResourceFee when building a restore transaction.
+   * Defaults to 3 (3x the base fee). Use higher values (e.g. 5) if restore tx
+   * fails to include during congestion, or lower values (e.g. 2) for lower fees.
+   * Must be >= 1.
+   */
   restoreFeeMultiplier?: number
   /** Method for detecting archived keys: 'simulation' (default) or 'direct'. */
   archiveDetectionMethod?: 'simulation' | 'direct'
-  /**
-   * Whether to enable CAP-0046 fine-grained authorization support.
-   *
-   * When `true`, the SDK will inspect simulation results for address-based
-   * `SorobanAuthorizationEntry` items and call the wallet's `signAuthEntry`
-   * method (if provided) for each one before assembling the final transaction.
-   *
-   * Defaults to `false` for backwards compatibility. Enable this for contracts
-   * that use cross-contract calls with fine-grained authorization.
-   *
-   * @see https://github.com/stellar/stellar-protocol/blob/master/core/cap-0046.md
-   */
-  enableFineGrainedAuth?: boolean
+  /** Enable simulation cache to reuse results and reduce RPC calls (default: false). */
+  enableSimulationCache?: boolean
+  /** Use SSE-based transaction status waiting when available (default: false). */
+  useSSE?: boolean
 }
 
-/** Wallet interface that wraps browser or extension wallets (e.g. Freighter). */
+/**
+ * Wallet interface that wraps browser or extension wallets (e.g. Freighter).
+ *
+ * @see {@link SubmitWithRestoreOptions.wallet}
+ *
+ * @example
+ * ```ts
+ * const wallet: WalletAdapter = {
+ *   isConnected: async () => freighter.isConnected(),
+ *   getPublicKey: async () => (await freighter.getAddress()).address,
+ *   signTransaction: (xdr, opts) => freighter.signTransaction(xdr, opts),
+ * }
+ * ```
+ */
 export interface WalletAdapter {
   /** Returns whether the wallet is connected. */
   isConnected(): Promise<boolean>
@@ -41,6 +62,40 @@ export interface WalletAdapter {
     tx: string,
     opts?: { networkPassphrase?: string; network?: string },
   ): Promise<string>
+}
+
+/**
+ * Sponsor interface for fee-bump transactions.
+ * A fee-bump sponsor pays the transaction fees on behalf of the user
+ * by wrapping the inner (user-signed) transaction in a fee-bump envelope.
+ */
+export interface FeeBumpSponsor {
+  /** Returns the sponsor's public key (the account that pays the fee). */
+  getPublicKey(): Promise<string>
+  /**
+   * Signs a fee-bump transaction XDR string.
+   * The provided XDR is a fully constructed FeeBumpTransaction envelope
+   * wrapping the user-signed inner transaction.
+   */
+  signFeeBump(
+    txXdr: string,
+    opts?: { networkPassphrase?: string },
+  ): Promise<string>
+}
+
+/**
+ * Configuration for fee-bump transactions.
+ * When provided, the restore and/or original transactions will be wrapped
+ * in fee-bump envelopes so the sponsor pays the fees.
+ */
+export interface FeeBumpConfig {
+  /** The fee-bump sponsor who will sign and pay the fees. */
+  sponsor: FeeBumpSponsor
+  /**
+   * Optional custom fee for the fee-bump wrapper (in stroops).
+   * If not provided, defaults to the inner transaction's fee.
+   */
+  feeBumpFee?: string
 }
 
 /** Represents a single ledger entry that has been archived (expired TTL). */
@@ -54,7 +109,11 @@ export interface ArchivedLedgerEntry {
 /** Convenience alias for the Soroban RPC simulate response type. */
 export type SimulateResponse = rpc.Api.SimulateTransactionResponse
 
-/** Result returned from the restore-and-submit workflow. */
+/**
+ * Result returned from the restore-and-submit workflow.
+ *
+ * @see {@link SorobanResurrect.submitWithRestore}
+ */
 export interface ResurrectResult {
   /** Whether the full transaction lifecycle succeeded. */
   success: boolean
@@ -75,30 +134,10 @@ export interface SubmitWithRestoreOptions {
   /** Wallet adapter used for signing. */
   wallet: WalletAdapter
   /**
-   * Called at the very beginning of the restore workflow, before simulation.
-   * Useful for showing a loading indicator immediately when the user triggers an action.
+   * Optional fee-bump configuration. When provided, transactions are wrapped
+   * in fee-bump envelopes so the sponsor pays fees on behalf of the user.
    */
-  onRestoreStart?: () => void
-  /**
-   * Called when the entire restore-and-submit workflow completes successfully.
-   * Fired after the original transaction has been submitted and confirmed.
-   */
-  onRestoreComplete?: (result: { restoreTxHash: string; originalTxHash: string }) => void
-  /**
-   * Called just before the original transaction is rebuilt after a successful
-   * restore confirmation. Useful for showing a "rebuilding transaction…" status.
-   */
-  onOriginalRebuilding?: () => void
-  /**
-   * Called after the original transaction has been successfully rebuilt and
-   * assembled with fresh simulation data, ready for signing.
-   */
-  onOriginalRebuilt?: () => void
-  /**
-   * Called on each polling tick while waiting for a transaction to confirm.
-   * Receives the transaction hash and attempt number (1-indexed).
-   */
-  onConfirming?: (txHash: string, attempt: number) => void
+  feeBumpConfig?: FeeBumpConfig
   /** Called when restore transaction is ready to be signed. */
   onSigningRestore?: () => void
   /** Called after restore transaction is signed and being submitted. */
@@ -117,7 +156,13 @@ export interface SubmitWithRestoreOptions {
   onRestoreFailed?: (error: string) => void
 }
 
-/** Tracks the current stage of the restore-and-submit workflow. */
+/**
+ * Tracks the current stage of the restore-and-submit workflow.
+ *
+ * See {@link SorobanResurrect.onStateChange} for how to subscribe to
+ * transitions between these states, and `ARCHITECTURE.md` in the repo
+ * root for the full state diagram.
+ */
 export type RestoreState =
   | 'idle'
   | 'simulating'
@@ -140,4 +185,25 @@ export interface RestoreStateInfo {
   archivedKeys?: ArchivedLedgerEntry[]
   /** Error message (only set in error state). */
   error?: string
+}
+
+/**
+ * Typed events emitted by SorobanResurrect for specific workflow transitions,
+ * in addition to the general-purpose `onStateChange` observer.
+ */
+export interface SorobanResurrectEvents {
+  /** Fired on every state transition (mirrors `onStateChange`). */
+  stateChange: RestoreStateInfo
+  /** Fired when archived entries are detected and restoration is required. */
+  restoreNeeded: ArchivedLedgerEntry[]
+  /** Fired after the restore transaction is submitted, with its tx hash. */
+  restoreSubmitted: string
+  /** Fired after the restore transaction is confirmed on-chain, with its tx hash. */
+  restoreConfirmed: string
+  /** Fired after the original transaction is submitted, with its tx hash. */
+  originalSubmitted: string
+  /** Fired once the full restore-and-submit workflow finishes, with the result. */
+  restoreComplete: ResurrectResult
+  /** Fired when the workflow fails, with the error message. */
+  error: string
 }

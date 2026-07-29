@@ -14,7 +14,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsup",
     "clean": "rm -rf dist",
     "test": "vitest run",
     "test:watch": "vitest"
@@ -26,12 +26,18 @@
     "@stellar/stellar-sdk": "^12.0.0",
     "react": "^18.0.0"
   },
+  "peerDependenciesMeta": {
+    "react-native": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@testing-library/dom": "^10.4.0",
     "@testing-library/react": "^16.3.2",
     "@types/react": "^18.3.0",
     "jsdom": "^29.1.1",
     "react": "^18.3.0",
+    "tsup": "^8.5.1",
     "typescript": "^5.5.0",
     "vitest": "^2.1.9"
   }
