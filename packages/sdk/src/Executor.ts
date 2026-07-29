@@ -187,6 +187,9 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
 
   const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
 
+  // Signal workflow start
+  onRestoreStart?.()
+
   try {
     const simResponse = await simulateWithCache(server, originalTx, simulationCache)
 
@@ -216,7 +219,6 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       }
 
       const publicKey = await wallet.getPublicKey()
-
       const account = await server.getAccount(publicKey)
 
       const restoreTx = await buildRestoreTransaction({
