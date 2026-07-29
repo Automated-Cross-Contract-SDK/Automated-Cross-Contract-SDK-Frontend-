@@ -19,3 +19,24 @@ export const KNOWN_NETWORK_PASSPHRASES = [
   'Public Global Stellar Network ; September 2015', // Mainnet
   'Test SDF Future Network ; September 2015', // Futurenet
 ]
+
+/** Known Soroban RPC URL to passphrase mapping for common endpoints. */
+export const URL_TO_PASSPHRASE: Record<string, string> = {
+  'soroban-testnet.stellar.org': 'Test SDF Network ; September 2015',
+  'soroban-mainnet.stellar.org': 'Public Global Stellar Network ; September 2015',
+  'futurenet.stellar.org': 'Test SDF Future Network ; September 2015',
+  'localhost': 'Test SDF Network ; September 2015',
+}
+
+/**
+ * Maps common RPC URLs to their network passphrases.
+ * Users can extend this to add custom RPC endpoints.
+ */
+export function resolveNetworkPassphrase(rpcUrl: string): string | undefined {
+  try {
+    const host = new URL(rpcUrl).hostname
+    return URL_TO_PASSPHRASE[host]
+  } catch {
+    return undefined
+  }
+}

@@ -6,11 +6,20 @@ import {
   ArchivedLedgerEntry,
   ResurrectResult,
   SubmitWithRestoreOptions,
+  WalletAdapter,
 } from './types.js'
-import { executeWithRestore } from './Executor.js'
+import { executeWithRestore, sendTransaction } from './Executor.js'
 import { isRestoreResponse, extractArchivedKeys } from './Archiver.js'
 import { buildRestoreTransaction } from './Restorer.js'
-import { DEFAULT_NETWORK_PASSPHRASE, POLL_INTERVAL_MS, POLL_TIMEOUT_MS, KNOWN_NETWORK_PASSPHRASES } from './constants.js'
+import {
+  DEFAULT_NETWORK_PASSPHRASE,
+  POLL_INTERVAL_MS,
+  POLL_TIMEOUT_MS,
+  RESTORE_FEE_MULTIPLIER,
+  KNOWN_NETWORK_PASSPHRASES,
+  resolveNetworkPassphrase,
+} from './constants.js'
+import { SimulationCache } from './SimulationCache.js'
 
 /**
  * Main facade for the Soroban-Resurrect SDK.
@@ -37,20 +46,30 @@ export class SorobanResurrect {
   private _lastError: string | undefined
   private _lastArchivedKeys: ArchivedLedgerEntry[] = []
   private _listeners: Array<(info: RestoreStateInfo) => void> = []
+  private _simulationCache: SimulationCache | undefined
 
   constructor(config: SorobanResurrectConfig) {
     this.server = new rpc.Server(config.rpcUrl)
-    const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
-    
+
+    const networkPassphrase =
+      config.networkPassphrase ??
+      resolveNetworkPassphrase(config.rpcUrl) ??
+      DEFAULT_NETWORK_PASSPHRASE
+
     // Validate network passphrase against known networks
     if (!KNOWN_NETWORK_PASSPHRASES.includes(networkPassphrase)) {
       console.warn(
         `Warning: Unknown network passphrase "${networkPassphrase}". ` +
-        `Known networks: ${KNOWN_NETWORK_PASSPHRASES.join(', ')}. ` +
-        `Transactions may fail with cryptic errors if the passphrase is incorrect.`,
+          `Known networks: ${KNOWN_NETWORK_PASSPHRASES.join(', ')}. ` +
+          `Transactions may fail with cryptic errors if the passphrase is incorrect.`,
       )
     }
-    
+
+    // Initialize the simulation cache if enabled
+    if (config.enableSimulationCache) {
+      this._simulationCache = new SimulationCache()
+    }
+
     this.config = {
       rpcUrl: config.rpcUrl,
       networkPassphrase,
@@ -58,7 +77,9 @@ export class SorobanResurrect {
       pollTimeoutMs: config.pollTimeoutMs ?? POLL_TIMEOUT_MS,
       restoreFeeMultiplier: config.restoreFeeMultiplier ?? RESTORE_FEE_MULTIPLIER,
       archiveDetectionMethod: config.archiveDetectionMethod ?? 'simulation',
-    }
+      enableSimulationCache: config.enableSimulationCache ?? false,
+      useSSE: config.useSSE ?? false,
+    } as Required<SorobanResurrectConfig>
   }
 
   /** Current workflow state. */
@@ -125,10 +146,26 @@ export class SorobanResurrect {
   /**
    * Simulates a transaction on the Soroban RPC endpoint.
    * Updates internal state to 'simulating'.
+   *
+   * If the simulation cache is enabled, cached results are reused
+   * when the same logical transaction is simulated again.
    */
   async simulate(transaction: Transaction) {
     this.setState('simulating', 'Simulating transaction...')
+
+    if (this._simulationCache) {
+      const cached = this._simulationCache.get(transaction)
+      if (cached) {
+        return cached
+      }
+    }
+
     const response = await this.server.simulateTransaction(transaction)
+
+    if (this._simulationCache) {
+      this._simulationCache.set(transaction, response)
+    }
+
     return response
   }
 
@@ -239,6 +276,24 @@ export class SorobanResurrect {
   }
 
   /**
+   * Signs and submits a transaction directly, without automatic archive
+   * restoration. This is a lighter-weight alternative to `submitWithRestore`
+   * for transactions known not to require restoration.
+   *
+   * If you want automatic detection and restoration, use `submitWithRestore`.
+   *
+   * @param transaction - The Soroban transaction to sign and submit
+   * @param wallet - Wallet adapter used for signing
+   * @returns A result object with the transaction hash on success
+   */
+  async sendTransaction(
+    transaction: Transaction,
+    wallet: WalletAdapter,
+  ): Promise<ResurrectResult> {
+    return sendTransaction(this.server, transaction, wallet, this.config)
+  }
+
+  /**
    * Submits a transaction with automatic archive restoration.
    *
    * If the simulation detects archived entries, a restore transaction
@@ -254,6 +309,7 @@ export class SorobanResurrect {
       transaction,
       wallet,
       config: this.config,
+      simulationCache: this._simulationCache,
       onSigningRestore: () => {
         this.setState('signing_restore', 'Signing restore transaction...')
         onSigningRestore?.()
@@ -266,11 +322,6 @@ export class SorobanResurrect {
         this._lastArchivedKeys = keys
         this.setState('restore_needed', `Detected ${keys.length} archived ledger entries`)
         callbacks.onRestoreNeeded?.(keys)
-      },
-      // Wallet is about to prompt the user to sign the restore tx —
-      // surface this so the UI can show a signing indicator.
-      onSigningRestore: () => {
-        this.setState('signing_restore', 'Awaiting wallet signature for restore transaction...')
       },
       onRestoreSubmitted: (txHash) => {
         this.setState('confirming_restore', 'Waiting for restore confirmation...')
@@ -302,5 +353,20 @@ export class SorobanResurrect {
     }
 
     return result
+  }
+
+  /**
+   * Auto-detects the network passphrase by calling `getNetwork()` on the
+   * Soroban RPC server. Returns the resolved passphrase.
+   *
+   * This can be used to verify the current network or to set the passphrase
+   * automatically without manual configuration.
+   *
+   * @returns The network passphrase string
+   * @throws If the RPC call fails
+   */
+  async detectNetworkPassphrase(): Promise<string> {
+    const network = await this.server.getNetwork()
+    return network.passphrase
   }
 }
