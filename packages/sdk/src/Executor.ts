@@ -5,6 +5,7 @@ import {
   FeeBumpConfig,
   ArchivedLedgerEntry,
   ResurrectResult,
+  DryRunResult,
 } from './types.js'
 import {
   isRestoreResponse,
@@ -204,6 +205,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       onRestoreFailed?.(err)
       return { success: false, archivedKeysDetected: 0, error: err }
     }
+    // ─────────────────────────────────────────────────────────────────────────
 
     if (isRestoreResponse(simResponse)) {
       const archivedKeys = extractArchivedKeys(simResponse)

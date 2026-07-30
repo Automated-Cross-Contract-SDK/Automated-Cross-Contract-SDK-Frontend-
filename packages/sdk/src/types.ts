@@ -125,6 +125,30 @@ export interface ResurrectResult {
   archivedKeysDetected: number
   /** Error message if the workflow failed. */
   error?: string
+  /** True when the result came from a dry-run (no transactions submitted). */
+  dryRun?: boolean
+  /** Detailed dry-run information (present when dryRun is true). */
+  dryRunResult?: DryRunResult
+}
+
+/**
+ * Detailed result of a dry-run simulation.
+ *
+ * Contains all information that would be needed to decide whether to
+ * proceed with the real submission — without having signed or submitted
+ * anything to the network.
+ */
+export interface DryRunResult {
+  /** Whether the transaction would require a restore before submission. */
+  wouldNeedRestore: boolean
+  /** Number of archived ledger entries detected. */
+  archivedKeysDetected: number
+  /** The archived ledger entries that would need to be restored. */
+  archivedKeys: ArchivedLedgerEntry[]
+  /** Estimated restore transaction fee (in stroops, as a string). Present when restore is needed. */
+  estimatedRestoreFee?: string
+  /** Simulation error message, if simulation itself failed. */
+  simulationError?: string
 }
 
 /** Options for submitting a transaction with automatic archive restoration. */
