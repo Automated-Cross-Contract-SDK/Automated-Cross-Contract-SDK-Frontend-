@@ -258,3 +258,117 @@ export async function detectArchivedKeysViaDirect(
 
   return detectArchivedEntries(server, readWrite)
 }
+
+/**
+ * Builds a ContractData ledger key for a given contract ID and storage key.
+ * This is used to query specific contract data entries on the ledger.
+ *
+ * @param contractId - The Stellar contract ID string (e.g. "CCJZ5...").
+ * @param key - The storage key as an xdr.ScVal.
+ * @param keyType - The durability of the storage entry (persistent or temporary).
+ * @returns An xdr.LedgerKey for the ContractData entry.
+ */
+export function buildContractDataKey(
+  contractId: string,
+  key: xdr.ScVal,
+  keyType: 'persistent' | 'temporary' = 'persistent',
+): xdr.LedgerKey {
+  // Convert hex contract ID string to bytes
+  const contractBytes = new Uint8Array(
+    (contractId.match(/.{1,2}/g) ?? []).map((b) => parseInt(b, 16)),
+  )
+
+  const contractAddress = {
+    switch: () => xdr.ScAddressType.scAddressTypeContract(),
+    contractId: contractBytes,
+  } as unknown as xdr.ScAddress
+
+  const contractData = {
+    contract: contractAddress,
+    key,
+    durability:
+      keyType === 'temporary'
+        ? xdr.ContractDataDurability.temporary()
+        : xdr.ContractDataDurability.persistent(),
+  } as unknown as xdr.LedgerKeyContractData
+
+  return {
+    type: xdr.LedgerEntryType.contractData(),
+    contractData,
+  } as unknown as xdr.LedgerKey
+}
+
+/**
+ * Checks whether a specific contract data entry is archived (expired / not found
+ * on the ledger). This is a targeted utility for dApp developers who want to
+ * check specific storage slots without simulating a full transaction.
+ *
+ * @param server - Soroban RPC server instance.
+ * @param contractId - The Stellar contract ID string.
+ * @param key - The storage key as an xdr.ScVal.
+ * @param keyType - The durability of the storage entry (persistent or temporary).
+ * @returns `true` if the entry is archived (not found), `false` if it exists.
+ *
+ * @example
+ * ```ts
+ * import { xdr } from '@stellar/stellar-sdk'
+ * const isArchived = await checkArchivedContractData(
+ *   server,
+ *   'CCJZ5DGASBWQXR5G4GXEJM2Q4FI5L3QJ6TQ3QFJTQH7GJ6KJ3J2Q2K2Q',
+ *   xdr.ScVal.scvSymbol('Balance'),
+ *   'persistent',
+ * )
+ * ```
+ */
+export async function checkArchivedContractData(
+  server: rpc.Server,
+  contractId: string,
+  key: xdr.ScVal,
+  keyType: 'persistent' | 'temporary' = 'persistent',
+): Promise<boolean> {
+  const ledgerKey = buildContractDataKey(contractId, key, keyType)
+  const archived = await detectArchivedEntries(server, [ledgerKey])
+  return archived.length > 0
+}
+
+/**
+ * Retrieves a specific contract data entry from the ledger.
+ * Returns the ledger entry data if it exists, or `null` if archived / not found.
+ *
+ * @param server - Soroban RPC server instance.
+ * @param contractId - The Stellar contract ID string.
+ * @param key - The storage key as an xdr.ScVal.
+ * @param keyType - The durability of the storage entry (persistent or temporary).
+ * @returns The ledger entry if found, otherwise `null`.
+ *
+ * @example
+ * ```ts
+ * import { xdr } from '@stellar/stellar-sdk'
+ * const entry = await getContractDataEntry(
+ *   server,
+ *   'CCJZ5DGASBWQXR5G4GXEJM2Q4FI5L3QJ6TQ3QFJTQH7GJ6KJ3J2Q2K2Q',
+ *   xdr.ScVal.scvSymbol('Balance'),
+ * )
+ * if (entry) {
+ *   console.log('Entry exists:', entry.key.toXDR('base64'))
+ * }
+ * ```
+ */
+export async function getContractDataEntry(
+  server: rpc.Server,
+  contractId: string,
+  key: xdr.ScVal,
+  keyType: 'persistent' | 'temporary' = 'persistent',
+): Promise<rpc.Api.LedgerEntryResult | null> {
+  const ledgerKey = buildContractDataKey(contractId, key, keyType)
+
+  try {
+    const result = await server.getLedgerEntries(ledgerKey)
+    if (result.entries && result.entries.length > 0) {
+      return result.entries[0]
+    }
+    return null
+  } catch {
+    return null
+  }
+}
