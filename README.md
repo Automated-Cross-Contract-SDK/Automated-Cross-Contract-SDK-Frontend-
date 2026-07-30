@@ -1,5 +1,13 @@
 # Soroban-Resurrect
 
+[![npm sdk version](https://img.shields.io/npm/v/%40soroban-resurrect%2Fsdk?label=%40soroban-resurrect%2Fsdk)](https://www.npmjs.com/package/@soroban-resurrect/sdk)
+[![npm react-hook version](https://img.shields.io/npm/v/%40soroban-resurrect%2Freact-hook?label=%40soroban-resurrect%2Freact-hook)](https://www.npmjs.com/package/@soroban-resurrect/react-hook)
+[![CI](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/actions/workflows/ci.yml/badge.svg)](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/codecov/c/github/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-)](https://codecov.io/gh/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-?style=social)](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/stargazers)
+[![GitHub issues](https://img.shields.io/github/issues/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-)](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/issues)
+
 **Automated Cross-Contract State Restoration SDK & Wallet Middleware**
 
 Soroban-Resurrect solves the "archived ledger entry" problem for Soroban dApps. When a user's persistent data (token balance, loan position, etc.) expires due to TTL rent, their transaction fails with a cryptic error. This SDK automatically detects archived entries via CAP-0066 and seamlessly restores them before submitting the user's intended transaction.
@@ -30,10 +38,12 @@ Soroban-Resurrect solves the "archived ledger entry" problem for Soroban dApps. 
 
 ## Packages
 
-| Package                         | Description                                                                                            |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `@soroban-resurrect/sdk`        | Core TypeScript SDK — wraps Soroban RPC, detects archived keys, builds & executes restore transactions |
-| `@soroban-resurrect/react-hook` | React context provider + hook for easy dApp integration                                                |
+| Package                          | Description                                                                                            |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `@soroban-resurrect/sdk`         | Core TypeScript SDK — wraps Soroban RPC, detects archived keys, builds & executes restore transactions |
+| `@soroban-resurrect/react-hook`  | React context provider + hook for easy dApp integration (also React Native compatible)                 |
+| `@soroban-resurrect/vue-hook`    | Vue 3 composable for easy dApp integration                                                             |
+| `@soroban-resurrect/svelte-hook` | Svelte store for easy dApp integration                                                                 |
 
 ## Quick Start
 
@@ -129,9 +139,54 @@ function WithdrawButton() {
 }
 ```
 
+### 4. Vue 3 Composable
+
+```vue
+<script setup lang="ts">
+import { ref } from 'vue'
+import { useSorobanResurrect } from '@soroban-resurrect/vue-hook'
+
+const config = ref({ rpcUrl: 'https://soroban-testnet.stellar.org' })
+const { state, isProcessing, submitWithRestore, reset } = useSorobanResurrect(config)
+</script>
+
+<template>
+  <button @click="reset()" :disabled="isProcessing">
+    {{ isProcessing ? state.message : 'Withdraw' }}
+  </button>
+</template>
+```
+
+### 5. Svelte Store
+
+```svelte
+<script>
+  import { onDestroy } from 'svelte'
+  import { writable } from 'svelte/store'
+  import { createSorobanResurrect } from '@soroban-resurrect/svelte-hook'
+
+  const config = writable({ rpcUrl: 'https://soroban-testnet.stellar.org' })
+  const { state, isProcessing, submitWithRestore, destroy } = createSorobanResurrect(config)
+
+  onDestroy(destroy)
+</script>
+
+<button on:click={() => submitWithRestore(tx, wallet)} disabled={$isProcessing}>
+  {$state.message || 'Withdraw'}
+</button>
+```
+
+### React Native
+
+All hooks in `@soroban-resurrect/react-hook` use only standard React APIs (`useState`, `useCallback`, `useRef`, `useEffect`) and contain no browser-specific code, making them fully compatible with React Native out of the box. See `examples/react-native/` for a complete example.
+
 ---
 
 ## Architecture
+
+> For the full picture — system diagram, data flow, state machine, and
+> component interaction, all with Mermaid diagrams — see
+> [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ### CAP-0066 Restoration Flow
 
@@ -157,6 +212,11 @@ The SDK implements the complete [CAP-0066](https://github.com/stellar/stellar-pr
 
 ## API Reference
 
+> A more detailed reference — including `@throws` documentation and
+> cross-links between related methods — lives in
+> [`docs/API.md`](docs/API.md). Every public export also carries full
+> JSDoc in source.
+
 ### `SorobanResurrect` (SDK)
 
 ```typescript
@@ -173,7 +233,9 @@ simulate(transaction: Transaction): Promise<SimulateResponse>
 detectArchivedKeys(transaction: Transaction): Promise<ArchivedLedgerEntry[]>
 needsRestore(transaction: Transaction): Promise<boolean>
 buildRestoreTx(sourcePublicKey: string, transaction: Transaction): Promise<Transaction>
+estimateRestoreCost(transaction: Transaction): Promise<RestoreCostEstimate>
 submitWithRestore(options: SubmitWithRestoreOptions): Promise<ResurrectResult>
+reset(fromState?: RestoreState): void
 onStateChange(listener: (info: RestoreStateInfo) => void): () => void  // unsubscribe
 ```
 
@@ -193,7 +255,7 @@ useSorobanResurrectContext(): {
   isProcessing: boolean
   submitWithRestore(tx, wallet): Promise<ResurrectResult>
   detectArchivedKeys(tx): Promise<ArchivedLedgerEntry[]>
-  reset(): void
+  reset(fromState?: RestoreState): void
 }
 
 // Standalone Hook
@@ -256,7 +318,14 @@ npm run typecheck
 
 # Run example app
 npm run dev:example
+
+# Run the documentation site locally
+npm run docs:dev
 ```
+
+### Documentation Site
+
+The full documentation site (getting started guide, complete API reference, interactive examples, tutorial, and framework integration guides) lives in [`docs/`](./docs) and is built with [VitePress](https://vitepress.dev/). Run it locally with `npm run docs:dev`, or build the static site with `npm run docs:build`.
 
 ### Project Structure
 
@@ -288,6 +357,10 @@ npm run dev:example
 ```
 
 ---
+
+## Migrating
+
+See [MIGRATION.md](./MIGRATION.md) for breaking changes and upgrade steps between versions.
 
 ## License
 

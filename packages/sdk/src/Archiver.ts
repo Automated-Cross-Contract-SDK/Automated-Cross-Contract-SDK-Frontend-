@@ -6,7 +6,11 @@ import { ArchivedLedgerEntry, SimulateResponse } from './types.js'
  * Type guard — returns true if the simulation response indicates archived
  * ledger entries that need restoration.
  *
- * @param response - The simulation response to check.
+ * @param response - A {@link SimulateResponse} from `simulateTransaction`.
+ * @returns `true`, narrowing `response` to
+ *   `SimulateTransactionRestoreResponse`, if a restore is required.
+ * @see {@link extractArchivedKeys} to get the archived keys once this
+ *   returns `true`.
  */
 export function isRestoreResponse(
   response: SimulateResponse,
@@ -18,7 +22,12 @@ export function isRestoreResponse(
  * Type guard — returns true if the simulation response indicates a
  * successful simulation with no restore required.
  *
- * @param response - The simulation response to check.
+ * @param response - A {@link SimulateResponse} from `simulateTransaction`.
+ * @returns `true`, narrowing `response` to
+ *   `SimulateTransactionSuccessResponse`, if simulation succeeded and no
+ *   restore is needed.
+ * @see {@link extractFootprintFromSuccess} to read the footprint from a
+ *   success response.
  */
 export function isSuccessResponse(
   response: SimulateResponse,
@@ -29,7 +38,9 @@ export function isSuccessResponse(
 /**
  * Type guard — returns true if the simulation response indicates an error.
  *
- * @param response - The simulation response to check.
+ * @param response - A {@link SimulateResponse} from `simulateTransaction`.
+ * @returns `true`, narrowing `response` to
+ *   `SimulateTransactionErrorResponse`, if simulation failed.
  */
 export function isErrorResponse(
   response: SimulateResponse,
@@ -42,8 +53,19 @@ export function isErrorResponse(
  * The read-write entries in the transaction footprint represent the keys that
  * need to be restored.
  *
- * @param response - A restore-required simulation response.
- * @returns The archived ledger entries found in the response's footprint.
+ * @param response - A restore simulation response, as narrowed by
+ *   {@link isRestoreResponse}.
+ * @returns Array of {@link ArchivedLedgerEntry}. Empty if the response has
+ *   `_parsed: false` or the footprint could not be read (a warning is
+ *   logged via `console.warn` in the former case).
+ *
+ * @example
+ * ```ts
+ * const sim = await server.simulateTransaction(tx)
+ * if (isRestoreResponse(sim)) {
+ *   const archived = extractArchivedKeys(sim)
+ * }
+ * ```
  */
 export function extractArchivedKeys(
   response: rpc.Api.SimulateTransactionRestoreResponse,
@@ -79,8 +101,12 @@ export function extractArchivedKeys(
  * Extracts the read-only and read-write ledger keys from a success simulation
  * response footprint.
  *
- * @param response - A successful simulation response.
- * @returns The read-only and read-write ledger keys from the response's footprint.
+ * @param response - A successful simulation response, as narrowed by
+ *   {@link isSuccessResponse}.
+ * @returns `{ readOnly, readWrite }` ledger key arrays. Both are empty if
+ *   the response has `_parsed: false` or the footprint could not be read.
+ * @see {@link detectArchivedEntries}, which typically consumes the
+ *   `readWrite` keys returned here.
  */
 export function extractFootprintFromSuccess(response: rpc.Api.SimulateTransactionSuccessResponse): {
   readOnly: xdr.LedgerKey[]
@@ -113,8 +139,13 @@ export function extractFootprintFromSuccess(response: rpc.Api.SimulateTransactio
  * archived to avoid false negatives.
  *
  * @param server - Soroban RPC server instance.
- * @param ledgerKeys - The ledger keys to check.
- * @returns The subset of `ledgerKeys` that are archived.
+ * @param ledgerKeys - Ledger keys to check (typically the read-write
+ *   footprint of a transaction).
+ * @returns Array of {@link ArchivedLedgerEntry} for keys that are missing
+ *   from `getLedgerEntries` results (i.e. archived), or that could not be
+ *   verified due to a request error.
+ * @see {@link detectArchivedKeysViaDirect}, which wraps this with the
+ *   simulate → extract-footprint steps.
  */
 export async function detectArchivedEntries(
   server: rpc.Server,
@@ -164,7 +195,10 @@ export async function detectArchivedEntries(
  *
  * @param server - Soroban RPC server instance.
  * @param transaction - The transaction to simulate.
- * @returns The archived ledger entries detected, or an empty array if none.
+ * @returns Array of {@link ArchivedLedgerEntry} — empty if the simulation
+ *   does not indicate a restore is needed.
+ * @see {@link detectArchivedKeysViaDirect} for the alternative
+ *   direct-ledger-query strategy.
  */
 export async function detectArchivedKeysViaSimulation(
   server: rpc.Server,
@@ -187,12 +221,16 @@ export async function detectArchivedKeysViaSimulation(
  * needed), extracts the footprint keys, then queries the ledger to find
  * which ones are archived.
  *
- * Throws an error if the simulation fails or indicates archived entries.
- *
  * @param server - Soroban RPC server instance.
  * @param transaction - The transaction to simulate and check.
- * @returns The archived ledger entries found among the transaction's footprint keys.
- * @throws If the simulation errors, or already indicates a restore is needed.
+ * @returns Array of {@link ArchivedLedgerEntry} found via direct ledger
+ *   lookup.
+ * @throws {Error} If the simulation itself fails, or if the simulation
+ *   already indicates a restore is needed (the simulation-based `restore`
+ *   response is a stronger signal — call {@link detectArchivedKeysViaSimulation}
+ *   or {@link isRestoreResponse} first).
+ * @see {@link detectArchivedKeysViaSimulation} for the default,
+ *   simulation-based strategy (`archiveDetectionMethod: 'simulation'`).
  */
 export async function detectArchivedKeysViaDirect(
   server: rpc.Server,
@@ -219,4 +257,118 @@ export async function detectArchivedKeysViaDirect(
   }
 
   return detectArchivedEntries(server, readWrite)
+}
+
+/**
+ * Builds a ContractData ledger key for a given contract ID and storage key.
+ * This is used to query specific contract data entries on the ledger.
+ *
+ * @param contractId - The Stellar contract ID string (e.g. "CCJZ5...").
+ * @param key - The storage key as an xdr.ScVal.
+ * @param keyType - The durability of the storage entry (persistent or temporary).
+ * @returns An xdr.LedgerKey for the ContractData entry.
+ */
+export function buildContractDataKey(
+  contractId: string,
+  key: xdr.ScVal,
+  keyType: 'persistent' | 'temporary' = 'persistent',
+): xdr.LedgerKey {
+  // Convert hex contract ID string to bytes
+  const contractBytes = new Uint8Array(
+    (contractId.match(/.{1,2}/g) ?? []).map((b) => parseInt(b, 16)),
+  )
+
+  const contractAddress = {
+    switch: () => xdr.ScAddressType.scAddressTypeContract(),
+    contractId: contractBytes,
+  } as unknown as xdr.ScAddress
+
+  const contractData = {
+    contract: contractAddress,
+    key,
+    durability:
+      keyType === 'temporary'
+        ? xdr.ContractDataDurability.temporary()
+        : xdr.ContractDataDurability.persistent(),
+  } as unknown as xdr.LedgerKeyContractData
+
+  return {
+    type: xdr.LedgerEntryType.contractData(),
+    contractData,
+  } as unknown as xdr.LedgerKey
+}
+
+/**
+ * Checks whether a specific contract data entry is archived (expired / not found
+ * on the ledger). This is a targeted utility for dApp developers who want to
+ * check specific storage slots without simulating a full transaction.
+ *
+ * @param server - Soroban RPC server instance.
+ * @param contractId - The Stellar contract ID string.
+ * @param key - The storage key as an xdr.ScVal.
+ * @param keyType - The durability of the storage entry (persistent or temporary).
+ * @returns `true` if the entry is archived (not found), `false` if it exists.
+ *
+ * @example
+ * ```ts
+ * import { xdr } from '@stellar/stellar-sdk'
+ * const isArchived = await checkArchivedContractData(
+ *   server,
+ *   'CCJZ5DGASBWQXR5G4GXEJM2Q4FI5L3QJ6TQ3QFJTQH7GJ6KJ3J2Q2K2Q',
+ *   xdr.ScVal.scvSymbol('Balance'),
+ *   'persistent',
+ * )
+ * ```
+ */
+export async function checkArchivedContractData(
+  server: rpc.Server,
+  contractId: string,
+  key: xdr.ScVal,
+  keyType: 'persistent' | 'temporary' = 'persistent',
+): Promise<boolean> {
+  const ledgerKey = buildContractDataKey(contractId, key, keyType)
+  const archived = await detectArchivedEntries(server, [ledgerKey])
+  return archived.length > 0
+}
+
+/**
+ * Retrieves a specific contract data entry from the ledger.
+ * Returns the ledger entry data if it exists, or `null` if archived / not found.
+ *
+ * @param server - Soroban RPC server instance.
+ * @param contractId - The Stellar contract ID string.
+ * @param key - The storage key as an xdr.ScVal.
+ * @param keyType - The durability of the storage entry (persistent or temporary).
+ * @returns The ledger entry if found, otherwise `null`.
+ *
+ * @example
+ * ```ts
+ * import { xdr } from '@stellar/stellar-sdk'
+ * const entry = await getContractDataEntry(
+ *   server,
+ *   'CCJZ5DGASBWQXR5G4GXEJM2Q4FI5L3QJ6TQ3QFJTQH7GJ6KJ3J2Q2K2Q',
+ *   xdr.ScVal.scvSymbol('Balance'),
+ * )
+ * if (entry) {
+ *   console.log('Entry exists:', entry.key.toXDR('base64'))
+ * }
+ * ```
+ */
+export async function getContractDataEntry(
+  server: rpc.Server,
+  contractId: string,
+  key: xdr.ScVal,
+  keyType: 'persistent' | 'temporary' = 'persistent',
+): Promise<rpc.Api.LedgerEntryResult | null> {
+  const ledgerKey = buildContractDataKey(contractId, key, keyType)
+
+  try {
+    const result = await server.getLedgerEntries(ledgerKey)
+    if (result.entries && result.entries.length > 0) {
+      return result.entries[0]
+    }
+    return null
+  } catch {
+    return null
+  }
 }

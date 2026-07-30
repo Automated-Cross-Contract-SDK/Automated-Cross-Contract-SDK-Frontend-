@@ -162,7 +162,7 @@ function WithdrawButton() {
           {isProcessing ? 'Processing...' : 'Submit Withdraw'}
         </button>
         {(state.state !== 'idle' || lastResult) && (
-          <button onClick={reset} style={{ marginLeft: 8 }}>
+          <button onClick={() => reset()} style={{ marginLeft: 8 }}>
             Reset
           </button>
         )}
