@@ -1,5 +1,5 @@
 import { rpc, TransactionBuilder, Transaction } from '@stellar/stellar-sdk'
-import {
+import type {
   SorobanResurrectConfig,
   WalletAdapter,
   FeeBumpConfig,
@@ -272,17 +272,10 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
 
       onRestoreConfirmed?.(restoreResult.hash)
 
-      const preparedTx = await buildOriginalAfterRestore(
-        server,
-        originalTx,
-        networkPassphrase,
-        originalTx.fee,
-      )
+      const preparedTx = await buildOriginalAfterRestore(server, originalTx, networkPassphrase, originalTx.fee)
 
       onSigningOriginal?.()
-      const signedOriginalXdr = await wallet.signTransaction(preparedTx.toXDR(), {
-        networkPassphrase,
-      })
+      const signedOriginalXdr = await wallet.signTransaction(preparedTx.toXDR(), { networkPassphrase })
 
       const signedOriginalTx = TransactionBuilder.fromXDR(signedOriginalXdr, networkPassphrase)
       if (!(signedOriginalTx instanceof Transaction)) {
