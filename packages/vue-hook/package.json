@@ -1,0 +1,31 @@
+{
+  "name": "@soroban-resurrect/vue-hook",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@soroban-resurrect/sdk": "^0.1.0"
+  },
+  "peerDependencies": {
+    "@stellar/stellar-sdk": "^12.0.0",
+    "vue": "^3.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "vue": "^3.0.0"
+  }
+}
