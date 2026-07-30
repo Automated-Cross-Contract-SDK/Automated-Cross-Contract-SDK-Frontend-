@@ -1,4 +1,4 @@
-import { rpc, Transaction } from '@stellar/stellar-sdk'
+import { rpc, Transaction, xdr } from '@stellar/stellar-sdk'
 import {
   SorobanResurrectConfig,
   RestoreState,
@@ -459,6 +459,75 @@ export class SorobanResurrect {
       minResourceFee: parseInt(response.minResourceFee, 10),
       config: this.config,
     })
+  }
+
+  // ---------------------------------------------------------------------------
+  // TTL / expiry helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Queries the current TTL information for one or more ledger keys.
+   *
+   * Uses the Soroban RPC `getLedgerEntries` and `getLatestLedger` calls to
+   * determine how many ledgers remain until each entry expires. Keys not found
+   * on-chain are reported as archived.
+   *
+   * @param keys - Ledger keys to query.
+   * @returns Aggregated TTL result with per-entry info and query metadata.
+   *
+   * @example
+   * ```ts
+   * const result = await resurrect.queryLedgerTTL([ledgerKey])
+   * console.log(result.entries[0].ttlLedgers) // ledgers remaining
+   * ```
+   */
+  async queryLedgerTTL(keys: xdr.LedgerKey[]): Promise<TTLQueryResult> {
+    return _queryLedgerTTL(this.server, keys)
+  }
+
+  /**
+   * Queries the current TTL information for a single ledger key.
+   *
+   * @param key - The ledger key to query.
+   * @returns TTL info for the requested entry.
+   *
+   * @example
+   * ```ts
+   * const info = await resurrect.queryLedgerEntryTTL(ledgerKey)
+   * if (info.ttlLedgers < 10_000) {
+   *   console.warn('Entry expiring soon!')
+   * }
+   * ```
+   */
+  async queryLedgerEntryTTL(key: xdr.LedgerKey): Promise<LedgerEntryTTLInfo> {
+    return _queryLedgerEntryTTL(this.server, key)
+  }
+
+  /**
+   * Returns ledger entries that are expiring within `ledgersThreshold` ledgers,
+   * including entries that are already archived.
+   *
+   * Useful for proactively warning users before their on-chain data expires so
+   * they can extend TTL before a transaction fails.
+   *
+   * @param keys              - Ledger keys to query.
+   * @param ledgersThreshold  - Maximum ledgers remaining to be considered "expiring soon"
+   *                            (defaults to 100,000 ledgers ≈ ~5.8 days at 5 s/ledger).
+   * @returns Entries expiring within the threshold (or already archived).
+   *
+   * @example
+   * ```ts
+   * const expiring = await resurrect.getExpiringSoonEntries([key], 17_280) // ~24 h
+   * if (expiring.length > 0) {
+   *   showWarning('Your position is expiring soon!')
+   * }
+   * ```
+   */
+  async getExpiringSoonEntries(
+    keys: xdr.LedgerKey[],
+    ledgersThreshold = 100_000,
+  ): Promise<LedgerEntryTTLInfo[]> {
+    return _getExpiringSoonEntries(this.server, keys, ledgersThreshold)
   }
 
   /**
