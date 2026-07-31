@@ -18,6 +18,11 @@ import {
 } from '@soroban-resurrect/sdk'
 import type { Transaction } from '@stellar/stellar-sdk'
 
+/**
+ * Shape of the value provided by `SorobanResurrectContext`. Not exported —
+ * consumers should go through `useSorobanResurrectContext()` instead of
+ * depending on this shape directly, since it may gain fields over time.
+ */
 interface SorobanResurrectContextValue {
   /** The underlying SDK instance (null before first render). */
   resurrect: SorobanResurrect | null

@@ -345,4 +345,35 @@ describe('SorobanResurrect.submitWithRestore — callback invocation ordering', 
       'success',
     ])
   })
+
+  // ── Regression test for Bug #32 ────────────────────────────────────────
+  // Original bug: onRestoreFailed callback was passed through without
+  // triggering state management, causing inconsistent callback behavior.
+  // The fix wraps onRestoreFailed with setState('error', ...) so that
+  // the state reflects the failure when the user's callback fires.
+  it('[regression #32] sets error state BEFORE invoking onRestoreFailed callback', async () => {
+    vi.spyOn(resurrect.server, 'simulateTransaction').mockResolvedValue(
+      makeErrorResponse() as never,
+    )
+
+    let stateInCallback: string | undefined
+
+    await resurrect.submitWithRestore({
+      transaction: makeSampleTx(),
+      wallet: makeWallet(),
+      onRestoreFailed: () => {
+        stateInCallback = resurrect.state
+      },
+    })
+
+    // After submitWithRestore completes, state must be 'error'
+    expect(resurrect.state).toBe('error')
+    expect(resurrect.stateInfo.error).toBeTruthy()
+
+    // The onRestoreFailed callback should have been invoked, and by the
+    // time it runs the instance state should already reflect the failure.
+    // This prevents UI race conditions where the callback fires before
+    // state observers are notified.
+    expect(stateInCallback).toBe('error')
+  })
 })
