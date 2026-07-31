@@ -28,12 +28,15 @@
     "format:fix": "prettier --write '**/*.{ts,tsx,json,md}' --ignore-path .gitignore",
     "test": "npm run test -w packages/sdk && npm run test -w packages/react-hook",
     "test:watch": "npm run test:watch -w packages/sdk",
-    "clean": "npm run clean --workspaces --if-present"
+    "clean": "npm run clean --workspaces --if-present",
+    "prepare": "husky"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "eslint": "^10.7.0",
     "eslint-config-prettier": "^10.1.8",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.5.0",
     "prettier": "^3.9.5",
     "typescript": "^5.5.0",
     "typescript-eslint": "^8.63.0"
