@@ -8,6 +8,7 @@ import {
   Keypair,
   rpc,
   SorobanDataBuilder,
+  xdr,
 } from '@stellar/stellar-sdk'
 import {
   extractXdrOperations,
@@ -49,6 +50,99 @@ describe('Restorer', () => {
       const tx = makeSampleTx()
       const ops = extractXdrOperations(tx)
       expect(Array.isArray(ops)).toBe(true)
+    })
+
+    // ── Regression tests for Bug #27 ──────────────────────────────────────
+    // Original bug: extractXdrOperations silently defaulted to V1 for
+    // unknown envelope types instead of throwing descriptive errors.
+    // Also lacked explicit handling for V0 and fee-bump envelopes.
+
+    it('[regression #27] extracts operations from a fee-bump transaction envelope', () => {
+      const innerTx = makeSampleTx()
+      const sponsor = Keypair.random()
+      const feeBumpTx = TransactionBuilder.buildFeeBumpTransaction(
+        sponsor.publicKey(),
+        '1000',
+        innerTx,
+        Networks.TESTNET,
+      )
+      // FeeBumpTransaction extends Transaction, so this compiles
+      const ops = extractXdrOperations(feeBumpTx)
+      expect(ops.length).toBe(1)
+      expect(ops[0]).toBeDefined()
+    })
+
+    it('[regression #27] extracts operations from a V0 transaction envelope', () => {
+      const kp = Keypair.random()
+
+      // Build a normal V1 transaction to get a valid xdr.Operation array,
+      // then wrap those operations in a V0 envelope.
+      const helperTx = makeSampleTx()
+      const helperEnvelope = helperTx.toEnvelope()
+      const helperV1Env = helperEnvelope.value() as xdr.TransactionV1Envelope
+      const operations = helperV1Env.tx().operations()
+
+      const v0TxBody = new xdr.TransactionV0({
+        sourceAccountEd25519: kp.rawPublicKey(),
+        fee: new xdr.Uint32(100),
+        seqNum: new xdr.SequenceNumber(new xdr.Int64(0, 1)),
+        timeBounds: new xdr.TimeBounds({
+          minTime: new xdr.TimePoint(0),
+          maxTime: new xdr.TimePoint(0),
+        }),
+        memo: xdr.Memo.memoNone(),
+        operations,
+        ext: new xdr.TransactionExt(0),
+      })
+
+      const v0Envelope = new xdr.TransactionV0Envelope({
+        tx: v0TxBody,
+        signatures: [],
+      })
+
+      const txEnv = xdr.TransactionEnvelope.envelopeTypeTxV0(v0Envelope)
+
+      // Create a Transaction but mock toEnvelope() to return our V0 envelope
+      // directly, since the Transaction class may not reconstruct V0 properly.
+      const v0Tx = new Transaction(txEnv, Networks.TESTNET)
+      vi.spyOn(v0Tx, 'toEnvelope').mockReturnValue(txEnv)
+
+      const ops = extractXdrOperations(v0Tx)
+      expect(ops.length).toBe(1)
+    })
+
+    it('[regression #27] throws descriptive error on unknown envelope type', () => {
+      const tx = makeSampleTx()
+      // Mock toEnvelope to return an unknown switch type
+      vi.spyOn(tx, 'toEnvelope').mockReturnValue({
+        switch: () => ({ name: 'envelopeTypeUnknown42' }),
+        value: () => ({}),
+      } as any)
+
+      expect(() => extractXdrOperations(tx)).toThrow(
+        'Unsupported transaction envelope type: envelopeTypeUnknown42',
+      )
+    })
+
+    it('[regression #27] throws descriptive error on unsupported inner envelope type in fee-bump', () => {
+      const tx = makeSampleTx()
+      // Mock toEnvelope to return a fee-bump envelope with an unsupported inner type
+      const fakeInnerEnvelope = {
+        switch: () => ({ name: 'envelopeTypeUnknownInner99' }),
+      }
+
+      vi.spyOn(tx, 'toEnvelope').mockReturnValue({
+        switch: () => ({ name: 'envelopeTypeTxFeeBump' }),
+        value: () => ({
+          tx: () => ({
+            innerTx: () => fakeInnerEnvelope,
+          }),
+        }),
+      } as any)
+
+      expect(() => extractXdrOperations(tx)).toThrow(
+        /Unsupported inner transaction envelope type in fee-bump/,
+      )
     })
   })
 
