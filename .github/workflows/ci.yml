@@ -34,7 +34,7 @@ jobs:
       - run: npm run test -w packages/sdk -- --coverage
       - run: npm run test -w packages/react-hook -- --coverage
 
-      - uses: codecov/codecov-action@v4
+      - uses: codecov/codecov-action@v7
         with:
           files: packages/sdk/coverage/lcov.info,packages/react-hook/coverage/lcov.info
           fail_ci_if_error: false
