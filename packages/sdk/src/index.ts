@@ -37,6 +37,7 @@ export {
   buildFeeBumpTransaction,
   submitFeeBumpTransaction,
 } from './Restorer.js'
+export { calculateRestoreFee, resolveRestoreFeeMultiplier } from './feeCalculation.js'
 export { SimulationCache } from './SimulationCache.js'
 export {
   DEFAULT_NETWORK_PASSPHRASE,
