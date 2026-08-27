@@ -20,7 +20,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@stellar/stellar-sdk": "^12.0.0"
+    "@stellar/stellar-sdk": "^12.0.0",
+    "@xstate/fsm": "2.0.1"
   },
   "devDependencies": {
     "tsup": "^8.5.1",

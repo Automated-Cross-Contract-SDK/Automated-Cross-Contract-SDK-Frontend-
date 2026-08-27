@@ -62,3 +62,14 @@ export type {
   SorobanResurrectEvents,
 } from './types.js'
 export { TypedEventEmitter } from './EventEmitter.js'
+export {
+  restoreMachine,
+  createRestoreService,
+  toRestoreStateInfo,
+} from './RestoreMachine.js'
+export type {
+  RestoreMachineEvent,
+  RestoreMachineContext,
+  RestoreTypestate,
+  RestoreService,
+} from './RestoreMachine.js'
