@@ -7,17 +7,85 @@ import {
   ResurrectResult,
   SubmitWithRestoreOptions,
   SorobanResurrectEvents,
+  WalletAdapter,
 } from './types.js'
 import { executeWithRestore, sendTransaction } from './Executor.js'
 import { isRestoreResponse, extractArchivedKeys } from './Archiver.js'
 import { buildRestoreTransaction } from './Restorer.js'
+import { SimulationCache } from './SimulationCache.js'
+import { TypedEventEmitter } from './EventEmitter.js'
+import { TransactionHistory, TransactionHistoryEntry } from './TransactionHistory.js'
 import {
   DEFAULT_NETWORK_PASSPHRASE,
   POLL_INTERVAL_MS,
   POLL_TIMEOUT_MS,
   RESTORE_FEE_MULTIPLIER,
   KNOWN_NETWORK_PASSPHRASES,
+  resolveNetworkPassphrase,
 } from './constants.js'
+import { invariant } from './invariant.js'
+
+function validateConfig(config: SorobanResurrectConfig): void {
+  invariant(config !== null && typeof config === 'object', 'config is required.')
+  invariant(
+    typeof config.rpcUrl === 'string' && config.rpcUrl.trim().length > 0,
+    'config.rpcUrl must be a non-empty string.',
+  )
+
+  let rpcUrl: URL
+  try {
+    rpcUrl = new URL(config.rpcUrl)
+  } catch {
+    throw new Error(`Invariant violation: config.rpcUrl must be a valid URL: "${config.rpcUrl}".`)
+  }
+  invariant(
+    rpcUrl.protocol === 'http:' || rpcUrl.protocol === 'https:',
+    `config.rpcUrl must use http or https: "${config.rpcUrl}".`,
+  )
+  invariant(
+    config.networkPassphrase === undefined ||
+      (typeof config.networkPassphrase === 'string' && config.networkPassphrase.trim().length > 0),
+    'config.networkPassphrase must be a non-empty string when provided.',
+  )
+  assertPositiveNumber(config.pollIntervalMs, 'config.pollIntervalMs')
+  assertPositiveNumber(config.pollTimeoutMs, 'config.pollTimeoutMs')
+  assertMinimumNumber(config.restoreFeeMultiplier, 'config.restoreFeeMultiplier', 1)
+  invariant(
+    config.archiveDetectionMethod === undefined ||
+      config.archiveDetectionMethod === 'simulation' ||
+      config.archiveDetectionMethod === 'direct',
+    'config.archiveDetectionMethod must be "simulation" or "direct".',
+  )
+  assertBoolean(config.enableSimulationCache, 'config.enableSimulationCache')
+  assertBoolean(config.useSSE, 'config.useSSE')
+}
+
+function assertPositiveNumber(value: number | undefined, name: string): void {
+  invariant(
+    value === undefined || (Number.isFinite(value) && value > 0),
+    `${name} must be a finite number greater than 0.`,
+  )
+}
+
+function assertMinimumNumber(value: number | undefined, name: string, minimum: number): void {
+  invariant(
+    value === undefined || (Number.isFinite(value) && value >= minimum),
+    `${name} must be a finite number greater than or equal to ${minimum}.`,
+  )
+}
+
+function assertBoolean(value: boolean | undefined, name: string): void {
+  invariant(value === undefined || typeof value === 'boolean', `${name} must be a boolean when provided.`)
+}
+
+function validateSubmitOptions(options: SubmitWithRestoreOptions): void {
+  invariant(options !== null && typeof options === 'object', 'submitWithRestore options are required.')
+  invariant(options.transaction instanceof Transaction, 'submitWithRestore options.transaction must be a Stellar Transaction.')
+  invariant(options.wallet !== null && typeof options.wallet === 'object', 'submitWithRestore options.wallet is required.')
+  invariant(typeof options.wallet.isConnected === 'function', 'submitWithRestore options.wallet.isConnected must be a function.')
+  invariant(typeof options.wallet.getPublicKey === 'function', 'submitWithRestore options.wallet.getPublicKey must be a function.')
+  invariant(typeof options.wallet.signTransaction === 'function', 'submitWithRestore options.wallet.signTransaction must be a function.')
+}
 
 /**
  * Main facade for the Soroban-Resurrect SDK.
@@ -69,6 +137,7 @@ export class SorobanResurrect {
    * ```
    */
   constructor(config: SorobanResurrectConfig) {
+    validateConfig(config)
     this.server = new rpc.Server(config.rpcUrl)
 
     const networkPassphrase =
@@ -593,6 +662,7 @@ export class SorobanResurrect {
    * ```
    */
   async submitWithRestore(options: SubmitWithRestoreOptions): Promise<ResurrectResult> {
+    validateSubmitOptions(options)
     const {
       transaction,
       wallet,
