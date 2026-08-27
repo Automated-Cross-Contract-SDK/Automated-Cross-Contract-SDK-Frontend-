@@ -16,6 +16,8 @@
   "scripts": {
     "build": "tsup",
     "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint 'src/**/*.{ts,tsx}'",
     "test": "vitest run",
     "test:watch": "vitest"
   },
