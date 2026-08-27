@@ -37,6 +37,23 @@
  *
  * From that point on TypeScript enforces correct usage everywhere else in the
  * codebase without any runtime overhead.
+ *
+ * ## Runtime validation
+ *
+ * Each branded type ships a companion `is*` type-guard that validates format
+ * at runtime. Use these at **trust boundaries** (e.g. user input, external API
+ * responses) where the value's format cannot be guaranteed statically:
+ *
+ * ```ts
+ * import { isTxHash, isContractIdHex } from './branded-types.js'
+ *
+ * if (!isTxHash(rawString)) throw new Error('Invalid transaction hash')
+ * if (!isContractIdHex(contractId)) throw new Error('Invalid contract ID')
+ * ```
+ *
+ * The `as*` cast helpers (e.g. `asTxHash`) remain **unchecked** for use inside
+ * the SDK at boundaries that are already type-safe (e.g. right after calling
+ * `.toXDR('base64')`). Prefer `is*` guards for external input.
  */
 
 // ---------------------------------------------------------------------------
@@ -81,6 +98,27 @@ export function asTxHash(value: string): TxHash {
   return value as TxHash
 }
 
+/**
+ * Runtime type-guard for {@link TxHash}.
+ *
+ * A valid transaction hash is a lowercase hex string of exactly 64 characters
+ * (32 bytes). Uppercase hex characters are accepted and normalised to lowercase
+ * by the Stellar SDK, but this guard enforces lowercase-only to match the
+ * format returned by `server.sendTransaction()`.
+ *
+ * @param value - The value to test.
+ * @returns `true` if `value` is a valid 64-character lowercase hex string.
+ *
+ * @example
+ * ```ts
+ * if (!isTxHash(raw)) throw new Error(`Invalid transaction hash: ${raw}`)
+ * const hash = raw as TxHash
+ * ```
+ */
+export function isTxHash(value: unknown): value is TxHash {
+  return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value)
+}
+
 // ---------------------------------------------------------------------------
 // Contract / address identifiers
 // ---------------------------------------------------------------------------
@@ -105,6 +143,25 @@ export function asContractIdHex(value: string): ContractIdHex {
 }
 
 /**
+ * Runtime type-guard for {@link ContractIdHex}.
+ *
+ * A valid contract ID hex is exactly 64 lowercase hex characters (32 bytes).
+ * This mirrors the XDR representation used by the Stellar network for contract
+ * identifiers.
+ *
+ * @param value - The value to test.
+ * @returns `true` if `value` is a valid 64-character lowercase hex string.
+ *
+ * @example
+ * ```ts
+ * if (!isContractIdHex(id)) throw new Error(`Not a contract ID: ${id}`)
+ * ```
+ */
+export function isContractIdHex(value: unknown): value is ContractIdHex {
+  return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value)
+}
+
+/**
  * A Stellar **public key** (account address) in strkey / G-address format,
  * e.g. `"GABC…"`. Also used for the source account of a transaction.
  */
@@ -115,6 +172,25 @@ export type StellarPublicKey = Branded<string, 'StellarPublicKey'>
  */
 export function asStellarPublicKey(value: string): StellarPublicKey {
   return value as StellarPublicKey
+}
+
+/**
+ * Runtime type-guard for {@link StellarPublicKey}.
+ *
+ * A valid Stellar public key (G-address) starts with `"G"` and is 56
+ * characters long — the standard strkey-encoded ED25519 public key format
+ * used across the Stellar network.
+ *
+ * @param value - The value to test.
+ * @returns `true` if `value` looks like a Stellar G-address.
+ *
+ * @example
+ * ```ts
+ * if (!isStellarPublicKey(address)) throw new Error('Not a Stellar public key')
+ * ```
+ */
+export function isStellarPublicKey(value: unknown): value is StellarPublicKey {
+  return typeof value === 'string' && /^G[A-Z2-7]{55}$/.test(value)
 }
 
 // ---------------------------------------------------------------------------
@@ -142,6 +218,29 @@ export function asXdrBase64(value: string): XdrBase64 {
 }
 
 /**
+ * Runtime type-guard for {@link XdrBase64}.
+ *
+ * Validates that `value` is a non-empty string containing only standard
+ * base64 characters (`A-Z`, `a-z`, `0-9`, `+`, `/`) with optional `=`
+ * padding, and that its length is a valid base64 length (multiple of 4, or
+ * with correct padding). This matches the format produced by
+ * `someXdrObject.toXDR('base64')`.
+ *
+ * @param value - The value to test.
+ * @returns `true` if `value` is a well-formed base64 string.
+ *
+ * @example
+ * ```ts
+ * if (!isXdrBase64(raw)) throw new Error('Expected base64-encoded XDR')
+ * ```
+ */
+export function isXdrBase64(value: unknown): value is XdrBase64 {
+  if (typeof value !== 'string' || value.length === 0) return false
+  // Base64 alphabet + padding; length must be a multiple of 4
+  return /^[A-Za-z0-9+/]*={0,2}$/.test(value) && value.length % 4 === 0
+}
+
+/**
  * A **hex-encoded** binary string. Used when values need to be expressed as
  * a sequence of two-character hex digits, e.g. contract IDs from the XDR
  * layer before being wrapped in {@link ContractIdHex}.
@@ -158,6 +257,25 @@ export type HexString = Branded<string, 'HexString'>
  */
 export function asHexString(value: string): HexString {
   return value as HexString
+}
+
+/**
+ * Runtime type-guard for {@link HexString}.
+ *
+ * Validates that `value` is a non-empty string containing only lowercase
+ * hexadecimal characters (`0-9`, `a-f`) with an even number of characters
+ * (each byte is two hex digits).
+ *
+ * @param value - The value to test.
+ * @returns `true` if `value` is a well-formed lowercase hex string.
+ *
+ * @example
+ * ```ts
+ * if (!isHexString(raw)) throw new Error('Expected a hex-encoded value')
+ * ```
+ */
+export function isHexString(value: unknown): value is HexString {
+  return typeof value === 'string' && value.length > 0 && /^[0-9a-f]+$/.test(value) && value.length % 2 === 0
 }
 
 // ---------------------------------------------------------------------------
@@ -185,6 +303,21 @@ export function asNetworkPassphrase(value: string): NetworkPassphrase {
 }
 
 /**
+ * Runtime type-guard for {@link NetworkPassphrase}.
+ *
+ * A valid network passphrase is any non-empty string. This guard intentionally
+ * does not restrict to known passphrases so that custom or private networks
+ * are supported. Use `resolveNetworkPassphrase` (from `constants.ts`) for
+ * stricter validation against the known Stellar network passphrases.
+ *
+ * @param value - The value to test.
+ * @returns `true` if `value` is a non-empty string.
+ */
+export function isNetworkPassphrase(value: unknown): value is NetworkPassphrase {
+  return typeof value === 'string' && value.length > 0
+}
+
+/**
  * An **RPC endpoint URL** string.
  * Branded separately from {@link NetworkPassphrase} so neither can be passed
  * where the other is expected.
@@ -198,6 +331,20 @@ export type RpcUrl = Branded<string, 'RpcUrl'>
  */
 export function asRpcUrl(value: string): RpcUrl {
   return value as RpcUrl
+}
+
+/**
+ * Runtime type-guard for {@link RpcUrl}.
+ *
+ * Validates that `value` is a string starting with `"https://"` or
+ * `"http://"`. HTTPS is strongly recommended for production use to prevent
+ * man-in-the-middle attacks on RPC responses.
+ *
+ * @param value - The value to test.
+ * @returns `true` if `value` is a URL with an HTTP or HTTPS scheme.
+ */
+export function isRpcUrl(value: unknown): value is RpcUrl {
+  return typeof value === 'string' && /^https?:\/\/.+/.test(value)
 }
 
 // ---------------------------------------------------------------------------
@@ -220,6 +367,20 @@ export function asFeeStroops(value: string): FeeStroops {
 }
 
 /**
+ * Runtime type-guard for {@link FeeStroops}.
+ *
+ * A valid fee-in-stroops value is a decimal string representing a
+ * non-negative integer. It must contain only digit characters and must not
+ * be empty.
+ *
+ * @param value - The value to test.
+ * @returns `true` if `value` is a non-negative decimal integer string.
+ */
+export function isFeeStroops(value: unknown): value is FeeStroops {
+  return typeof value === 'string' && /^\d+$/.test(value)
+}
+
+/**
  * A Stellar **sequence number**, represented as a decimal string.
  * Sequence numbers are 64-bit integers that must be serialised as strings to
  * avoid JavaScript precision loss.
@@ -233,6 +394,20 @@ export type SequenceNumber = Branded<string, 'SequenceNumber'>
  */
 export function asSequenceNumber(value: string): SequenceNumber {
   return value as SequenceNumber
+}
+
+/**
+ * Runtime type-guard for {@link SequenceNumber}.
+ *
+ * A valid sequence number is a decimal string representing a non-negative
+ * integer. Sequence numbers are 64-bit values serialised as strings to avoid
+ * JavaScript's `Number.MAX_SAFE_INTEGER` precision ceiling.
+ *
+ * @param value - The value to test.
+ * @returns `true` if `value` is a non-negative decimal integer string.
+ */
+export function isSequenceNumber(value: unknown): value is SequenceNumber {
+  return typeof value === 'string' && /^\d+$/.test(value)
 }
 
 // ---------------------------------------------------------------------------
@@ -251,4 +426,19 @@ export type HistoryEntryId = Branded<string, 'HistoryEntryId'>
  */
 export function asHistoryEntryId(value: string): HistoryEntryId {
   return value as HistoryEntryId
+}
+
+/**
+ * Runtime type-guard for {@link HistoryEntryId}.
+ *
+ * A valid history entry ID follows the format `"<base36-timestamp>-<random-suffix>"`:
+ * two alphanumeric segments (base-36 characters: `0-9`, `a-z`) joined by a
+ * single hyphen. This matches the format generated by
+ * `TransactionHistory.generateId()`.
+ *
+ * @param value - The value to test.
+ * @returns `true` if `value` matches the expected history entry ID format.
+ */
+export function isHistoryEntryId(value: unknown): value is HistoryEntryId {
+  return typeof value === 'string' && /^[0-9a-z]+-[0-9a-z]+$/.test(value)
 }

@@ -71,6 +71,7 @@ export type {
   TxHash,
   XdrBase64,
   ContractIdHex,
+  HexString,
   StellarPublicKey,
   NetworkPassphrase,
   RpcUrl,
@@ -91,4 +92,15 @@ export {
   asFeeStroops,
   asSequenceNumber,
   asHistoryEntryId,
+  // Runtime format validators — use at trust boundaries (user input, external APIs)
+  isTxHash,
+  isXdrBase64,
+  isContractIdHex,
+  isStellarPublicKey,
+  isHexString,
+  isNetworkPassphrase,
+  isRpcUrl,
+  isFeeStroops,
+  isSequenceNumber,
+  isHistoryEntryId,
 } from './branded-types.js'
