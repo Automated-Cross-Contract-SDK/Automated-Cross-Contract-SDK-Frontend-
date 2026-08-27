@@ -16,6 +16,7 @@
  */
 
 import { xdr, Transaction, hash } from '@stellar/stellar-sdk'
+import { asXdrBase64, type XdrBase64 } from './branded-types.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,7 +37,7 @@ export interface CategorizedAuthEntry {
   /** The raw XDR authorization entry. */
   entry: xdr.SorobanAuthorizationEntry
   /** Base64-encoded XDR of the entry, useful as a stable identifier. */
-  entryBase64: string
+  entryBase64: XdrBase64
   /** Credential type — determines how the entry must be signed. */
   credentialType: 'source_account' | 'address'
   /**
@@ -70,14 +71,14 @@ export interface AuthorizationWalletAdapter {
    * @returns Base64-encoded XDR of the signed `SorobanAuthorizationEntry`.
    */
   signAuthEntry(
-    authEntryXdr: string,
+    authEntryXdr: XdrBase64,
     opts?: {
       /** Network passphrase required for computing the auth entry hash. */
       networkPassphrase?: string
       /** The address that should sign the entry. */
       address?: string
     },
-  ): Promise<string>
+  ): Promise<XdrBase64>
 }
 
 /**
@@ -160,7 +161,7 @@ export function categorizeAuthEntries(
 
     return {
       entry,
-      entryBase64: entry.toXDR('base64'),
+      entryBase64: asXdrBase64(entry.toXDR('base64')),
       credentialType: isSourceAccount ? 'source_account' : 'address',
       signerAddress,
     }

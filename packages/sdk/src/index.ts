@@ -62,3 +62,33 @@ export type {
   SorobanResurrectEvents,
 } from './types.js'
 export { TypedEventEmitter } from './EventEmitter.js'
+
+// ---------------------------------------------------------------------------
+// Branded / nominal types — re-exported from types.ts (which re-exports from
+// branded-types.ts) so consumers can import everything from one entry point.
+// ---------------------------------------------------------------------------
+export type {
+  TxHash,
+  XdrBase64,
+  ContractIdHex,
+  StellarPublicKey,
+  NetworkPassphrase,
+  RpcUrl,
+  FeeStroops,
+  SequenceNumber,
+  HistoryEntryId,
+} from './types.js'
+
+// Cast / constructor helpers — let consumers brand values at ingest boundaries
+// without importing from the internal branded-types module directly.
+export {
+  asTxHash,
+  asXdrBase64,
+  asContractIdHex,
+  asStellarPublicKey,
+  asNetworkPassphrase,
+  asRpcUrl,
+  asFeeStroops,
+  asSequenceNumber,
+  asHistoryEntryId,
+} from './branded-types.js'

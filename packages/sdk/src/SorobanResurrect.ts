@@ -7,6 +7,7 @@ import {
   ResurrectResult,
   SubmitWithRestoreOptions,
   SorobanResurrectEvents,
+  WalletAdapter,
 } from './types.js'
 import { executeWithRestore, sendTransaction } from './Executor.js'
 import { isRestoreResponse, extractArchivedKeys } from './Archiver.js'
@@ -17,7 +18,19 @@ import {
   POLL_TIMEOUT_MS,
   RESTORE_FEE_MULTIPLIER,
   KNOWN_NETWORK_PASSPHRASES,
+  resolveNetworkPassphrase,
 } from './constants.js'
+import { TypedEventEmitter } from './EventEmitter.js'
+import { SimulationCache } from './SimulationCache.js'
+import { TransactionHistory, type TransactionHistoryEntry } from './TransactionHistory.js'
+import {
+  queryLedgerTTL as _queryLedgerTTL,
+  queryLedgerEntryTTL as _queryLedgerEntryTTL,
+  getExpiringSoonEntries as _getExpiringSoonEntries,
+  type TTLQueryResult,
+  type LedgerEntryTTLInfo,
+} from './TTLHelpers.js'
+import { asTxHash, asHistoryEntryId, type StellarPublicKey, type HistoryEntryId } from './branded-types.js'
 
 /**
  * Main facade for the Soroban-Resurrect SDK.
@@ -48,7 +61,9 @@ export class SorobanResurrect {
   private _lastError: string | undefined
   private _lastArchivedKeys: ArchivedLedgerEntry[] = []
   private _listeners: Array<(info: RestoreStateInfo) => void> = []
-  private _emitter = new TypedEventEmitter<SorobanResurrectEvents>()
+  private _emitter = new TypedEventEmitter<SorobanResurrectEvents & Record<string, unknown>>()
+  private _simulationCache: SimulationCache | undefined
+  private _history = new TransactionHistory()
 
   /**
    * Creates a new SDK instance bound to a single Soroban RPC endpoint.
@@ -154,13 +169,14 @@ export class SorobanResurrect {
    * @returns The result of the retry attempt.
    * @throws If no history entry is found for `entryId`.
    */
-  async retry(entryId: string, wallet: WalletAdapter): Promise<ResurrectResult> {
-    const entry = this._history.get(entryId)
+  async retry(entryId: HistoryEntryId | string, wallet: WalletAdapter): Promise<ResurrectResult> {
+    const id = asHistoryEntryId(entryId)
+    const entry = this._history.get(id)
     if (!entry) {
       throw new Error(`No history entry found for id: ${entryId}`)
     }
 
-    this._history.incrementAttempt(entryId)
+    this._history.incrementAttempt(id)
 
     const result = await executeWithRestore({
       server: this.server,
@@ -191,7 +207,7 @@ export class SorobanResurrect {
       },
     })
 
-    this._history.update(entryId, result)
+    this._history.update(id, result)
 
     if (!result.success) {
       this._lastError = result.error
@@ -442,7 +458,7 @@ export class SorobanResurrect {
    * ```
    */
   async buildRestoreTx(
-    sourcePublicKey: string,
+    sourcePublicKey: StellarPublicKey | string,
     transaction: Transaction,
     simulationResponse?: rpc.Api.SimulateTransactionRestoreResponse,
   ) {
@@ -606,6 +622,9 @@ export class SorobanResurrect {
       onRestoreFailed,
     } = options
 
+    // Record this attempt in transaction history before starting
+    const historyId = this._history.add(transaction)
+
     const result = await executeWithRestore({
       server: this.server,
       transaction,
@@ -625,12 +644,12 @@ export class SorobanResurrect {
         this._lastArchivedKeys = keys
         this.setState('restore_needed', `Detected ${keys.length} archived ledger entries`)
         this._emitter.emit('restoreNeeded', keys)
-        callbacks.onRestoreNeeded?.(keys)
+        onRestoreNeeded?.(keys)
       },
       onRestoreSubmitted: (txHash) => {
         this.setState('confirming_restore', 'Waiting for restore confirmation...')
         this._emitter.emit('restoreSubmitted', txHash)
-        callbacks.onRestoreSubmitted?.(txHash)
+        onRestoreSubmitted?.(txHash)
       },
       onRestoreConfirmed: (txHash) => {
         this.setState(
@@ -638,7 +657,7 @@ export class SorobanResurrect {
           'Restore confirmed. Preparing original transaction...',
         )
         this._emitter.emit('restoreConfirmed', txHash)
-        callbacks.onRestoreConfirmed?.(txHash)
+        onRestoreConfirmed?.(txHash)
       },
       onSigningOriginal: () => {
         this.setState('signing_original', 'Signing original transaction...')
@@ -647,7 +666,7 @@ export class SorobanResurrect {
       onOriginalSubmitted: (txHash) => {
         this.setState('success', 'Original transaction submitted successfully')
         this._emitter.emit('originalSubmitted', txHash)
-        callbacks.onOriginalSubmitted?.(txHash)
+        onOriginalSubmitted?.(txHash)
       },
       onRestoreFailed: (error) => {
         this._emitter.emit('error', error)
