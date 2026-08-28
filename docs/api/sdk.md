@@ -101,9 +101,9 @@ These are exported alongside the class for advanced/lower-level usage:
 | `isErrorResponse(response)`      | `Archiver.js` | Type guard for an error simulation response.                                  |
 | `extractArchivedKeys(response)`  | `Archiver.js` | Extracts archived ledger keys from a restore simulation response.             |
 | `extractFootprintFromSuccess(response)` | `Archiver.js` | Extracts read-only/read-write ledger keys from a success simulation footprint. |
-| `detectArchivedEntries(server, keys)` | `Archiver.js` | Queries the RPC server directly to find which ledger keys are archived.  |
+| `detectArchivedEntries(server, keys, options?)` | `Archiver.js` | Queries the RPC server directly, in parallel chunks, to find which ledger keys are archived. |
 | `detectArchivedKeysViaSimulation(server, tx)` | `Archiver.js` | Detects archived keys via the simulation-restore-response approach. |
-| `detectArchivedKeysViaDirect(server, tx)` | `Archiver.js` | Detects archived keys by querying the ledger directly.               |
+| `detectArchivedKeysViaDirect(server, tx, options?)` | `Archiver.js` | Detects archived keys by querying the ledger directly.        |
 | `buildRestoreTransaction(params)` | `Restorer.js` | Builds a restore transaction from simulation data.                            |
 | `buildOriginalAfterRestore(server, tx, networkPassphrase, fee)` | `Restorer.js` | Rebuilds the original transaction after a successful restore.  |
 | `waitForTransaction(server, hash, pollIntervalMs?, pollTimeoutMs?)` | `Restorer.js` | Polls until a transaction reaches a terminal status.       |

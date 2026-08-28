@@ -44,6 +44,8 @@ export {
   POLL_INTERVAL_MS,
   POLL_TIMEOUT_MS,
   RESTORE_FEE_MULTIPLIER,
+  ARCHIVE_DETECTION_CHUNK_SIZE,
+  ARCHIVE_DETECTION_CONCURRENCY,
   KNOWN_NETWORK_PASSPHRASES,
   resolveNetworkPassphrase,
 } from './constants.js'
@@ -53,6 +55,7 @@ export type {
   FeeBumpSponsor,
   FeeBumpConfig,
   ArchivedLedgerEntry,
+  ArchiveDetectionOptions,
   SimulateResponse,
   ResurrectResult,
   DryRunResult,

@@ -17,6 +17,8 @@ import {
   POLL_TIMEOUT_MS,
   RESTORE_FEE_MULTIPLIER,
   KNOWN_NETWORK_PASSPHRASES,
+  ARCHIVE_DETECTION_CHUNK_SIZE,
+  ARCHIVE_DETECTION_CONCURRENCY,
 } from './constants.js'
 import { createDebugger } from './debug.js'
 
@@ -101,6 +103,9 @@ export class SorobanResurrect {
       pollTimeoutMs: config.pollTimeoutMs ?? POLL_TIMEOUT_MS,
       restoreFeeMultiplier: config.restoreFeeMultiplier ?? RESTORE_FEE_MULTIPLIER,
       archiveDetectionMethod: config.archiveDetectionMethod ?? 'simulation',
+      archiveDetectionChunkSize: config.archiveDetectionChunkSize ?? ARCHIVE_DETECTION_CHUNK_SIZE,
+      archiveDetectionConcurrency:
+        config.archiveDetectionConcurrency ?? ARCHIVE_DETECTION_CONCURRENCY,
       enableSimulationCache: config.enableSimulationCache ?? false,
       useSSE: config.useSSE ?? false,
     } as Required<SorobanResurrectConfig>
@@ -400,7 +405,10 @@ export class SorobanResurrect {
     transaction: Transaction,
   ): Promise<ArchivedLedgerEntry[]> {
     const { detectArchivedKeysViaDirect: detect } = await import('./Archiver.js')
-    return detect(this.server, transaction)
+    return detect(this.server, transaction, {
+      chunkSize: this.config.archiveDetectionChunkSize,
+      concurrency: this.config.archiveDetectionConcurrency,
+    })
   }
 
   /**

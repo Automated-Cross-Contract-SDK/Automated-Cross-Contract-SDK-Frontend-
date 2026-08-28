@@ -19,6 +19,20 @@ export const POLL_TIMEOUT_MS = 60_000
  */
 export const RESTORE_FEE_MULTIPLIER = 3
 
+/** Default number of ledger keys fetched per `getLedgerEntries` request. */
+export const ARCHIVE_DETECTION_CHUNK_SIZE = 50
+
+/**
+ * Default number of `getLedgerEntries` requests issued in parallel when
+ * detecting archived entries.
+ *
+ * Large footprints split into many chunks, and issuing them one at a time makes
+ * detection latency scale linearly with footprint size. Four in flight keeps
+ * wall-clock time down without tripping the request rate limits that public RPC
+ * providers apply. Can be customized via SorobanResurrectConfig.archiveDetectionConcurrency.
+ */
+export const ARCHIVE_DETECTION_CONCURRENCY = 4
+
 /** Known Stellar/Soroban network passphrases for validation. */
 export const KNOWN_NETWORK_PASSPHRASES = [
   'Test SDF Network ; September 2015',        // Testnet
