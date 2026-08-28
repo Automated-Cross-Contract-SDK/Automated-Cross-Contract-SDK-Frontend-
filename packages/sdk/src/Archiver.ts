@@ -149,7 +149,7 @@ export function extractFootprintFromSuccess(response: rpc.Api.SimulateTransactio
  *   simulate → extract-footprint steps.
  */
 export async function detectArchivedEntries(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   ledgerKeys: xdr.LedgerKey[],
 ): Promise<ArchivedLedgerEntry[]> {
   const archived: ArchivedLedgerEntry[] = []
@@ -202,7 +202,7 @@ export async function detectArchivedEntries(
  *   direct-ledger-query strategy.
  */
 export async function detectArchivedKeysViaSimulation(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   transaction: Transaction,
 ): Promise<ArchivedLedgerEntry[]> {
   const response = await server.simulateTransaction(transaction)
@@ -234,7 +234,7 @@ export async function detectArchivedKeysViaSimulation(
  *   simulation-based strategy (`archiveDetectionMethod: 'simulation'`).
  */
 export async function detectArchivedKeysViaDirect(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   transaction: Transaction,
 ): Promise<ArchivedLedgerEntry[]> {
   const response = await server.simulateTransaction(transaction)

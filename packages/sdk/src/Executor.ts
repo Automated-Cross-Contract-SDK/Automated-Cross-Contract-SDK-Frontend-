@@ -1,4 +1,5 @@
 import { rpc, TransactionBuilder, Transaction } from '@stellar/stellar-sdk'
+import type { ISorobanRpcClient } from './RpcClient.js'
 import type {
   SorobanResurrectConfig,
   WalletAdapter,
@@ -27,8 +28,8 @@ import { asTxHash, asXdrBase64, type TxHash, type XdrBase64 } from './branded-ty
 
 /** Parameters for the full restore-and-submit execution flow. */
 export interface ExecuteParams {
-  /** Soroban RPC server instance. */
-  server: rpc.Server
+  /** RPC client used for all Soroban network calls. */
+  server: ISorobanRpcClient
   /** The original transaction to submit (may need restore first). */
   transaction: Transaction
   /** Wallet adapter used for signing. */
@@ -69,7 +70,7 @@ async function signAndMaybeFeeBump(params: {
   wallet: WalletAdapter
   feeBumpConfig?: FeeBumpConfig
   networkPassphrase: string
-  server: rpc.Server
+  server: ISorobanRpcClient
   onSigning?: () => void
   onSigningFeeBump?: () => void
   onSubmitting?: () => void
@@ -113,7 +114,7 @@ async function signAndMaybeFeeBump(params: {
  * of transactions that differ only by sequence number.
  */
 async function simulateWithCache(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   tx: Transaction,
   cache?: SimulationCache,
 ): Promise<rpc.Api.SimulateTransactionResponse> {
@@ -348,7 +349,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
  * Returns a `ResurrectResult` with the transaction hash on success.
  */
 export async function sendTransaction(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   transaction: Transaction,
   wallet: WalletAdapter,
   config: SorobanResurrectConfig,

@@ -48,10 +48,16 @@ import type { LedgerEntryTTLInfo, TTLQueryResult } from './TTLHelpers.js'
  * ```
  */
 export class SorobanResurrect {
-  /** Soroban RPC server instance. */
-  public readonly server: rpc.Server
+  /**
+   * The RPC client used for all Soroban network calls.
+   *
+   * Exposes the {@link ISorobanRpcClient} interface rather than the
+   * concrete `rpc.Server` class, making it possible to inject test
+   * doubles via `config.rpcClient` without casting.
+   */
+  public readonly server: ISorobanRpcClient
   /** Resolved configuration with defaults applied. */
-  public readonly config: Required<SorobanResurrectConfig>
+  public readonly config: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & { rpcClient: ISorobanRpcClient }
 
   private readonly _stateMgr: SorobanResurrectStateManager
   private readonly _simulator: SorobanResurrectSimulator

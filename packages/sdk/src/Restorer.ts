@@ -275,7 +275,7 @@ async function streamTransactionViaEvents(
  * @private
  */
 async function pollTransactionAdaptive(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   hash: string,
   timeoutMs: number,
 ): Promise<rpc.Api.GetTransactionResponse> {
@@ -426,7 +426,7 @@ export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
  * ```
  */
 export async function buildOriginalAfterRestore(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   originalTx: Transaction,
   networkPassphrase: string,
   fee: string,
@@ -487,7 +487,7 @@ export async function buildOriginalAfterRestore(
  *   {@link buildRestoreTransaction} in that case).
  */
 export async function prepareTransaction(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   tx: Transaction,
 ): Promise<Transaction> {
   const sim = await server.simulateTransaction(tx)
