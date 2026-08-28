@@ -62,3 +62,4 @@ export type {
   SorobanResurrectEvents,
 } from './types.js'
 export { TypedEventEmitter } from './EventEmitter.js'
+export { isProcessingState, PROCESSING_STATES } from './stateUtils.js'
