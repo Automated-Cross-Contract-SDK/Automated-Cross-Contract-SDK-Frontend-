@@ -11,6 +11,7 @@ import {
 import { executeWithRestore, sendTransaction } from './Executor.js'
 import { isRestoreResponse, extractArchivedKeys } from './Archiver.js'
 import { buildRestoreTransaction } from './Restorer.js'
+import { createDebugger } from './Debug.js'
 import {
   DEFAULT_NETWORK_PASSPHRASE,
   POLL_INTERVAL_MS,
@@ -37,6 +38,8 @@ import {
  * // result.historyId can be used to retry via resurrec.retry(result.historyId, wallet)
  * ```
  */
+const debug = createDebugger('core')
+
 export class SorobanResurrect {
   /** Soroban RPC server instance. */
   public readonly server: rpc.Server
@@ -269,6 +272,7 @@ export class SorobanResurrect {
   }
 
   private setState(state: RestoreState, message: string) {
+    debug('state: %s -> %s (%s)', this._state, state, message)
     this._state = state
     this._message = message
     if (state !== 'error') {
@@ -358,6 +362,7 @@ export class SorobanResurrect {
    */
   async detectArchivedKeys(transaction: Transaction): Promise<ArchivedLedgerEntry[]> {
     const method = this.config.archiveDetectionMethod ?? 'simulation'
+    debug('detectArchivedKeys: using %s detection', method)
 
     let keys: ArchivedLedgerEntry[] = []
 
@@ -369,9 +374,11 @@ export class SorobanResurrect {
       }
     } catch (err) {
       console.warn('SorobanResurrect: archive detection error:', err)
+      debug('detectArchivedKeys: detection failed', err)
       keys = []
     }
 
+    debug('detectArchivedKeys: found %d archived entries', keys.length)
     this._lastArchivedKeys = keys
     return keys
   }

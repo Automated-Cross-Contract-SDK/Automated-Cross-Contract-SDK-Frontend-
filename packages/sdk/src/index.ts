@@ -39,6 +39,13 @@ export {
 } from './Restorer.js'
 export { SimulationCache } from './SimulationCache.js'
 export {
+  createDebugger,
+  isDebugEnabled,
+  refreshDebugFilter,
+  DEBUG_NAMESPACE_PREFIX,
+} from './Debug.js'
+export type { Debugger } from './Debug.js'
+export {
   DEFAULT_NETWORK_PASSPHRASE,
   DEFAULT_RPC_URL,
   POLL_INTERVAL_MS,

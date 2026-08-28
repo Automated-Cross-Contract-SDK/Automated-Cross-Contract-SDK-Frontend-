@@ -109,5 +109,65 @@ These are exported alongside the class for advanced/lower-level usage:
 | `waitForTransaction(server, hash, pollIntervalMs?, pollTimeoutMs?)` | `Restorer.js` | Polls until a transaction reaches a terminal status.       |
 | `prepareTransaction(server, tx)` | `Restorer.js` | Simulates and assembles a transaction; throws on error or restore-required. |
 | `extractXdrOperations(tx)`       | `Restorer.js` | Extracts XDR operations from a transaction, handling fee-bump envelopes.       |
+| `createDebugger(namespace)`      | `Debug.js`    | Creates a namespaced debug logger. See [Debug logging](#debug-logging).        |
+| `isDebugEnabled(namespace)`      | `Debug.js`    | Returns whether the active `DEBUG` filter enables a namespace.                 |
+| `refreshDebugFilter(spec?)`      | `Debug.js`    | Re-reads the filter after `DEBUG` or `localStorage.debug` changes at runtime.  |
+
+## Debug logging
+
+The SDK logs its internal operations through a namespaced debug logger. Nothing
+is printed unless logging is switched on explicitly.
+
+In Node, set the `DEBUG` environment variable:
+
+```bash
+DEBUG=soroban-resurrect:* node script.js
+```
+
+In a browser, set `localStorage.debug` and reload:
+
+```js
+localStorage.debug = 'soroban-resurrect:*'
+```
+
+### Namespaces
+
+| Namespace | What it logs |
+|-----------|--------------|
+| `soroban-resurrect:core` | State transitions and archived-key detection on the `SorobanResurrect` instance. |
+| `soroban-resurrect:archiver` | Chunked ledger-entry queries and their archived/not-archived outcomes. |
+| `soroban-resurrect:executor` | The restore-and-submit workflow. |
+
+Patterns support `*` as a wildcard, comma or space separated, and a leading `-`
+to exclude:
+
+```bash
+DEBUG=soroban-resurrect:archiver          # one namespace
+DEBUG=soroban-resurrect:*,-soroban-resurrect:core   # all but core
+```
+
+### Logging from your own code
+
+`createDebugger` is exported, so application code can log under the same filter:
+
+```typescript
+import { createDebugger } from '@soroban-resurrect/sdk'
+
+const debug = createDebugger('my-app')
+
+debug('submitting transaction %s', hash)
+// soroban-resurrect:my-app submitting transaction abc123 +4ms
+```
+
+Guard expensive work with the `enabled` flag:
+
+```typescript
+if (debug.enabled) {
+  debug('footprint: %o', keys.map((k) => k.keyBase64))
+}
+```
+
+Output goes to `console.debug`. Note that most browser consoles hide
+`console.debug` behind a "Verbose" log level filter.
 
 For the full type definitions used throughout this API, see [Types](/api/types).

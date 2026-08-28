@@ -1,6 +1,9 @@
 import { rpc, Transaction } from '@stellar/stellar-sdk'
 import { xdr } from '@stellar/stellar-sdk'
 import { ArchivedLedgerEntry, SimulateResponse } from './types.js'
+import { createDebugger } from './Debug.js'
+
+const debug = createDebugger('archiver')
 
 /**
  * Type guard — returns true if the simulation response indicates archived
@@ -154,6 +157,7 @@ export async function detectArchivedEntries(
   const archived: ArchivedLedgerEntry[] = []
 
   const chunkSize = 50
+  debug('detectArchivedEntries: checking %d keys in chunks of %d', ledgerKeys.length, chunkSize)
   for (let i = 0; i < ledgerKeys.length; i += chunkSize) {
     const chunk = ledgerKeys.slice(i, i + chunkSize)
     try {
@@ -175,7 +179,8 @@ export async function detectArchivedEntries(
           })
         }
       }
-    } catch {
+    } catch (err) {
+      debug('detectArchivedEntries: chunk at offset %d failed, assuming archived', i, err)
       // On network error, conservatively treat all keys in chunk as archived
       archived.push(
         ...chunk.map((key) => ({
@@ -186,6 +191,7 @@ export async function detectArchivedEntries(
     }
   }
 
+  debug('detectArchivedEntries: %d of %d keys archived', archived.length, ledgerKeys.length)
   return archived
 }
 
