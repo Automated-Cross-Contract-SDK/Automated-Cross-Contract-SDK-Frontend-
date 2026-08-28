@@ -54,7 +54,8 @@ function buildStrAppMock(kp: Keypair) {
     getPublicKey: vi.fn().mockResolvedValue({ publicKey: kp.publicKey() }),
     getAppConfiguration: vi.fn().mockResolvedValue({ version: '6.1.0' }),
     signHash: vi.fn().mockImplementation(async (_path: string, hash: Uint8Array) => ({
-      signature: kp.sign(hash),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      signature: (kp as any).sign(hash),
     })),
   }
 }
@@ -311,6 +312,7 @@ describe('TrezorWalletAdapter', () => {
   describe('connect()', () => {
     it('throws when no trezorConnect instance is provided', async () => {
       const adapter = new TrezorWalletAdapter({
+        trezorConnect: null,
         manifest: { email: 'a@b.com', appUrl: 'https://a.com' },
       })
       await expect(adapter.connect()).rejects.toThrow(

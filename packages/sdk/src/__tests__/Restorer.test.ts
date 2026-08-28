@@ -67,7 +67,7 @@ describe('Restorer', () => {
         Networks.TESTNET,
       )
       // FeeBumpTransaction extends Transaction, so this compiles
-      const ops = extractXdrOperations(feeBumpTx)
+      const ops = extractXdrOperations(feeBumpTx as unknown as Transaction)
       expect(ops.length).toBe(1)
       expect(ops[0]).toBeDefined()
     })
@@ -84,15 +84,16 @@ describe('Restorer', () => {
 
       const v0TxBody = new xdr.TransactionV0({
         sourceAccountEd25519: kp.rawPublicKey(),
-        fee: new xdr.Uint32(100),
-        seqNum: new xdr.SequenceNumber(new xdr.Int64(0, 1)),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        fee: 100 as unknown as any,
+        seqNum: BigInt(1) as unknown as xdr.Int64,
         timeBounds: new xdr.TimeBounds({
-          minTime: new xdr.TimePoint(0),
-          maxTime: new xdr.TimePoint(0),
+          minTime: BigInt(0) as unknown as xdr.Uint64,
+          maxTime: BigInt(0) as unknown as xdr.Uint64,
         }),
         memo: xdr.Memo.memoNone(),
         operations,
-        ext: new xdr.TransactionExt(0),
+        ext: 0 as unknown as xdr.TransactionExt,
       })
 
       const v0Envelope = new xdr.TransactionV0Envelope({

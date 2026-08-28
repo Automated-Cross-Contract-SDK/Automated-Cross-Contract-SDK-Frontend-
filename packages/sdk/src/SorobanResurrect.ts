@@ -305,7 +305,7 @@ export class SorobanResurrect {
    * ```
    */
   async buildRestoreTx(
-    sourcePublicKey: string,
+    sourcePublicKey: StellarPublicKey | string,
     transaction: Transaction,
     simulationResponse?: rpc.Api.SimulateTransactionRestoreResponse,
   ): Promise<Transaction> {

@@ -1,5 +1,6 @@
 import { rpc, xdr } from '@stellar/stellar-sdk'
 import { ArchivedLedgerEntry } from './types.js'
+import { asXdrBase64, type XdrBase64 } from './branded-types.js'
 
 /**
  * Average ledger close time in seconds. Used for estimating time remaining
@@ -12,7 +13,7 @@ export const LEDGER_CLOSE_TIME_SECONDS = 5
  */
 export interface LedgerEntryTTLInfo {
   /** Base64-encoded XDR representation of the ledger key. */
-  keyBase64: string
+  keyBase64: XdrBase64
   /** Ledger sequence number at which this entry expires (0 if archived). */
   liveUntilLedger: number
   /** Current ledger sequence number at the time of the query. */
@@ -45,7 +46,7 @@ export interface TTLQueryResult {
  * Builds a `LedgerEntryTTLInfo` object for an entry that was not found
  * on-chain (i.e. already archived).
  */
-function makeArchivedInfo(keyBase64: string, currentLedger: number): LedgerEntryTTLInfo {
+function makeArchivedInfo(keyBase64: XdrBase64, currentLedger: number): LedgerEntryTTLInfo {
   return {
     keyBase64,
     liveUntilLedger: 0,
@@ -60,7 +61,7 @@ function makeArchivedInfo(keyBase64: string, currentLedger: number): LedgerEntry
  * Builds a `LedgerEntryTTLInfo` object for a live (non-archived) entry.
  */
 function makeLiveInfo(
-  keyBase64: string,
+  keyBase64: XdrBase64,
   liveUntilLedger: number,
   currentLedger: number,
 ): LedgerEntryTTLInfo {
@@ -104,7 +105,7 @@ export async function queryLedgerTTL(
 
   // Pre-populate all keys as archived; overwrite if found on-chain
   for (const key of keys) {
-    const keyBase64 = key.toXDR('base64')
+    const keyBase64 = asXdrBase64(key.toXDR('base64'))
     infoMap.set(keyBase64, makeArchivedInfo(keyBase64, currentLedger))
   }
 
@@ -115,7 +116,7 @@ export async function queryLedgerTTL(
       const result = await server.getLedgerEntries(...chunk)
       if (result.entries) {
         for (const entry of result.entries) {
-          const keyBase64 = entry.key.toXDR('base64')
+          const keyBase64 = asXdrBase64(entry.key.toXDR('base64'))
           const liveUntilLedger = entry.liveUntilLedgerSeq ?? 0
           infoMap.set(keyBase64, makeLiveInfo(keyBase64, liveUntilLedger, currentLedger))
         }
@@ -128,7 +129,7 @@ export async function queryLedgerTTL(
 
   // Preserve original key order
   const entries: LedgerEntryTTLInfo[] = keys.map((key) => {
-    const keyBase64 = key.toXDR('base64')
+    const keyBase64 = asXdrBase64(key.toXDR('base64'))
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     return infoMap.get(keyBase64)!
   })
