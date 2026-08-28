@@ -15,10 +15,12 @@
   ],
   "scripts": {
     "build": "tsc",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint 'src/**/*.{ts,tsx}'"
   },
   "dependencies": {
-    "@lobstrco/signer-extension-api": "^1.0.2"
+    "@lobstrco/signer-extension-api": "^2.0.0"
   },
   "peerDependencies": {
     "@soroban-resurrect/sdk": "^0.1.0"

@@ -1,5 +1,6 @@
 import { Networks } from '@stellar/stellar-sdk'
 import type { HardwareWalletAdapter, LedgerAdapterConfig, TrezorAdapterConfig } from './types.js'
+import { asStellarPublicKey, asXdrBase64 } from './branded-types.js'
 
 /**
  * BIP44 coin type for Stellar (SLIP-0044).
@@ -127,13 +128,13 @@ export class LedgerWalletAdapter implements HardwareWalletAdapter {
    * Returns the Stellar public key for the configured account index.
    * Requires `connect()` to have been called first.
    */
-  async getPublicKey(): Promise<string> {
+  async getPublicKey() {
     this.assertConnected()
     if (!this._publicKey) {
       const result = await this.strApp!.getPublicKey(this.bip44Path)
       this._publicKey = result.publicKey
     }
-    return this._publicKey
+    return asStellarPublicKey(this._publicKey)
   }
 
   /**
@@ -149,7 +150,7 @@ export class LedgerWalletAdapter implements HardwareWalletAdapter {
   async signTransaction(
     txXdr: string,
     opts?: { networkPassphrase?: string; network?: string },
-  ): Promise<string> {
+  ) {
     this.assertConnected()
 
     const networkPassphrase = opts?.networkPassphrase ?? Networks.TESTNET
@@ -172,7 +173,7 @@ export class LedgerWalletAdapter implements HardwareWalletAdapter {
     const signatureBase64 = btoa(String.fromCharCode(...Array.from(signResult.signature)))
     tx.addSignature(keypair.publicKey(), signatureBase64)
 
-    return tx.toEnvelope().toXDR('base64')
+    return asXdrBase64(tx.toEnvelope().toXDR('base64'))
   }
 
   private assertConnected(): void {
@@ -300,12 +301,12 @@ export class TrezorWalletAdapter implements HardwareWalletAdapter {
    * Returns the Stellar public key for the configured account index.
    * Requires `connect()` to have been called first.
    */
-  async getPublicKey(): Promise<string> {
+  async getPublicKey() {
     this.assertConnected()
     if (!this._publicKey) {
       this._publicKey = await this.fetchPublicKey()
     }
-    return this._publicKey
+    return asStellarPublicKey(this._publicKey)
   }
 
   /**
@@ -318,7 +319,7 @@ export class TrezorWalletAdapter implements HardwareWalletAdapter {
   async signTransaction(
     txXdr: string,
     opts?: { networkPassphrase?: string; network?: string },
-  ): Promise<string> {
+  ) {
     this.assertConnected()
 
     const networkPassphrase = opts?.networkPassphrase ?? Networks.TESTNET
@@ -346,7 +347,7 @@ export class TrezorWalletAdapter implements HardwareWalletAdapter {
     const keypair = Keypair.fromPublicKey(publicKey)
     tx.addSignature(keypair.publicKey(), signature)
 
-    return tx.toEnvelope().toXDR('base64')
+    return asXdrBase64(tx.toEnvelope().toXDR('base64'))
   }
 
   private async fetchPublicKey(): Promise<string> {
