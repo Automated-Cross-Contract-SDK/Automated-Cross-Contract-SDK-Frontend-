@@ -62,3 +62,20 @@ export type {
   SorobanResurrectEvents,
 } from './types.js'
 export { TypedEventEmitter } from './EventEmitter.js'
+export { resolveConfig } from './SorobanResurrectConfig.js'
+export type { ResolvedConfig } from './SorobanResurrectConfig.js'
+export { SorobanResurrectStateManager } from './SorobanResurrectState.js'
+export { SorobanResurrectSimulator } from './SorobanResurrectSimulation.js'
+export { SorobanResurrectExecutor } from './SorobanResurrectExecution.js'
+export type { LedgerEntryTTLInfo, TTLQueryResult } from './TTLHelpers.js'
+export {
+  queryLedgerTTL,
+  queryLedgerEntryTTL,
+  getExpiringSoonEntries,
+  getArchivedEntries,
+} from './TTLHelpers.js'
+export type {
+  TransactionHistoryEntry,
+  TransactionAttemptStatus,
+} from './TransactionHistory.js'
+export { TransactionHistory } from './TransactionHistory.js'
