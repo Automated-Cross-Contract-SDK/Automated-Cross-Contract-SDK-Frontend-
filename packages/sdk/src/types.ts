@@ -129,6 +129,12 @@ export interface ResurrectResult {
   dryRun?: boolean
   /** Detailed dry-run information (present when dryRun is true). */
   dryRunResult?: DryRunResult
+  /**
+   * History entry id for this attempt. Present when the result was produced
+   * by `SorobanResurrect.submitWithRestore`. Pass to `retry()` to re-attempt
+   * the workflow without rebuilding the original transaction.
+   */
+  historyId?: string
 }
 
 /**
@@ -209,6 +215,60 @@ export interface RestoreStateInfo {
   archivedKeys?: ArchivedLedgerEntry[]
   /** Error message (only set in error state). */
   error?: string
+}
+
+// ---------------------------------------------------------------------------
+// Hardware wallet types
+// ---------------------------------------------------------------------------
+
+/**
+ * Extended wallet adapter interface for hardware wallet devices (Ledger, Trezor).
+ * Adds `connect`/`disconnect` lifecycle methods to the base `WalletAdapter`.
+ */
+export interface HardwareWalletAdapter extends WalletAdapter {
+  /** Device type identifier. */
+  readonly type: 'ledger' | 'trezor'
+  /** Connects to the hardware device and prepares it for signing. */
+  connect(): Promise<void>
+  /** Disconnects from the hardware device and releases the transport. */
+  disconnect(): Promise<void>
+}
+
+/**
+ * Configuration for `LedgerWalletAdapter`.
+ *
+ * @see {@link LedgerWalletAdapter}
+ */
+export interface LedgerAdapterConfig {
+  /**
+   * A pre-opened Ledger transport instance (e.g. from `@ledgerhq/hw-transport-webusb`).
+   * When omitted, the adapter cannot sign — you must call `connect()` manually after
+   * supplying a transport via `setTransport()`.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  transport?: any
+  /** BIP44 account index for key derivation (default: 0). */
+  accountIndex?: number
+}
+
+/**
+ * Configuration for `TrezorWalletAdapter`.
+ *
+ * @see {@link TrezorWalletAdapter}
+ */
+export interface TrezorAdapterConfig {
+  /**
+   * Your application's manifest — required by Trezor Connect.
+   * See https://connect.trezor.io/9/methods/manifest/
+   */
+  manifest: {
+    /** Email address for the application maintainer. */
+    email: string
+    /** URL of the application's public repository. */
+    appUrl: string
+  }
+  /** BIP44 account index for key derivation (default: 0). */
+  accountIndex?: number
 }
 
 /**
