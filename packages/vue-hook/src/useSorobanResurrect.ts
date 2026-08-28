@@ -11,6 +11,7 @@ import {
 } from 'vue'
 import {
   SorobanResurrect,
+  isProcessingState,
   type SorobanResurrectConfig,
   type WalletAdapter,
   type RestoreStateInfo,
@@ -83,17 +84,7 @@ export function useSorobanResurrect(
     }
   })
 
-  const isProcessing = computed(() => {
-    const s = state.value.state
-    return (
-      s === 'simulating' ||
-      s === 'signing_restore' ||
-      s === 'submitting_restore' ||
-      s === 'confirming_restore' ||
-      s === 'signing_original' ||
-      s === 'submitting_original'
-    )
-  })
+  const isProcessing = computed(() => isProcessingState(state.value.state))
 
   const submitWithRestore = async (
     transaction: Transaction,

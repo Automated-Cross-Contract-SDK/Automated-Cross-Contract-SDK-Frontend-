@@ -9,6 +9,7 @@ import React, {
 } from 'react'
 import {
   SorobanResurrect,
+  isProcessingState,
   type SorobanResurrectConfig,
   type WalletAdapter,
   type RestoreStateInfo,
@@ -128,13 +129,7 @@ export function SorobanResurrectProvider({ config, children }: SorobanResurrectP
     resurrectRef.current?.reset(fromState)
   }, [])
 
-  const isProcessing =
-    state.state === 'simulating' ||
-    state.state === 'signing_restore' ||
-    state.state === 'submitting_restore' ||
-    state.state === 'confirming_restore' ||
-    state.state === 'signing_original' ||
-    state.state === 'submitting_original'
+  const isProcessing = isProcessingState(state.state)
 
   const value: SorobanResurrectContextValue = {
     resurrect: resurrectRef.current,
