@@ -1,16 +1,8 @@
 import { rpc, Account, Keypair } from '@stellar/stellar-sdk'
 import { TransactionBuilder, Operation, Transaction, xdr, FeeBumpTransaction } from '@stellar/stellar-sdk'
 import { SorobanResurrectConfig, FeeBumpSponsor } from './types.js'
-import { DEFAULT_NETWORK_PASSPHRASE, RESTORE_FEE_MULTIPLIER } from './constants.js'
-import {
-  asTxHash,
-  asXdrBase64,
-  asStellarPublicKey,
-  type TxHash,
-  type XdrBase64,
-  type StellarPublicKey,
-  type SequenceNumber,
-} from './branded-types.js'
+import { DEFAULT_NETWORK_PASSPHRASE } from './constants.js'
+import { calculateRestoreFee } from './feeCalculation.js'
 
 /** Parameters for building a restore transaction. */
 export interface BuildRestoreTxParams {
@@ -63,8 +55,6 @@ export async function buildRestoreTransaction(params: BuildRestoreTxParams): Pro
   const { sourcePublicKey, transactionData, minResourceFee, config, account: preFetched, sequenceNumber } = params
 
   const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
-  const restoreFeeMultiplier = (config as Required<typeof config>).restoreFeeMultiplier ?? RESTORE_FEE_MULTIPLIER
-
   let account = preFetched
   if (!account) {
     if (sequenceNumber !== undefined) {
@@ -74,7 +64,7 @@ export async function buildRestoreTransaction(params: BuildRestoreTxParams): Pro
     }
   }
 
-  const restoreFee = (minResourceFee * restoreFeeMultiplier).toString()
+  const restoreFee = calculateRestoreFee(minResourceFee, config)
 
   const restoreTx = new TransactionBuilder(account, {
     fee: restoreFee,
