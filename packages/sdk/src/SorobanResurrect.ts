@@ -8,6 +8,7 @@ import type {
   ResurrectResult,
   SubmitWithRestoreOptions,
   SorobanResurrectEvents,
+  WalletAdapter,
 } from './types.js'
 import { resolveConfig } from './SorobanResurrectConfig.js'
 import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
