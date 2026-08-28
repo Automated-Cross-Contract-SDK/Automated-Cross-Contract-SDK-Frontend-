@@ -16,11 +16,14 @@
   "scripts": {
     "build": "tsup",
     "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint 'src/**/*.{ts,tsx}'",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@stellar/stellar-sdk": "^12.0.0"
+    "@stellar/stellar-sdk": "^12.0.0",
+    "@xstate/fsm": "2.0.1"
   },
   "devDependencies": {
     "tsup": "^8.5.1",

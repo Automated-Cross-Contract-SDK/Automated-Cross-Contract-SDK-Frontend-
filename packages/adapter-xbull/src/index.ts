@@ -1,5 +1,6 @@
 import { XBullWalletConnect } from '@creit.tech/xbull-wallet-connect'
 import type { WalletAdapter } from '@soroban-resurrect/sdk'
+import { asStellarPublicKey, asXdrBase64 } from '@soroban-resurrect/sdk'
 
 /**
  * WalletAdapter implementation for the xBull browser extension wallet.
@@ -13,24 +14,25 @@ export class XBullAdapter implements WalletAdapter {
     return this.publicKey !== undefined
   }
 
-  async getPublicKey(): Promise<string> {
+  async getPublicKey() {
     const publicKey = await this.connector.connect()
     this.publicKey = publicKey
-    return publicKey
+    return asStellarPublicKey(publicKey)
   }
 
   async signTransaction(
     tx: string,
     opts?: { networkPassphrase?: string; network?: string },
-  ): Promise<string> {
+  ) {
     if (!this.publicKey) {
       throw new Error('xBull: wallet is not connected')
     }
 
-    return this.connector.sign({
+    const signed = await this.connector.sign({
       xdr: tx,
       publicKey: this.publicKey,
       network: opts?.networkPassphrase,
     })
+    return asXdrBase64(signed)
   }
 }
