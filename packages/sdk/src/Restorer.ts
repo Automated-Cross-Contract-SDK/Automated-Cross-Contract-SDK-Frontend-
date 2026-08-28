@@ -2,11 +2,12 @@ import { rpc, Account, Keypair } from '@stellar/stellar-sdk'
 import { TransactionBuilder, Operation, Transaction, xdr, FeeBumpTransaction } from '@stellar/stellar-sdk'
 import { SorobanResurrectConfig, FeeBumpSponsor } from './types.js'
 import { DEFAULT_NETWORK_PASSPHRASE, RESTORE_FEE_MULTIPLIER } from './constants.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
 
 /** Parameters for building a restore transaction. */
 export interface BuildRestoreTxParams {
-  /** Soroban RPC server instance. */
-  server: rpc.Server
+  /** RPC client used for account lookup when no pre-fetched account is given. */
+  server: ISorobanRpcClient
   /** Source account public key. */
   sourcePublicKey: string
   /** Soroban transaction data from the simulation response. */
@@ -103,7 +104,7 @@ export async function buildRestoreTransaction(params: BuildRestoreTxParams): Pro
  * ```
  */
 export async function waitForTransaction(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   hash: string,
   pollIntervalMs: number = 1000,
   pollTimeoutMs: number = 60_000,
@@ -154,7 +155,7 @@ function isTerminalStatus(status: string): boolean {
  * @private
  */
 async function streamTransactionViaEvents(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   hash: string,
   timeoutMs: number,
 ): Promise<rpc.Api.GetTransactionResponse | null> {
@@ -276,7 +277,7 @@ async function streamTransactionViaEvents(
  * @private
  */
 async function pollTransactionAdaptive(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   hash: string,
   timeoutMs: number,
 ): Promise<rpc.Api.GetTransactionResponse> {
@@ -316,7 +317,7 @@ async function pollTransactionAdaptive(
  * @throws If the transaction does not complete within the timeout
  */
 export async function waitForTransactionSSE(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   hash: string,
   pollTimeoutMs: number = 60_000,
 ): Promise<rpc.Api.GetTransactionResponse> {
@@ -427,7 +428,7 @@ export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
  * ```
  */
 export async function buildOriginalAfterRestore(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   originalTx: Transaction,
   networkPassphrase: string,
   fee: string,
@@ -488,7 +489,7 @@ export async function buildOriginalAfterRestore(
  *   {@link buildRestoreTransaction} in that case).
  */
 export async function prepareTransaction(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   tx: Transaction,
 ): Promise<Transaction> {
   const sim = await server.simulateTransaction(tx)
@@ -556,7 +557,7 @@ export async function buildFeeBumpTransaction(
  * @returns The send transaction response with the hash.
  */
 export async function submitFeeBumpTransaction(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   feeBumpXdr: string,
   networkPassphrase: string,
 ): Promise<rpc.Api.SendTransactionResponse> {

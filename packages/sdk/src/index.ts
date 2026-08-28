@@ -62,3 +62,9 @@ export type {
   SorobanResurrectEvents,
 } from './types.js'
 export { TypedEventEmitter } from './EventEmitter.js'
+
+// ---------------------------------------------------------------------------
+// RPC abstraction layer — enables test doubles and custom transports
+// ---------------------------------------------------------------------------
+export type { ISorobanRpcClient } from './RpcClient.js'
+export { SorobanRpcClient, createRpcClient } from './RpcClient.js'

@@ -1,6 +1,7 @@
 import { rpc, Transaction } from '@stellar/stellar-sdk'
 import { xdr } from '@stellar/stellar-sdk'
 import { ArchivedLedgerEntry, SimulateResponse } from './types.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
 
 /**
  * Type guard — returns true if the simulation response indicates archived
@@ -148,7 +149,7 @@ export function extractFootprintFromSuccess(response: rpc.Api.SimulateTransactio
  *   simulate → extract-footprint steps.
  */
 export async function detectArchivedEntries(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   ledgerKeys: xdr.LedgerKey[],
 ): Promise<ArchivedLedgerEntry[]> {
   const archived: ArchivedLedgerEntry[] = []
@@ -201,7 +202,7 @@ export async function detectArchivedEntries(
  *   direct-ledger-query strategy.
  */
 export async function detectArchivedKeysViaSimulation(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   transaction: Transaction,
 ): Promise<ArchivedLedgerEntry[]> {
   const response = await server.simulateTransaction(transaction)
@@ -233,7 +234,7 @@ export async function detectArchivedKeysViaSimulation(
  *   simulation-based strategy (`archiveDetectionMethod: 'simulation'`).
  */
 export async function detectArchivedKeysViaDirect(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   transaction: Transaction,
 ): Promise<ArchivedLedgerEntry[]> {
   const response = await server.simulateTransaction(transaction)
@@ -321,7 +322,7 @@ export function buildContractDataKey(
  * ```
  */
 export async function checkArchivedContractData(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   contractId: string,
   key: xdr.ScVal,
   keyType: 'persistent' | 'temporary' = 'persistent',
@@ -355,7 +356,7 @@ export async function checkArchivedContractData(
  * ```
  */
 export async function getContractDataEntry(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   contractId: string,
   key: xdr.ScVal,
   keyType: 'persistent' | 'temporary' = 'persistent',

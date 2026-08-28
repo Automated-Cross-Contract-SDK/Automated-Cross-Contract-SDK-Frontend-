@@ -1,11 +1,7 @@
 import { rpc, xdr } from '@stellar/stellar-sdk'
 import { ArchivedLedgerEntry } from './types.js'
-
-/**
- * Average ledger close time in seconds. Used for estimating time remaining
- * before a ledger entry expires.
- */
-export const LEDGER_CLOSE_TIME_SECONDS = 5
+import { rpc, xdr } from '@stellar/stellar-sdk'
+import type { ISorobanRpcClient } from './RpcClient.js'
 
 /**
  * Detailed TTL information for a single ledger entry.
@@ -91,7 +87,7 @@ function makeLiveInfo(
  * @returns Aggregated TTL result including per-entry info and query metadata.
  */
 export async function queryLedgerTTL(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   keys: xdr.LedgerKey[],
 ): Promise<TTLQueryResult> {
   const queriedAt = Date.now()
@@ -144,7 +140,7 @@ export async function queryLedgerTTL(
  * @returns TTL info for the requested entry.
  */
 export async function queryLedgerEntryTTL(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   key: xdr.LedgerKey,
 ): Promise<LedgerEntryTTLInfo> {
   const result = await queryLedgerTTL(server, [key])
@@ -161,7 +157,7 @@ export async function queryLedgerEntryTTL(
  * @returns Entries expiring within the threshold (or already archived).
  */
 export async function getExpiringSoonEntries(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   keys: xdr.LedgerKey[],
   ledgersThreshold: number,
 ): Promise<LedgerEntryTTLInfo[]> {
@@ -181,7 +177,7 @@ export async function getExpiringSoonEntries(
  * @returns Archived entries as `ArchivedLedgerEntry[]`.
  */
 export async function getArchivedEntries(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   keys: xdr.LedgerKey[],
 ): Promise<ArchivedLedgerEntry[]> {
   const result = await queryLedgerTTL(server, keys)

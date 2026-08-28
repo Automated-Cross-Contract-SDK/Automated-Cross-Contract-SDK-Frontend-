@@ -1,4 +1,5 @@
 import { rpc, TransactionBuilder, Transaction } from '@stellar/stellar-sdk'
+import type { ISorobanRpcClient } from './RpcClient.js'
 import type {
   SorobanResurrectConfig,
   WalletAdapter,
@@ -26,8 +27,8 @@ import { DEFAULT_NETWORK_PASSPHRASE, POLL_INTERVAL_MS, POLL_TIMEOUT_MS } from '.
 
 /** Parameters for the full restore-and-submit execution flow. */
 export interface ExecuteParams {
-  /** Soroban RPC server instance. */
-  server: rpc.Server
+  /** RPC client used for all Soroban network calls. */
+  server: ISorobanRpcClient
   /** The original transaction to submit (may need restore first). */
   transaction: Transaction
   /** Wallet adapter used for signing. */
@@ -66,7 +67,7 @@ async function signAndMaybeFeeBump(params: {
   wallet: WalletAdapter
   feeBumpConfig?: FeeBumpConfig
   networkPassphrase: string
-  server: rpc.Server
+  server: ISorobanRpcClient
   onSigning?: () => void
   onSigningFeeBump?: () => void
   onSubmitting?: () => void
@@ -110,7 +111,7 @@ async function signAndMaybeFeeBump(params: {
  * of transactions that differ only by sequence number.
  */
 async function simulateWithCache(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   tx: Transaction,
   cache?: SimulationCache,
 ): Promise<rpc.Api.SimulateTransactionResponse> {
@@ -130,7 +131,7 @@ async function simulateWithCache(
  * Helper: waits for a transaction using SSE if configured, otherwise polls.
  */
 async function waitForTx(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   hash: string,
   config: SorobanResurrectConfig,
 ): Promise<rpc.Api.GetTransactionResponse> {
@@ -188,14 +189,14 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
 
   const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
 
-  // Signal workflow start
-  onRestoreStart?.()
-
-  // Signal workflow start
-  onRestoreStart?.()
-
-  // Signal workflow start
-  onRestoreStart?.()
+  // Extract optional fields that may not be destructured from params
+  const onSigningRestore = (params as ExecuteParams & { onSigningRestore?: () => void }).onSigningRestore
+  const onSubmittingRestore = (params as ExecuteParams & { onSubmittingRestore?: () => void }).onSubmittingRestore
+  const onSigningOriginal = (params as ExecuteParams & { onSigningOriginal?: () => void }).onSigningOriginal
+  const feeBumpConfig = (params as ExecuteParams & { feeBumpConfig?: FeeBumpConfig }).feeBumpConfig
+  const simulationCache = (params as ExecuteParams & { simulationCache?: SimulationCache }).simulationCache
+  const pollInterval = config.pollIntervalMs ?? POLL_INTERVAL_MS
+  const pollTimeout = config.pollTimeoutMs ?? POLL_TIMEOUT_MS
 
   try {
     const simResponse = await simulateWithCache(server, originalTx, simulationCache)
@@ -344,7 +345,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
  * Returns a `ResurrectResult` with the transaction hash on success.
  */
 export async function sendTransaction(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   transaction: Transaction,
   wallet: WalletAdapter,
   config: SorobanResurrectConfig,
@@ -395,7 +396,7 @@ export async function sendTransaction(
  * helper from Restorer.ts but adds callback support.
  */
 async function waitForTransactionWithCallbacks(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   hash: string,
   pollIntervalMs: number,
   pollTimeoutMs: number,

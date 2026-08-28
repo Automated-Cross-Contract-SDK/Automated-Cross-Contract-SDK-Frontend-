@@ -1,5 +1,6 @@
 import { Transaction, xdr } from '@stellar/stellar-sdk'
 import { rpc } from '@stellar/stellar-sdk'
+import type { ISorobanRpcClient } from './RpcClient.js'
 
 /**
  * Configuration options for creating a SorobanResurrect instance.
@@ -36,6 +37,27 @@ export interface SorobanResurrectConfig {
   enableSimulationCache?: boolean
   /** Use SSE-based transaction status waiting when available (default: false). */
   useSSE?: boolean
+  /**
+   * Optional pre-built RPC client to use instead of creating one from `rpcUrl`.
+   *
+   * When provided, the SDK uses this client for all Soroban RPC calls
+   * instead of instantiating a new `rpc.Server`. This enables:
+   * - Injecting test doubles that implement {@link ISorobanRpcClient}
+   * - Wrapping the default client with caching, logging, or rate-limiting
+   * - Reusing a single client across multiple `SorobanResurrect` instances
+   *
+   * If omitted, the SDK creates a {@link SorobanRpcClient} from `rpcUrl`
+   * automatically (the default behaviour, unchanged from previous versions).
+   *
+   * @example
+   * ```ts
+   * import { createRpcClient } from '@soroban-resurrect/sdk'
+   *
+   * const client = createRpcClient('https://soroban-testnet.stellar.org')
+   * const sdk = new SorobanResurrect({ rpcUrl: '...', rpcClient: client })
+   * ```
+   */
+  rpcClient?: ISorobanRpcClient
 }
 
 /**
