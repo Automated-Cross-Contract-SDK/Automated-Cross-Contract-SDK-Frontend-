@@ -57,6 +57,18 @@ export class SorobanResurrect {
   private readonly _simulator: SorobanResurrectSimulator
   private readonly _executor: SorobanResurrectExecutor
 
+  // Optional simulation cache (enabled via config.enableSimulationCache).
+  private _simulationCache: SimulationCache | undefined
+
+  // Transaction history log.
+  private _history = new TransactionHistory()
+
+  // Last set of archived keys from a standalone detectArchivedKeys() call.
+  // The FSM context already stores archivedKeys for the full submit workflow;
+  // this field covers the standalone diagnostic path so stateInfo.archivedKeys
+  // is always populated regardless of which code path populated it.
+  private _standaloneArchivedKeys: ArchivedLedgerEntry[] = []
+
   /**
    * Creates a new SDK instance bound to a single Soroban RPC endpoint.
    *
@@ -107,6 +119,10 @@ export class SorobanResurrect {
     return this._stateMgr.stateInfo
   }
 
+  // ---------------------------------------------------------------------------
+  // Retry
+  // ---------------------------------------------------------------------------
+
   /**
    * Resets the instance back to idle state, clearing archived keys and errors.
    *
@@ -132,10 +148,6 @@ export class SorobanResurrect {
 
   /**
    * Registers a listener for state changes. Returns an unsubscribe function.
-   *
-   * Listener errors are caught and logged (via `console.warn`) so a
-   * misbehaving listener cannot break the workflow or prevent other
-   * listeners from being notified.
    *
    * @param listener - Callback invoked with a {@link RestoreStateInfo}
    *   snapshot on every state transition.
@@ -419,5 +431,60 @@ export class SorobanResurrect {
     ledgersThreshold = 100_000,
   ): Promise<LedgerEntryTTLInfo[]> {
     return getExpiringSoonEntries(this.server, keys, ledgersThreshold)
+  }
+
+  // ---------------------------------------------------------------------------
+  // Direct send (no restore)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Signs and submits a transaction directly, without automatic archive
+   * restoration. Use `submitWithRestore` for the full workflow.
+   */
+  async sendTransaction(
+    transaction: Transaction,
+    wallet: WalletAdapter,
+  ): Promise<ResurrectResult> {
+    return sendTransaction(this.server, transaction, wallet, this.config)
+  }
+
+  // ---------------------------------------------------------------------------
+  // TTL / expiry helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Queries the current TTL information for one or more ledger keys.
+   *
+   * @param keys - Ledger keys to query.
+   * @returns Aggregated TTL result with per-entry info and query metadata.
+   */
+  async queryLedgerTTL(keys: xdr.LedgerKey[]): Promise<TTLQueryResult> {
+    return _queryLedgerTTL(this.server, keys)
+  }
+
+  /**
+   * Queries the current TTL information for a single ledger key.
+   *
+   * @param key - The ledger key to query.
+   * @returns TTL info for the requested entry.
+   */
+  async queryLedgerEntryTTL(key: xdr.LedgerKey): Promise<LedgerEntryTTLInfo> {
+    return _queryLedgerEntryTTL(this.server, key)
+  }
+
+  /**
+   * Returns ledger entries that are expiring within `ledgersThreshold` ledgers,
+   * including entries that are already archived.
+   *
+   * @param keys              - Ledger keys to query.
+   * @param ledgersThreshold  - Maximum ledgers remaining to be considered
+   *   "expiring soon" (defaults to 100,000 ≈ ~5.8 days at 5 s/ledger).
+   * @returns Entries expiring within the threshold (or already archived).
+   */
+  async getExpiringSoonEntries(
+    keys: xdr.LedgerKey[],
+    ledgersThreshold = 100_000,
+  ): Promise<LedgerEntryTTLInfo[]> {
+    return _getExpiringSoonEntries(this.server, keys, ledgersThreshold)
   }
 }
