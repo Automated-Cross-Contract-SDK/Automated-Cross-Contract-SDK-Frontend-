@@ -1,6 +1,7 @@
 import { rpc, Transaction, xdr } from '@stellar/stellar-sdk'
-import {
+import type {
   SorobanResurrectConfig,
+  WalletAdapter,
   RestoreState,
   RestoreStateInfo,
   ArchivedLedgerEntry,
@@ -9,31 +10,17 @@ import {
   SorobanResurrectEvents,
   WalletAdapter,
 } from './types.js'
-import { executeWithRestore, sendTransaction } from './Executor.js'
-import { isRestoreResponse, extractArchivedKeys } from './Archiver.js'
-import { buildRestoreTransaction } from './Restorer.js'
+import { resolveConfig } from './SorobanResurrectConfig.js'
+import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
+import { SorobanResurrectSimulator } from './SorobanResurrectSimulation.js'
+import { SorobanResurrectExecutor } from './SorobanResurrectExecution.js'
+import type { TransactionHistoryEntry } from './TransactionHistory.js'
 import {
-  DEFAULT_NETWORK_PASSPHRASE,
-  POLL_INTERVAL_MS,
-  POLL_TIMEOUT_MS,
-  RESTORE_FEE_MULTIPLIER,
-  KNOWN_NETWORK_PASSPHRASES,
-  resolveNetworkPassphrase,
-} from './constants.js'
-import { TypedEventEmitter } from './EventEmitter.js'
-import { SimulationCache } from './SimulationCache.js'
-import { TransactionHistory, TransactionHistoryEntry } from './TransactionHistory.js'
-import { TTLQueryResult, LedgerEntryTTLInfo } from './TTLHelpers.js'
-import {
-  queryLedgerTTL as _queryLedgerTTL,
-  queryLedgerEntryTTL as _queryLedgerEntryTTL,
-  getExpiringSoonEntries as _getExpiringSoonEntries,
+  queryLedgerTTL,
+  queryLedgerEntryTTL,
+  getExpiringSoonEntries,
 } from './TTLHelpers.js'
-import {
-  createRestoreService,
-  toRestoreStateInfo,
-  type RestoreService,
-} from './RestoreMachine.js'
+import type { LedgerEntryTTLInfo, TTLQueryResult } from './TTLHelpers.js'
 
 /**
  * Main facade for the Soroban-Resurrect SDK.
@@ -43,18 +30,19 @@ import {
  * automatic archive restoration. State changes are published to
  * registered listeners via the observer pattern.
  *
- * Internally, workflow state is managed by an `@xstate/fsm` finite state
- * machine (see `RestoreMachine.ts`). This replaces the former manual
- * `_state`/`_message` variables and imperative `setState()` calls with
- * explicit, declarative state transitions that are easier to reason about,
- * test in isolation, and visualise.
+ * Internally the class delegates every concern to a focused module:
+ * - **Config / init** → {@link resolveConfig} (`SorobanResurrectConfig.ts`)
+ * - **State & events** → `SorobanResurrectStateManager` (`SorobanResurrectState.ts`)
+ * - **Simulation & detection** → `SorobanResurrectSimulator` (`SorobanResurrectSimulation.ts`)
+ * - **Execution & history** → `SorobanResurrectExecutor` (`SorobanResurrectExecution.ts`)
+ * - **TTL helpers** → functions in `TTLHelpers.ts`
  *
  * @see {@link SorobanResurrectConfig} for constructor options.
  * @see {@link onStateChange} to subscribe to workflow state transitions.
  *
  * @example
  * ```ts
- * const resurrect = new SorobanResurrect({ rpcUrl: 'https://...' })
+ * const resurrect = new SorobanResurrect({ rpcUrl: 'https://soroban-testnet.stellar.org' })
  * const result = await resurrect.submitWithRestore({ transaction, wallet })
  * // result.historyId can be used to retry via resurrect.retry(result.historyId, wallet)
  * ```
@@ -65,16 +53,9 @@ export class SorobanResurrect {
   /** Resolved configuration with defaults applied. */
   public readonly config: Required<SorobanResurrectConfig>
 
-  // ---------------------------------------------------------------------------
-  // State machine (replaces former _state / _message / _lastError /
-  // _lastArchivedKeys private fields and the imperative setState() method)
-  // ---------------------------------------------------------------------------
-  private _service: RestoreService
-
-  // Legacy observer-pattern listeners (kept for backward compatibility with
-  // the public onStateChange() API).
-  private _listeners: Array<(info: RestoreStateInfo) => void> = []
-  private _emitter = new TypedEventEmitter<SorobanResurrectEvents>()
+  private readonly _stateMgr: SorobanResurrectStateManager
+  private readonly _simulator: SorobanResurrectSimulator
+  private readonly _executor: SorobanResurrectExecutor
 
   // Optional simulation cache (enabled via config.enableSimulationCache).
   private _simulationCache: SimulationCache | undefined
@@ -93,6 +74,8 @@ export class SorobanResurrect {
    *
    * @param config - SDK configuration. Only `rpcUrl` is required; all
    *   other fields fall back to sensible Testnet defaults.
+   * @throws {Error} If the resolved `networkPassphrase` is not a known
+   *   Stellar network passphrase.
    *
    * @example
    * ```ts
@@ -103,105 +86,37 @@ export class SorobanResurrect {
    * ```
    */
   constructor(config: SorobanResurrectConfig) {
-    this.server = new rpc.Server(config.rpcUrl)
+    const resolved = resolveConfig(config)
+    this.server = resolved.server
+    this.config = resolved.config
 
-    const networkPassphrase =
-      config.networkPassphrase ??
-      resolveNetworkPassphrase(config.rpcUrl) ??
-      DEFAULT_NETWORK_PASSPHRASE
-
-    // Validate network passphrase against known networks.
-    if (!KNOWN_NETWORK_PASSPHRASES.includes(networkPassphrase)) {
-      const knownNetworks = KNOWN_NETWORK_PASSPHRASES.map((p) => `"${p}"`).join(', ')
-      throw new Error(
-        `Invalid network passphrase: "${networkPassphrase}". ` +
-          `Must be one of: ${knownNetworks}. ` +
-          `A typo in the passphrase will cause cryptic transaction failures.`,
-      )
-    }
-
-    if (config.enableSimulationCache) {
-      this._simulationCache = new SimulationCache()
-    }
-
-    this.config = {
-      rpcUrl: config.rpcUrl,
-      networkPassphrase,
-      pollIntervalMs: config.pollIntervalMs ?? POLL_INTERVAL_MS,
-      pollTimeoutMs: config.pollTimeoutMs ?? POLL_TIMEOUT_MS,
-      restoreFeeMultiplier: config.restoreFeeMultiplier ?? RESTORE_FEE_MULTIPLIER,
-      archiveDetectionMethod: config.archiveDetectionMethod ?? 'simulation',
-      enableSimulationCache: config.enableSimulationCache ?? false,
-      useSSE: config.useSSE ?? false,
-    } as Required<SorobanResurrectConfig>
-
-    // Start the state machine service and wire its state transitions to the
-    // existing observer-pattern listeners and typed event emitter.
-    this._service = createRestoreService()
-    this._service.subscribe((machineState) => {
-      const info = toRestoreStateInfo(
-        String(machineState.value),
-        machineState.context,
-      )
-      for (const listener of this._listeners) {
-        try {
-          listener(info)
-        } catch (err) {
-          console.warn('SorobanResurrect: state listener error:', err)
-        }
-      }
-      this._emitter.emit('stateChange', info)
-    })
+    this._stateMgr = new SorobanResurrectStateManager()
+    this._simulator = new SorobanResurrectSimulator(
+      this.server,
+      this.config,
+      resolved.simulationCache,
+      this._stateMgr,
+    )
+    this._executor = new SorobanResurrectExecutor(
+      this.server,
+      this.config,
+      this._stateMgr,
+      this._simulator,
+    )
   }
 
   // ---------------------------------------------------------------------------
-  // Public state accessors
+  // State accessors
   // ---------------------------------------------------------------------------
 
-  /** Current workflow state. */
+  /** Current workflow state label. */
   get state(): RestoreState {
-    return this._service.state.value as RestoreState
+    return this._stateMgr.state
   }
 
   /** Snapshot of current state, message, archived keys, and error. */
   get stateInfo(): RestoreStateInfo {
-    const info = toRestoreStateInfo(
-      String(this._service.state.value),
-      this._service.state.context,
-    )
-    // Merge standalone archivedKeys (from direct detectArchivedKeys calls)
-    // so the field is always populated regardless of the code path.
-    if (!info.archivedKeys || info.archivedKeys.length === 0) {
-      info.archivedKeys = this._standaloneArchivedKeys
-    }
-    return info
-  }
-
-  // ---------------------------------------------------------------------------
-  // Transaction history
-  // ---------------------------------------------------------------------------
-
-  /**
-   * All recorded history entries in insertion order.
-   * Each `submitWithRestore` call (including retries) appends an entry.
-   */
-  get history(): TransactionHistoryEntry[] {
-    return this._history.getAll()
-  }
-
-  /**
-   * Returns all recorded history entries in insertion order.
-   * Equivalent to reading the `history` property.
-   */
-  getHistory(): TransactionHistoryEntry[] {
-    return this._history.getAll()
-  }
-
-  /**
-   * Clears all recorded history entries.
-   */
-  clearHistory(): void {
-    this._history.clear()
+    return this._stateMgr.stateInfo
   }
 
   // ---------------------------------------------------------------------------
@@ -209,61 +124,22 @@ export class SorobanResurrect {
   // ---------------------------------------------------------------------------
 
   /**
-   * Retries a previously-recorded restore workflow without re-building the
-   * original transaction.
+   * Resets the instance back to idle state, clearing archived keys and errors.
    *
-   * @param entryId - The id returned in `submitWithRestore`'s `historyId` field.
-   * @param wallet  - The wallet adapter to use for signing.
-   * @returns The result of the retry attempt.
-   * @throws If no history entry is found for `entryId`.
+   * When `fromState` is provided the reset is a no-op unless the current
+   * state matches `fromState` — useful for idempotent resets in concurrent
+   * workflows.
+   *
+   * @param fromState - Only reset if currently in this state (optional).
+   *
+   * @example
+   * ```ts
+   * resurrect.reset()
+   * console.log(resurrect.state) // 'idle'
+   * ```
    */
-  async retry(entryId: string, wallet: WalletAdapter): Promise<ResurrectResult> {
-    const entry = this._history.get(entryId)
-    if (!entry) {
-      throw new Error(`No history entry found for id: ${entryId}`)
-    }
-
-    this._history.incrementAttempt(entryId)
-
-    const result = await executeWithRestore({
-      server: this.server,
-      transaction: entry.transaction,
-      wallet,
-      config: this.config,
-      onSigningRestore: () => {
-        this._service.send({ type: 'SIGN_RESTORE' })
-      },
-      onSubmittingRestore: () => {
-        this._service.send({ type: 'SUBMIT_RESTORE' })
-      },
-      onRestoreNeeded: (keys) => {
-        this._service.send({ type: 'RESTORE_NEEDED', keys })
-        this._emitter.emit('restoreNeeded', keys)
-      },
-      onRestoreSubmitted: (txHash) => {
-        this._service.send({ type: 'CONFIRM_RESTORE' })
-        this._emitter.emit('restoreSubmitted', txHash)
-      },
-      onRestoreConfirmed: (txHash) => {
-        this._service.send({ type: 'SIGN_ORIGINAL' })
-        this._emitter.emit('restoreConfirmed', txHash)
-      },
-      onSigningOriginal: () => {
-        // Already in signing_original — no FSM transition needed.
-      },
-      onOriginalSubmitted: (txHash) => {
-        this._service.send({ type: 'SUCCESS' })
-        this._emitter.emit('originalSubmitted', txHash)
-      },
-    })
-
-    this._history.update(entryId, result)
-
-    if (!result.success) {
-      this._service.send({ type: 'FAIL', error: result.error ?? 'Unknown error' })
-    }
-
-    return result
+  reset(fromState?: RestoreState): void {
+    this._stateMgr.reset(fromState)
   }
 
   // ---------------------------------------------------------------------------
@@ -282,14 +158,12 @@ export class SorobanResurrect {
    * const unsubscribe = resurrect.onStateChange((info) => {
    *   console.log(info.state, info.message)
    * })
+   * // later:
    * unsubscribe()
    * ```
    */
   onStateChange(listener: (info: RestoreStateInfo) => void): () => void {
-    this._listeners.push(listener)
-    return () => {
-      this._listeners = this._listeners.filter((l) => l !== listener)
-    }
+    return this._stateMgr.onStateChange(listener)
   }
 
   /**
@@ -300,7 +174,7 @@ export class SorobanResurrect {
     event: K,
     listener: (payload: SorobanResurrectEvents[K]) => void,
   ): () => void {
-    return this._emitter.on(event, listener)
+    return this._stateMgr.emitter.on(event, listener)
   }
 
   /** Registers a listener that fires at most once for the given event. */
@@ -308,7 +182,7 @@ export class SorobanResurrect {
     event: K,
     listener: (payload: SorobanResurrectEvents[K]) => void,
   ): () => void {
-    return this._emitter.once(event, listener)
+    return this._stateMgr.emitter.once(event, listener)
   }
 
   /** Removes a previously registered listener for the given event. */
@@ -316,148 +190,138 @@ export class SorobanResurrect {
     event: K,
     listener: (payload: SorobanResurrectEvents[K]) => void,
   ): void {
-    this._emitter.off(event, listener)
+    this._stateMgr.emitter.off(event, listener)
   }
 
   // ---------------------------------------------------------------------------
-  // Reset
+  // History
   // ---------------------------------------------------------------------------
 
   /**
-   * Resets the instance back to idle state, clearing any archived keys
-   * and error messages from previous workflows.
-   *
-   * @param fromState - When provided, only resets if the current state
-   *   matches this value (guarded reset).
-   *
-   * @example
-   * ```ts
-   * resurrect.reset()
-   * console.log(resurrect.state) // 'idle'
-   * ```
+   * All recorded history entries in insertion order.
+   * Each `submitWithRestore` call (including retries) appends an entry.
    */
-  reset(fromState?: RestoreState): void {
-    if (fromState !== undefined && this.state !== fromState) return
-    this._standaloneArchivedKeys = []
-    this._service.send({ type: 'RESET' })
+  get history(): TransactionHistoryEntry[] {
+    return this._executor.history
+  }
+
+  /**
+   * Returns all recorded history entries in insertion order.
+   * Equivalent to reading the `history` property.
+   */
+  getHistory(): TransactionHistoryEntry[] {
+    return this._executor.getHistory()
+  }
+
+  /** Clears all recorded history entries. */
+  clearHistory(): void {
+    this._executor.clearHistory()
   }
 
   // ---------------------------------------------------------------------------
-  // Core workflow
+  // Simulation & detection
   // ---------------------------------------------------------------------------
 
   /**
    * Simulates a transaction on the Soroban RPC endpoint.
-   * Transitions internal state to `'simulating'`.
+   * Updates internal state to `'simulating'`.
    *
    * @param transaction - The transaction to simulate.
    * @returns The raw simulation response from the RPC server.
+   * @see {@link detectArchivedKeys} for a higher-level check.
    */
-  async simulate(transaction: Transaction) {
-    this._service.send({ type: 'SIMULATE' })
-
-    if (this._simulationCache) {
-      const cached = this._simulationCache.get(transaction)
-      if (cached) {
-        return cached
-      }
-    }
-
-    const response = await this.server.simulateTransaction(transaction)
-
-    if (this._simulationCache) {
-      this._simulationCache.set(transaction, response)
-    }
-
-    return response
+  async simulate(transaction: Transaction): Promise<rpc.Api.SimulateTransactionResponse> {
+    return this._simulator.simulate(transaction)
   }
 
   /**
-   * Detects archived ledger entries using the configured detection method.
-   * Returns the list of archived keys, or an empty array if none.
+   * Detects archived ledger entries using the configured detection method
+   * (`'simulation'` or `'direct'`).
    *
-   * Detection errors are caught internally and treated as "no archived
-   * keys found" — this method never throws.
+   * Detection errors are caught internally and treated as "no archived keys
+   * found" — this method never throws.
    *
-   * @param transaction - The transaction whose footprint should be checked.
-   * @returns Array of {@link ArchivedLedgerEntry} — empty if nothing is
-   *   archived or detection failed.
+   * @param transaction - The transaction whose footprint to inspect.
+   * @returns Array of {@link ArchivedLedgerEntry}; empty if nothing is archived.
+   *
+   * @example
+   * ```ts
+   * const archived = await resurrect.detectArchivedKeys(tx)
+   * if (archived.length > 0) {
+   *   console.log(`${archived.length} entries need restoring`)
+   * }
+   * ```
    */
   async detectArchivedKeys(transaction: Transaction): Promise<ArchivedLedgerEntry[]> {
-    const method = this.config.archiveDetectionMethod ?? 'simulation'
-    let keys: ArchivedLedgerEntry[] = []
-
-    try {
-      if (method === 'direct') {
-        keys = await this._detectArchivedKeysViaDirect(transaction)
-      } else {
-        keys = await this._detectArchivedKeysViaSimulation(transaction)
-      }
-    } catch (err) {
-      console.warn('SorobanResurrect: archive detection error:', err)
-      keys = []
-    }
-
-    // Store for stateInfo.archivedKeys (standalone path — the full submit
-    // workflow populates FSM context directly via the RESTORE_NEEDED event).
-    this._standaloneArchivedKeys = keys
-    return keys
-  }
-
-  private async _detectArchivedKeysViaSimulation(
-    transaction: Transaction,
-  ): Promise<ArchivedLedgerEntry[]> {
-    const response = await this.simulate(transaction)
-    if (isRestoreResponse(response)) {
-      return extractArchivedKeys(response)
-    }
-    return []
-  }
-
-  private async _detectArchivedKeysViaDirect(
-    transaction: Transaction,
-  ): Promise<ArchivedLedgerEntry[]> {
-    const { detectArchivedKeysViaDirect: detect } = await import('./Archiver.js')
-    return detect(this.server, transaction)
+    return this._simulator.detectArchivedKeys(transaction)
   }
 
   /**
-   * Convenience method — returns true if the transaction requires
-   * archive restoration before it can be submitted.
+   * Convenience method — returns `true` if the transaction requires archive
+   * restoration before it can be submitted.
    *
    * @param transaction - The transaction to check.
    * @returns `true` if one or more archived ledger entries were detected.
+   *
+   * @example
+   * ```ts
+   * if (await resurrect.needsRestore(tx)) {
+   *   // show a "restoring state..." indicator
+   * }
+   * ```
    */
-  needsRestore(transaction: Transaction): Promise<boolean> {
-    return this.detectArchivedKeys(transaction).then((keys) => keys.length > 0)
+  async needsRestore(transaction: Transaction): Promise<boolean> {
+    return this._simulator.needsRestore(transaction)
   }
 
   /**
-   * Builds a restore transaction for the given source account and transaction.
+   * Detects archived ledger entries across multiple transactions at once.
+   * Returns one array of archived keys per input transaction, in the same order.
    *
-   * If `simulationResponse` is provided it is used directly (no RPC call,
-   * no state transition). Otherwise the transaction is simulated first.
+   * @param transactions - Transactions to inspect.
+   * @returns Array of archived-key arrays, one entry per transaction.
+   */
+  async detectArchivedKeysBatch(transactions: Transaction[]): Promise<ArchivedLedgerEntry[][]> {
+    return Promise.all(transactions.map((tx) => this._simulator.detectArchivedKeys(tx)))
+  }
+
+  // ---------------------------------------------------------------------------
+  // Execution
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Builds an unsigned restore transaction for the given source account.
    *
-   * @throws {Error} If the simulation does not indicate a restore is needed.
+   * @param sourcePublicKey     - The source account public key that will pay.
+   * @param transaction         - The transaction to build a restore for.
+   * @param simulationResponse  - Optional pre-computed simulation response.
+   * @returns An unsigned restore `Transaction` ready to be signed.
+   * @throws {Error} If simulation does not indicate a restore is needed.
+   *
+   * @example
+   * ```ts
+   * const restoreTx = await resurrect.buildRestoreTx(publicKey, tx)
+   * const signedXdr = await wallet.signTransaction(restoreTx.toXDR())
+   * ```
    */
   async buildRestoreTx(
     sourcePublicKey: string,
     transaction: Transaction,
     simulationResponse?: rpc.Api.SimulateTransactionRestoreResponse,
-  ) {
-    const response = simulationResponse ?? (await this.simulate(transaction))
+  ): Promise<Transaction> {
+    return this._executor.buildRestoreTx(sourcePublicKey, transaction, simulationResponse)
+  }
 
-    if (!isRestoreResponse(response)) {
-      throw new Error('No archived keys detected — restore transaction not needed')
-    }
-
-    return buildRestoreTransaction({
-      server: this.server,
-      sourcePublicKey,
-      transactionData: response.transactionData.build(),
-      minResourceFee: parseInt(response.minResourceFee, 10),
-      config: this.config,
-    })
+  /**
+   * Signs and submits a transaction directly, without automatic archive
+   * restoration. Use `submitWithRestore` when restoration may be needed.
+   *
+   * @param transaction - The transaction to sign and submit.
+   * @param wallet      - Wallet adapter used for signing.
+   * @returns Result with transaction hash on success.
+   */
+  async sendTransaction(transaction: Transaction, wallet: WalletAdapter): Promise<ResurrectResult> {
+    return this._executor.sendTransaction(transaction, wallet)
   }
 
   /**
@@ -465,126 +329,108 @@ export class SorobanResurrect {
    *
    * Records the attempt in transaction history. The returned result includes
    * a `historyId` field that can be passed to `retry()` to re-attempt a
-   * failed workflow.
+   * failed workflow without re-building the transaction.
    *
-   * This method never throws — all failures are caught and returned as a
-   * {@link ResurrectResult} with `success: false` and an `error` message.
+   * This method never throws — all failures are returned as
+   * `ResurrectResult { success: false, error: ... }`.
    *
    * @param options - See {@link SubmitWithRestoreOptions}.
-   * @returns A {@link ResurrectResult} describing the outcome.
+   * @returns {@link ResurrectResult} describing the outcome.
    *
    * @example
    * ```ts
-   * const result = await resurrect.submitWithRestore({ transaction: tx, wallet })
+   * const result = await resurrect.submitWithRestore({
+   *   transaction: tx,
+   *   wallet,
+   *   onRestoreNeeded: (keys) => console.log(`Restoring ${keys.length} entries`),
+   * })
    * if (result.success) {
    *   console.log('Submitted:', result.originalTxHash)
-   * } else {
-   *   console.error('Failed:', result.error)
    * }
    * ```
    */
   async submitWithRestore(options: SubmitWithRestoreOptions): Promise<ResurrectResult> {
-    const {
-      transaction,
-      wallet,
-      onRestoreNeeded,
-      onSigningRestore,
-      onSubmittingRestore,
-      onRestoreSubmitted,
-      onRestoreConfirmed,
-      onSigningOriginal,
-      onOriginalSubmitted,
-      onRestoreFailed,
-    } = options
-
-    const historyId = this._history.add(transaction)
-
-    // Transition the machine out of idle before the executor runs so that
-    // any state-change listener registered via onStateChange() fires at
-    // least once and the current state is never 'idle' during an active workflow.
-    this._service.send({ type: 'SIMULATE' })
-
-    const result = await executeWithRestore({
-      server: this.server,
-      transaction,
-      wallet,
-      config: this.config,
-      onSigningRestore: () => {
-        this._service.send({ type: 'SIGN_RESTORE' })
-        onSigningRestore?.()
-      },
-      onSubmittingRestore: () => {
-        this._service.send({ type: 'SUBMIT_RESTORE' })
-        onSubmittingRestore?.()
-      },
-      onRestoreNeeded: (keys) => {
-        this._service.send({ type: 'RESTORE_NEEDED', keys })
-        this._emitter.emit('restoreNeeded', keys)
-        onRestoreNeeded?.(keys)
-      },
-      onRestoreSubmitted: (txHash) => {
-        this._service.send({ type: 'CONFIRM_RESTORE' })
-        this._emitter.emit('restoreSubmitted', txHash)
-        onRestoreSubmitted?.(txHash)
-      },
-      onRestoreConfirmed: (txHash) => {
-        this._service.send({ type: 'SIGN_ORIGINAL' })
-        this._emitter.emit('restoreConfirmed', txHash)
-        onRestoreConfirmed?.(txHash)
-      },
-      onSigningOriginal: () => {
-        // Already in signing_original state (reached via NO_RESTORE_NEEDED or
-        // SIGN_ORIGINAL from confirming_restore). No further FSM send needed.
-        onSigningOriginal?.()
-      },
-      onOriginalSubmitted: (txHash) => {
-        this._service.send({ type: 'SUCCESS' })
-        this._emitter.emit('originalSubmitted', txHash)
-        onOriginalSubmitted?.(txHash)
-      },
-      onRestoreFailed: (error) => {
-        this._emitter.emit('error', error)
-        onRestoreFailed?.(error)
-      },
-      onSigningFeeBump: () => {
-        // Fee-bump signing reuses the signing_restore state visually.
-        this._service.send({ type: 'SIGN_RESTORE' })
-      },
-    })
-
-    this._history.update(historyId, result)
-
-    if (!result.success) {
-      this._service.send({ type: 'FAIL', error: result.error ?? 'Unknown error' })
-      this._emitter.emit('error', result.error ?? 'Unknown error')
-    }
-
-    this._emitter.emit('restoreComplete', result)
-
-    return result
+    return this._executor.submitWithRestore(options)
   }
 
-  // ---------------------------------------------------------------------------
-  // Batch helpers
-  // ---------------------------------------------------------------------------
-
   /**
-   * Detects archived ledger entries across multiple transactions at once.
+   * Retries a previously recorded restore workflow by history entry id.
+   *
+   * @param entryId - The `historyId` returned by a prior `submitWithRestore`.
+   * @param wallet  - Wallet adapter to use for signing.
+   * @returns Result of the retry attempt.
+   * @throws {Error} If no history entry exists for `entryId`.
    */
-  async detectArchivedKeysBatch(transactions: Transaction[]): Promise<ArchivedLedgerEntry[][]> {
-    return Promise.all(transactions.map((tx) => this.detectArchivedKeys(tx)))
+  async retry(entryId: string, wallet: WalletAdapter): Promise<ResurrectResult> {
+    return this._executor.retry(entryId, wallet)
   }
 
   /**
    * Submits multiple transactions with automatic archive restoration,
    * sequentially to avoid sequence-number races.
+   *
+   * @param items - Array of `SubmitWithRestoreOptions`, one per transaction.
+   * @returns Array of results in the same order as the input.
    */
   async submitBatchWithRestore(items: SubmitWithRestoreOptions[]): Promise<ResurrectResult[]> {
-    const results: ResurrectResult[] = []
-    for (const item of items) {
-      results.push(await this.submitWithRestore(item))
-    }
-    return results
+    return this._executor.submitBatchWithRestore(items)
+  }
+
+  // ---------------------------------------------------------------------------
+  // TTL / expiry helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Queries the current TTL information for one or more ledger keys.
+   *
+   * @param keys - Ledger keys to query.
+   * @returns Aggregated TTL result with per-entry info and query metadata.
+   *
+   * @example
+   * ```ts
+   * const result = await resurrect.queryLedgerTTL([ledgerKey])
+   * console.log(result.entries[0].ttlLedgers)
+   * ```
+   */
+  async queryLedgerTTL(keys: xdr.LedgerKey[]): Promise<TTLQueryResult> {
+    return queryLedgerTTL(this.server, keys)
+  }
+
+  /**
+   * Queries the current TTL information for a single ledger key.
+   *
+   * @param key - The ledger key to query.
+   * @returns TTL info for the requested entry.
+   *
+   * @example
+   * ```ts
+   * const info = await resurrect.queryLedgerEntryTTL(ledgerKey)
+   * if (info.ttlLedgers < 10_000) console.warn('Entry expiring soon!')
+   * ```
+   */
+  async queryLedgerEntryTTL(key: xdr.LedgerKey): Promise<LedgerEntryTTLInfo> {
+    return queryLedgerEntryTTL(this.server, key)
+  }
+
+  /**
+   * Returns ledger entries expiring within `ledgersThreshold` ledgers,
+   * including already-archived entries.
+   *
+   * @param keys              - Ledger keys to query.
+   * @param ledgersThreshold  - Maximum ledgers remaining (defaults to 100,000).
+   * @returns Entries expiring within the threshold (or already archived).
+   *
+   * @example
+   * ```ts
+   * const expiring = await resurrect.getExpiringSoonEntries([key], 17_280) // ~24 h
+   * if (expiring.length > 0) showWarning('Your position is expiring soon!')
+   * ```
+   */
+  async getExpiringSoonEntries(
+    keys: xdr.LedgerKey[],
+    ledgersThreshold = 100_000,
+  ): Promise<LedgerEntryTTLInfo[]> {
+    return getExpiringSoonEntries(this.server, keys, ledgersThreshold)
   }
 
   // ---------------------------------------------------------------------------

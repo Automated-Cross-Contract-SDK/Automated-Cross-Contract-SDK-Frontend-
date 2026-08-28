@@ -101,6 +101,8 @@ describe('SorobanResurrect — config change reactivity', () => {
         pollTimeoutMs: 30_000,
         restoreFeeMultiplier: 7,
         archiveDetectionMethod: 'direct',
+        enableSimulationCache: false,
+        useSSE: false,
       })
 
       expect(resurrect.config).toEqual({
@@ -110,21 +112,20 @@ describe('SorobanResurrect — config change reactivity', () => {
         pollTimeoutMs: 30_000,
         restoreFeeMultiplier: 7,
         archiveDetectionMethod: 'direct',
+        enableSimulationCache: false,
+        useSSE: false,
       })
     })
   })
 
   describe('network passphrase validation reactivity', () => {
-    it('warns when constructed with an unrecognized network passphrase', () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-
-      new SorobanResurrect({
-        rpcUrl: 'https://soroban-testnet.stellar.org',
-        networkPassphrase: 'Some Made Up Network ; 2024',
-      })
-
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Unknown network passphrase'))
-      warnSpy.mockRestore()
+    it('throws when constructed with an unrecognized network passphrase', () => {
+      expect(() =>
+        new SorobanResurrect({
+          rpcUrl: 'https://soroban-testnet.stellar.org',
+          networkPassphrase: 'Some Made Up Network ; 2024',
+        }),
+      ).toThrow(/Invalid network passphrase/)
     })
 
     it.each(KNOWN_NETWORK_PASSPHRASES)('does not warn for known network passphrase %s', (passphrase) => {

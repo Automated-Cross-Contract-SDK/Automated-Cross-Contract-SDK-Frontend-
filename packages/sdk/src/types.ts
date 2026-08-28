@@ -129,6 +129,12 @@ export interface ResurrectResult {
   dryRun?: boolean
   /** Detailed dry-run information (present when dryRun is true). */
   dryRunResult?: DryRunResult
+  /**
+   * History entry id for this attempt. Present when the result was produced
+   * by `SorobanResurrect.submitWithRestore`. Pass to `retry()` to re-attempt
+   * the workflow without rebuilding the original transaction.
+   */
+  historyId?: string
 }
 
 /**
