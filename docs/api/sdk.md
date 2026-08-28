@@ -45,6 +45,8 @@ detectArchivedKeys(transaction: Transaction): Promise<ArchivedLedgerEntry[]>
 
 Detects archived ledger entries using the configured `archiveDetectionMethod` (`'simulation'` by default, or `'direct'`). Returns an empty array if none are found or detection fails.
 
+With `'direct'` detection, a large footprint is split into chunks of `archiveDetectionChunkSize` keys (50 by default) and `archiveDetectionConcurrency` chunk requests (4 by default) are kept in flight at once, so detection cost scales with `ceil(chunks / concurrency)` round trips rather than one per chunk. Raise the concurrency for faster detection, lower it to stay under an endpoint's rate limit — a rate-limited chunk is conservatively reported as archived. Returned entries keep the footprint's key order regardless of which request settles first.
+
 #### `needsRestore(transaction)`
 
 ```typescript
@@ -101,9 +103,9 @@ These are exported alongside the class for advanced/lower-level usage:
 | `isErrorResponse(response)`      | `Archiver.js` | Type guard for an error simulation response.                                  |
 | `extractArchivedKeys(response)`  | `Archiver.js` | Extracts archived ledger keys from a restore simulation response.             |
 | `extractFootprintFromSuccess(response)` | `Archiver.js` | Extracts read-only/read-write ledger keys from a success simulation footprint. |
-| `detectArchivedEntries(server, keys)` | `Archiver.js` | Queries the RPC server directly to find which ledger keys are archived.  |
+| `detectArchivedEntries(server, keys, options?)` | `Archiver.js` | Queries the RPC server directly to find which ledger keys are archived, in parallel chunks. |
 | `detectArchivedKeysViaSimulation(server, tx)` | `Archiver.js` | Detects archived keys via the simulation-restore-response approach. |
-| `detectArchivedKeysViaDirect(server, tx)` | `Archiver.js` | Detects archived keys by querying the ledger directly.               |
+| `detectArchivedKeysViaDirect(server, tx, options?)` | `Archiver.js` | Detects archived keys by querying the ledger directly.     |
 | `buildRestoreTransaction(params)` | `Restorer.js` | Builds a restore transaction from simulation data.                            |
 | `buildOriginalAfterRestore(server, tx, networkPassphrase, fee)` | `Restorer.js` | Rebuilds the original transaction after a successful restore.  |
 | `waitForTransaction(server, hash, pollIntervalMs?, pollTimeoutMs?)` | `Restorer.js` | Polls until a transaction reaches a terminal status.       |

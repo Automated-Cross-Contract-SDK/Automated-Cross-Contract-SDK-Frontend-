@@ -27,6 +27,7 @@ export {
   checkArchivedContractData,
   getContractDataEntry,
 } from './Archiver.js'
+export type { DetectArchivedEntriesOptions } from './Archiver.js'
 export {
   buildRestoreTransaction,
   buildOriginalAfterRestore,
@@ -52,6 +53,8 @@ export {
   POLL_TIMEOUT_MS,
   RESTORE_FEE_MULTIPLIER,
   KNOWN_NETWORK_PASSPHRASES,
+  LEDGER_ENTRY_CHUNK_SIZE,
+  LEDGER_ENTRY_CONCURRENCY,
   resolveNetworkPassphrase,
 } from './constants.js'
 export type {
