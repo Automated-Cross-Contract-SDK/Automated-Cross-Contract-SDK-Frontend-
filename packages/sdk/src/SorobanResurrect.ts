@@ -18,6 +18,9 @@ import {
   RESTORE_FEE_MULTIPLIER,
   KNOWN_NETWORK_PASSPHRASES,
 } from './constants.js'
+import { createDebugger } from './debug.js'
+
+const debug = createDebugger('resurrect')
 
 /**
  * Main facade for the Soroban-Resurrect SDK.
@@ -101,6 +104,8 @@ export class SorobanResurrect {
       enableSimulationCache: config.enableSimulationCache ?? false,
       useSSE: config.useSSE ?? false,
     } as Required<SorobanResurrectConfig>
+
+    debug('created instance', this.config)
   }
 
   /** Current workflow state. */
@@ -269,6 +274,7 @@ export class SorobanResurrect {
   }
 
   private setState(state: RestoreState, message: string) {
+    debug('state: %s -> %s (%s)', this._state, state, message)
     this._state = state
     this._message = message
     if (state !== 'error') {
@@ -313,10 +319,12 @@ export class SorobanResurrect {
     if (this._simulationCache) {
       const cached = this._simulationCache.get(transaction)
       if (cached) {
+        debug('simulate: cache hit')
         return cached
       }
     }
 
+    debug('simulate: calling simulateTransaction')
     const response = await this.server.simulateTransaction(transaction)
 
     if (this._simulationCache) {
@@ -369,9 +377,11 @@ export class SorobanResurrect {
       }
     } catch (err) {
       console.warn('SorobanResurrect: archive detection error:', err)
+      debug('detectArchivedKeys: detection failed via %s method', method, err)
       keys = []
     }
 
+    debug('detectArchivedKeys: %d archived key(s) via %s method', keys.length, method)
     this._lastArchivedKeys = keys
     return keys
   }

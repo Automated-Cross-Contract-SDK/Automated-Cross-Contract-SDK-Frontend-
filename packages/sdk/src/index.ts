@@ -62,3 +62,10 @@ export type {
   SorobanResurrectEvents,
 } from './types.js'
 export { TypedEventEmitter } from './EventEmitter.js'
+export {
+  createDebugger,
+  getDebugFilter,
+  isNamespaceEnabled,
+  DEBUG_NAMESPACE_PREFIX,
+} from './debug.js'
+export type { Debugger } from './debug.js'

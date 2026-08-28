@@ -1,6 +1,9 @@
 import { rpc, Transaction } from '@stellar/stellar-sdk'
 import { xdr } from '@stellar/stellar-sdk'
 import { ArchivedLedgerEntry, SimulateResponse } from './types.js'
+import { createDebugger } from './debug.js'
+
+const debug = createDebugger('archiver')
 
 /**
  * Type guard — returns true if the simulation response indicates archived
@@ -90,10 +93,12 @@ export function extractArchivedKeys(
         keyBase64,
       })
     }
-  } catch {
+  } catch (err) {
+    debug('extractArchivedKeys: failed to read footprint', err)
     return keys
   }
 
+  debug('extractArchivedKeys: %d archived key(s) in restore footprint', keys.length)
   return keys
 }
 
@@ -154,6 +159,11 @@ export async function detectArchivedEntries(
   const archived: ArchivedLedgerEntry[] = []
 
   const chunkSize = 50
+  debug(
+    'detectArchivedEntries: checking %d ledger key(s) in chunks of %d',
+    ledgerKeys.length,
+    chunkSize,
+  )
   for (let i = 0; i < ledgerKeys.length; i += chunkSize) {
     const chunk = ledgerKeys.slice(i, i + chunkSize)
     try {
@@ -175,8 +185,9 @@ export async function detectArchivedEntries(
           })
         }
       }
-    } catch {
+    } catch (err) {
       // On network error, conservatively treat all keys in chunk as archived
+      debug('detectArchivedEntries: chunk at offset %d failed, assuming archived', i, err)
       archived.push(
         ...chunk.map((key) => ({
           key,
@@ -186,6 +197,7 @@ export async function detectArchivedEntries(
     }
   }
 
+  debug('detectArchivedEntries: %d of %d key(s) archived', archived.length, ledgerKeys.length)
   return archived
 }
 

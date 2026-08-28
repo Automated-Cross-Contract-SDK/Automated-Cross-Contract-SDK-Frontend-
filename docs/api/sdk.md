@@ -110,4 +110,45 @@ These are exported alongside the class for advanced/lower-level usage:
 | `prepareTransaction(server, tx)` | `Restorer.js` | Simulates and assembles a transaction; throws on error or restore-required. |
 | `extractXdrOperations(tx)`       | `Restorer.js` | Extracts XDR operations from a transaction, handling fee-bump envelopes.       |
 
+| `createDebugger(scope)`          | `debug.js`    | Creates a namespaced debug logger for internal SDK operations.                |
+
+## Debug Logging
+
+The SDK logs its internal operations through namespaced loggers that stay silent
+unless a filter is set. Namespaces are prefixed with `soroban-resurrect`:
+`soroban-resurrect:resurrect` for lifecycle and state transitions, and
+`soroban-resurrect:archiver` for archive detection.
+
+In Node, set the `DEBUG` environment variable:
+
+```bash
+DEBUG=soroban-resurrect:* node ./scripts/restore.mjs
+```
+
+In the browser, set `localStorage.debug` and reload:
+
+```javascript
+localStorage.debug = 'soroban-resurrect:*'
+```
+
+The filter is a comma or space separated list of patterns. `*` matches any run
+of characters and a `-` prefix excludes a namespace:
+
+```bash
+DEBUG='soroban-resurrect:*,-soroban-resurrect:archiver' npm run dev:example
+```
+
+Filters are read once when the module loads, so change `DEBUG` before starting
+the process rather than during it. Output goes to `console.debug`, prefixed with
+an ISO timestamp and the namespace.
+
+Application code can create its own loggers under the same filter:
+
+```typescript
+import { createDebugger } from '@soroban-resurrect/sdk'
+
+const debug = createDebugger('my-dapp')
+debug('submitting transaction %s', tx.hash().toString('hex'))
+```
+
 For the full type definitions used throughout this API, see [Types](/api/types).
