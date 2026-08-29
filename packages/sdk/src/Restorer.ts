@@ -1,5 +1,11 @@
 import { rpc, Account, Keypair } from '@stellar/stellar-sdk'
-import { TransactionBuilder, Operation, Transaction, xdr, FeeBumpTransaction } from '@stellar/stellar-sdk'
+import {
+  TransactionBuilder,
+  Operation,
+  Transaction,
+  xdr,
+  FeeBumpTransaction,
+} from '@stellar/stellar-sdk'
 import { SorobanResurrectConfig, FeeBumpSponsor } from './types.js'
 import { DEFAULT_NETWORK_PASSPHRASE } from './constants.js'
 import { calculateRestoreFee } from './feeCalculation.js'
@@ -52,7 +58,14 @@ export interface BuildRestoreTxParams {
  * ```
  */
 export async function buildRestoreTransaction(params: BuildRestoreTxParams): Promise<Transaction> {
-  const { sourcePublicKey, transactionData, minResourceFee, config, account: preFetched, sequenceNumber } = params
+  const {
+    sourcePublicKey,
+    transactionData,
+    minResourceFee,
+    config,
+    account: preFetched,
+    sequenceNumber,
+  } = params
 
   const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
   let account = preFetched
@@ -184,7 +197,7 @@ async function streamTransactionViaEvents(
   const serverURL =
     typeof (server as any).serverURL === 'string'
       ? (server as any).serverURL
-      : (server as any).serverURL?.toString?.() ?? ''
+      : ((server as any).serverURL?.toString?.() ?? '')
 
   if (!serverURL) {
     return null
@@ -356,9 +369,18 @@ export async function waitForTransactionSSE(
  * @see {@link buildOriginalAfterRestore}, which uses this to copy
  *   operations onto a freshly-built transaction.
  */
+const parsedXdrOperationsCache = new WeakMap<Transaction, xdr.Operation[]>()
+
 export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
+  const cached = parsedXdrOperationsCache.get(tx)
+  if (cached) {
+    return cached
+  }
+
   const envelope = tx.toEnvelope()
   const envelopeType = envelope.switch()
+
+  let operations: xdr.Operation[]
 
   // Handle fee-bump transactions: extract the inner transaction first
   if (envelopeType.name === 'envelopeTypeTxFeeBump') {
@@ -369,30 +391,29 @@ export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
     if (innerType.name === 'envelopeTypeTxV0') {
       // For V0 inner transaction, cast through unknown to handle type differences
       const innerV0 = innerEnvelope.value() as unknown as xdr.TransactionV0Envelope
-      return innerV0.tx().operations()
-    }
-
-    if (innerType === xdr.EnvelopeType.envelopeTypeTx()) {
+      operations = innerV0.tx().operations()
+    } else if (innerType === xdr.EnvelopeType.envelopeTypeTx()) {
       const innerV1 = innerEnvelope.value() as xdr.TransactionV1Envelope
-      return innerV1.tx().operations()
+      operations = innerV1.tx().operations()
+    } else {
+      throw new Error(
+        `Unsupported inner transaction envelope type in fee-bump transaction: ${innerType.name}`,
+      )
     }
-
-    throw new Error(`Unsupported inner transaction envelope type in fee-bump transaction: ${innerType.name}`)
-  }
-
-  // Handle regular V0 transactions
-  if (envelopeType.name === 'envelopeTypeTxV0') {
+  } else if (envelopeType.name === 'envelopeTypeTxV0') {
+    // Handle regular V0 transactions
     const v0Envelope = envelope.value() as xdr.TransactionV0Envelope
-    return v0Envelope.tx().operations()
-  }
-
-  // Handle regular V1 transactions
-  if (envelopeType === xdr.EnvelopeType.envelopeTypeTx()) {
+    operations = v0Envelope.tx().operations()
+  } else if (envelopeType === xdr.EnvelopeType.envelopeTypeTx()) {
+    // Handle regular V1 transactions
     const v1Envelope = envelope.value() as xdr.TransactionV1Envelope
-    return v1Envelope.tx().operations()
+    operations = v1Envelope.tx().operations()
+  } else {
+    throw new Error(`Unsupported transaction envelope type: ${envelopeType.name}`)
   }
 
-  throw new Error(`Unsupported transaction envelope type: ${envelopeType.name}`)
+  parsedXdrOperationsCache.set(tx, operations)
+  return operations
 }
 
 /**
