@@ -82,6 +82,45 @@ export interface SorobanResurrectConfig {
    * ```
    */
   rpcClient?: ISorobanRpcClient
+  /**
+   * Persist transaction history to durable storage so `retry(historyId)` can
+   * survive a full app restart (e.g. a React Native app kill).
+   *
+   * On construction the SDK hydrates `TransactionHistory` from storage; every
+   * subsequent change is written back. Pass any AsyncStorage-compatible object
+   * (React Native's `@react-native-async-storage/async-storage`, `localStorage`,
+   * or a custom `{ getItem, setItem }`).
+   *
+   * @example
+   * ```ts
+   * import AsyncStorage from '@react-native-async-storage/async-storage'
+   *
+   * const sdk = new SorobanResurrect({
+   *   rpcUrl: 'https://soroban-testnet.stellar.org',
+   *   persistHistory: { storage: AsyncStorage },
+   * })
+   * await sdk.ready // hydration finished — safe to call retry(historyId)
+   * ```
+   */
+  persistHistory?: HistoryPersistenceOptions
+}
+
+/**
+ * Minimal key/value storage contract compatible with React Native's
+ * AsyncStorage and the browser `localStorage`/`sessionStorage` APIs.
+ */
+export interface HistoryStorage {
+  getItem(key: string): Promise<string | null> | string | null
+  setItem(key: string, value: string): Promise<void> | void
+  removeItem?(key: string): Promise<void> | void
+}
+
+/** Options for {@link SorobanResurrectConfig.persistHistory}. */
+export interface HistoryPersistenceOptions {
+  /** AsyncStorage-compatible backing store. */
+  storage: HistoryStorage
+  /** Storage key to read/write. Defaults to `soroban-resurrect:history`. */
+  key?: string
 }
 
 /**
@@ -291,7 +330,7 @@ export interface LedgerAdapterConfig {
    * When omitted, the adapter cannot sign — you must call `connect()` manually after
    * supplying a transport via `setTransport()`.
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   transport?: any
   /** BIP44 account index for key derivation (default: 0). */
   accountIndex?: number

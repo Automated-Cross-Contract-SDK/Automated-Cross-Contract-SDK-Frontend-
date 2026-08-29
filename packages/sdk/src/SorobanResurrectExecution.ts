@@ -10,6 +10,8 @@ import { executeWithRestore, sendTransaction as _sendTransaction } from './Execu
 import { buildRestoreTransaction } from './Restorer.js'
 import { isRestoreResponse } from './Archiver.js'
 import { TransactionHistory, TransactionHistoryEntry } from './TransactionHistory.js'
+import { attachHistoryPersistence, type HistoryPersistenceHandle } from './HistoryPersistence.js'
+import type { HistoryPersistenceOptions } from './types.js'
 import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
 import { SorobanResurrectSimulator } from './SorobanResurrectSimulation.js'
 
@@ -32,24 +34,39 @@ export class SorobanResurrectExecutor {
   private readonly _config: Required<SorobanResurrectConfig>
   private readonly _stateMgr: SorobanResurrectStateManager
   private readonly _simulator: SorobanResurrectSimulator
-  private readonly _history = new TransactionHistory()
+  private readonly _history: TransactionHistory
+  private readonly _historyPersistence: HistoryPersistenceHandle | null
 
   /**
-   * @param server    - Soroban RPC server instance.
-   * @param config    - Fully resolved SDK configuration.
-   * @param stateMgr  - Shared state manager for state transitions and events.
-   * @param simulator - Simulation/detection helper for the same instance.
+   * @param server         - Soroban RPC server instance.
+   * @param config         - Fully resolved SDK configuration.
+   * @param stateMgr       - Shared state manager for state transitions and events.
+   * @param simulator      - Simulation/detection helper for the same instance.
+   * @param persistHistory - Optional durable-storage config for transaction history.
    */
   constructor(
     server: rpc.Server,
     config: Required<SorobanResurrectConfig>,
     stateMgr: SorobanResurrectStateManager,
     simulator: SorobanResurrectSimulator,
+    persistHistory?: HistoryPersistenceOptions,
   ) {
     this._server = server
     this._config = config
     this._stateMgr = stateMgr
     this._simulator = simulator
+    this._history = new TransactionHistory(config.networkPassphrase)
+    this._historyPersistence = persistHistory
+      ? attachHistoryPersistence(this._history, persistHistory.storage, persistHistory.key)
+      : null
+  }
+
+  /**
+   * Resolves once transaction history has been hydrated from durable storage.
+   * When persistence is disabled this resolves immediately.
+   */
+  get historyHydrated(): Promise<void> {
+    return this._historyPersistence?.hydrated ?? Promise.resolve()
   }
 
   // ---------------------------------------------------------------------------
@@ -184,7 +201,10 @@ export class SorobanResurrectExecutor {
       },
 
       onRestoreConfirmed: (txHash: string) => {
-        stateMgr.setState('submitting_original', 'Restore confirmed. Preparing original transaction...')
+        stateMgr.setState(
+          'submitting_original',
+          'Restore confirmed. Preparing original transaction...',
+        )
         emitter.emit('restoreConfirmed', txHash)
         onRestoreConfirmed?.(txHash)
       },
@@ -264,7 +284,10 @@ export class SorobanResurrectExecutor {
         stateMgr.setState('confirming_restore', 'Waiting for restore confirmation...')
       },
       onRestoreConfirmed: (_txHash: string) => {
-        stateMgr.setState('submitting_original', 'Restore confirmed. Preparing original transaction...')
+        stateMgr.setState(
+          'submitting_original',
+          'Restore confirmed. Preparing original transaction...',
+        )
       },
       onSigningOriginal: () => {
         stateMgr.setState('signing_original', 'Signing original transaction...')

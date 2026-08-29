@@ -15,11 +15,7 @@ import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
 import { SorobanResurrectSimulator } from './SorobanResurrectSimulation.js'
 import { SorobanResurrectExecutor } from './SorobanResurrectExecution.js'
 import type { TransactionHistoryEntry } from './TransactionHistory.js'
-import {
-  queryLedgerTTL,
-  queryLedgerEntryTTL,
-  getExpiringSoonEntries,
-} from './TTLHelpers.js'
+import { queryLedgerTTL, queryLedgerEntryTTL, getExpiringSoonEntries } from './TTLHelpers.js'
 import type { LedgerEntryTTLInfo, TTLQueryResult } from './TTLHelpers.js'
 
 /**
@@ -57,7 +53,9 @@ export class SorobanResurrect {
    */
   public readonly server: ISorobanRpcClient
   /** Resolved configuration with defaults applied. */
-  public readonly config: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & { rpcClient: ISorobanRpcClient }
+  public readonly config: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & {
+    rpcClient: ISorobanRpcClient
+  }
 
   private readonly _stateMgr: SorobanResurrectStateManager
   private readonly _simulator: SorobanResurrectSimulator
@@ -68,6 +66,14 @@ export class SorobanResurrect {
 
   // Transaction history log.
   private _history = new TransactionHistory()
+
+  /**
+   * Resolves once transaction history has finished hydrating from the
+   * `persistHistory` store. Resolves immediately when `persistHistory` is not
+   * configured. `await sdk.ready` before calling `retry(historyId)` on a
+   * freshly-constructed instance if you rely on persisted history.
+   */
+  public readonly ready: Promise<void>
 
   // Last set of archived keys from a standalone detectArchivedKeys() call.
   // The FSM context already stores archivedKeys for the full submit workflow;
@@ -108,7 +114,9 @@ export class SorobanResurrect {
       this.config,
       this._stateMgr,
       this._simulator,
+      config.persistHistory,
     )
+    this.ready = this._executor.historyHydrated
   }
 
   // ---------------------------------------------------------------------------
@@ -447,10 +455,7 @@ export class SorobanResurrect {
    * Signs and submits a transaction directly, without automatic archive
    * restoration. Use `submitWithRestore` for the full workflow.
    */
-  async sendTransaction(
-    transaction: Transaction,
-    wallet: WalletAdapter,
-  ): Promise<ResurrectResult> {
+  async sendTransaction(transaction: Transaction, wallet: WalletAdapter): Promise<ResurrectResult> {
     return sendTransaction(this.server, transaction, wallet, this.config)
   }
 
