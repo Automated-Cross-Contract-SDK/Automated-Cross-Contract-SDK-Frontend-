@@ -190,7 +190,9 @@ fires the corresponding optional callback passed to `submitWithRestore()`.
 4. **Build the restore transaction** — `buildRestoreTransaction()`
    constructs a transaction with a single `Operation.restoreFootprint({})`,
    using the simulation's `transactionData` and a fee of
-   `minResourceFee × restoreFeeMultiplier` (default multiplier: `100`).
+   `minResourceFee × restoreFeeMultiplier` (default multiplier: `3` — see
+   [Choosing `restoreFeeMultiplier`](docs/api/types.md#choosing-restorefeemultiplier)
+   for how to tune it under congestion).
 5. **Sign and submit the restore transaction** — the wallet is prompted to
    sign (state: `signing_restore`, then `submitting_restore` once sent via
    `server.sendTransaction()`).

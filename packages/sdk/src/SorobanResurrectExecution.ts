@@ -6,6 +6,7 @@ import {
   SubmitWithRestoreOptions,
   WalletAdapter,
 } from './types.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
 import { executeWithRestore, sendTransaction as _sendTransaction } from './Executor.js'
 import { buildRestoreTransaction } from './Restorer.js'
 import { isRestoreResponse } from './Archiver.js'
@@ -28,7 +29,7 @@ import { SorobanResurrectSimulator } from './SorobanResurrectSimulation.js'
  * and `SorobanResurrectSimulator` for simulation / archive detection.
  */
 export class SorobanResurrectExecutor {
-  private readonly _server: rpc.Server
+  private readonly _server: ISorobanRpcClient
   private readonly _config: Required<SorobanResurrectConfig>
   private readonly _stateMgr: SorobanResurrectStateManager
   private readonly _simulator: SorobanResurrectSimulator
@@ -41,7 +42,7 @@ export class SorobanResurrectExecutor {
    * @param simulator - Simulation/detection helper for the same instance.
    */
   constructor(
-    server: rpc.Server,
+    server: ISorobanRpcClient,
     config: Required<SorobanResurrectConfig>,
     stateMgr: SorobanResurrectStateManager,
     simulator: SorobanResurrectSimulator,

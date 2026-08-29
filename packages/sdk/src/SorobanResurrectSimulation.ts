@@ -22,7 +22,7 @@ import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
  * throws so callers do not need to guard against network failures.
  */
 export class SorobanResurrectSimulator {
-  private readonly _server: rpc.Server
+  private readonly _server: ISorobanRpcClient
   private readonly _config: Required<SorobanResurrectConfig>
   private readonly _cache: SimulationCache | undefined
   private readonly _stateMgr: SorobanResurrectStateManager
@@ -34,7 +34,7 @@ export class SorobanResurrectSimulator {
    * @param stateMgr - State manager used to publish `'simulating'` transitions.
    */
   constructor(
-    server: rpc.Server,
+    server: ISorobanRpcClient,
     config: Required<SorobanResurrectConfig>,
     cache: SimulationCache | undefined,
     stateMgr: SorobanResurrectStateManager,

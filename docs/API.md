@@ -7,7 +7,11 @@ listed here also carries full JSDoc (parameters, return values, `@throws`,
 inline docs, or read the linked source file below.
 
 For a narrative walkthrough of how these pieces fit together, see
-[`ARCHITECTURE.md`](../ARCHITECTURE.md).
+[`ARCHITECTURE.md`](../ARCHITECTURE.md). For the full, canonical
+`SorobanResurrectConfig` field table (kept in sync with `types.ts`), see
+[`docs/api/types.md`](api/types.md#sorobanresurrectconfig). For how to inject a
+test double / swap the RPC client in tests, see
+[`docs/guide/testing.md`](guide/testing.md).
 
 ## Contents
 
@@ -41,7 +45,7 @@ new SorobanResurrect(config: SorobanResurrectConfig)
 
 | Member | Signature | Description |
 | --- | --- | --- |
-| `server` | `readonly rpc.Server` | The underlying Soroban RPC server instance. |
+| `server` | `readonly ISorobanRpcClient` | The RPC client instance — `config.rpcClient` when supplied, otherwise an auto-created `SorobanRpcClient`. See [Testing](guide/testing.md). |
 | `config` | `readonly Required<SorobanResurrectConfig>` | Resolved configuration with defaults applied. |
 | `state` | `get state(): RestoreState` | Current workflow state. |
 | `stateInfo` | `get stateInfo(): RestoreStateInfo` | Snapshot of state, message, archived keys, and error. |
@@ -107,7 +111,7 @@ Source: [`Restorer.ts`](../packages/sdk/src/Restorer.ts)
 
 | Function | Description |
 | --- | --- |
-| `buildRestoreTransaction(params)` | Build an unsigned `restoreFootprint` transaction. Fee = `minResourceFee * restoreFeeMultiplier`. |
+| `buildRestoreTransaction(params)` | Build an unsigned `restoreFootprint` transaction. Fee = `minResourceFee * restoreFeeMultiplier` (default multiplier `3`; see [Choosing `restoreFeeMultiplier`](api/types.md#choosing-restorefeemultiplier)). |
 | `waitForTransaction(server, hash, pollIntervalMs?, pollTimeoutMs?)` | Poll until a transaction reaches `SUCCESS`/`FAILED`, with exponential backoff + jitter. **Throws** on timeout. |
 | `extractXdrOperations(tx)` | Extract raw XDR operations from a transaction, handling fee-bump envelopes. |
 | `buildOriginalAfterRestore(server, originalTx, networkPassphrase, fee)` | Rebuild the original transaction after a successful restore (fresh sequence number + re-simulation). **Throws** if restoration was insufficient. |
@@ -117,7 +121,7 @@ Source: [`Restorer.ts`](../packages/sdk/src/Restorer.ts)
 
 Source: [`types.ts`](../packages/sdk/src/types.ts)
 
-- `SorobanResurrectConfig` — constructor options (`rpcUrl`, `networkPassphrase?`, `pollIntervalMs?`, `pollTimeoutMs?`, `restoreFeeMultiplier?`, `archiveDetectionMethod?`).
+- `SorobanResurrectConfig` — constructor options. Full field table (kept in sync with source): [`docs/api/types.md#sorobanresurrectconfig`](api/types.md#sorobanresurrectconfig).
 - `WalletAdapter` — `isConnected()`, `getPublicKey()`, `signTransaction(xdr, opts?)`.
 - `ArchivedLedgerEntry` — `{ key: xdr.LedgerKey, keyBase64: string }`.
 - `SimulateResponse` — alias for `rpc.Api.SimulateTransactionResponse`.

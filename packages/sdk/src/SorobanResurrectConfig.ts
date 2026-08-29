@@ -1,5 +1,6 @@
-import { rpc } from '@stellar/stellar-sdk'
 import { SorobanResurrectConfig } from './types.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
+import { SorobanRpcClient } from './RpcClient.js'
 import {
   DEFAULT_NETWORK_PASSPHRASE,
   POLL_INTERVAL_MS,
@@ -14,12 +15,16 @@ import { SimulationCache } from './SimulationCache.js'
  * Result of initialising the SDK configuration.
  *
  * Contains the fully resolved `Required<SorobanResurrectConfig>`, the
- * constructed `rpc.Server`, and an optional `SimulationCache` instance
+ * resolved RPC client, and an optional `SimulationCache` instance
  * (present only when `enableSimulationCache` is `true`).
  */
 export interface ResolvedConfig {
-  /** Soroban RPC server instance bound to the configured endpoint. */
-  server: rpc.Server
+  /**
+   * RPC client bound to the configured endpoint. This is `config.rpcClient`
+   * when one was supplied (dependency injection / testing), otherwise a
+   * {@link SorobanRpcClient} created from `config.rpcUrl`.
+   */
+  server: ISorobanRpcClient
   /** Resolved configuration with all optional fields filled in. */
   config: Required<SorobanResurrectConfig>
   /**
@@ -54,7 +59,7 @@ export interface ResolvedConfig {
  * ```
  */
 export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
-  const server = new rpc.Server(config.rpcUrl)
+  const server: ISorobanRpcClient = config.rpcClient ?? new SorobanRpcClient(config.rpcUrl)
 
   const networkPassphrase =
     config.networkPassphrase ??
@@ -81,6 +86,7 @@ export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
     archiveDetectionMethod: config.archiveDetectionMethod ?? 'simulation',
     enableSimulationCache: config.enableSimulationCache ?? false,
     useSSE: config.useSSE ?? false,
+    rpcClient: server,
   }
 
   return { server, config: resolved, simulationCache }
