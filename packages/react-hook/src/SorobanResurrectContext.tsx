@@ -41,7 +41,23 @@ interface SorobanResurrectContextValue {
   reset: (fromState?: RestoreState) => void
 }
 
-const SorobanResurrectContext = createContext<SorobanResurrectContextValue | null>(null)
+/**
+ * Underlying React context. Exported so sibling hooks
+ * (`useSorobanResurrectSubmit`, `useRestoreWatcher`,
+ * `useSorobanResurrectNetwork`) can opt into the provider's SDK instance
+ * when one is present, and fall back to a standalone instance otherwise.
+ * Prefer `useSorobanResurrectContext()` in application code.
+ */
+export const SorobanResurrectContext = createContext<SorobanResurrectContextValue | null>(null)
+
+/**
+ * Non-throwing variant of {@link useSorobanResurrectContext}. Returns the
+ * context value when called inside a `<SorobanResurrectProvider>`, or
+ * `null` when used standalone.
+ */
+export function useOptionalSorobanResurrectContext(): SorobanResurrectContextValue | null {
+  return useContext(SorobanResurrectContext)
+}
 
 /** Props for the SorobanResurrectProvider component. */
 export interface SorobanResurrectProviderProps {
