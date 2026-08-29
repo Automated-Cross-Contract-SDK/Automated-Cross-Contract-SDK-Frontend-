@@ -8,6 +8,7 @@ import type {
   ResurrectResult,
   DryRunResult,
 } from './types.js'
+import type { ResurrectErrorCode } from './errors.js'
 import {
   isRestoreResponse,
   isSuccessResponse,
@@ -75,8 +76,16 @@ async function signAndMaybeFeeBump(params: {
   onSigningFeeBump?: () => void
   onSubmitting?: () => void
 }): Promise<{ hash: TxHash }> {
-  const { tx, wallet, feeBumpConfig, networkPassphrase, server, onSigning, onSigningFeeBump, onSubmitting } =
-    params
+  const {
+    tx,
+    wallet,
+    feeBumpConfig,
+    networkPassphrase,
+    server,
+    onSigning,
+    onSigningFeeBump,
+    onSubmitting,
+  } = params
 
   onSigning?.()
   const signedXdr = await wallet.signTransaction(asXdrBase64(tx.toXDR()), { networkPassphrase })
@@ -193,11 +202,15 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
   const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
 
   // Extract optional fields that may not be destructured from params
-  const onSigningRestore = (params as ExecuteParams & { onSigningRestore?: () => void }).onSigningRestore
-  const onSubmittingRestore = (params as ExecuteParams & { onSubmittingRestore?: () => void }).onSubmittingRestore
-  const onSigningOriginal = (params as ExecuteParams & { onSigningOriginal?: () => void }).onSigningOriginal
+  const onSigningRestore = (params as ExecuteParams & { onSigningRestore?: () => void })
+    .onSigningRestore
+  const onSubmittingRestore = (params as ExecuteParams & { onSubmittingRestore?: () => void })
+    .onSubmittingRestore
+  const onSigningOriginal = (params as ExecuteParams & { onSigningOriginal?: () => void })
+    .onSigningOriginal
   const feeBumpConfig = (params as ExecuteParams & { feeBumpConfig?: FeeBumpConfig }).feeBumpConfig
-  const simulationCache = (params as ExecuteParams & { simulationCache?: SimulationCache }).simulationCache
+  const simulationCache = (params as ExecuteParams & { simulationCache?: SimulationCache })
+    .simulationCache
   const pollInterval = config.pollIntervalMs ?? POLL_INTERVAL_MS
   const pollTimeout = config.pollTimeoutMs ?? POLL_TIMEOUT_MS
 
@@ -207,7 +220,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
     if (isErrorResponse(simResponse)) {
       const err = `Simulation error: ${simResponse.error}`
       onRestoreFailed?.(err)
-      return { success: false, archivedKeysDetected: 0, error: err }
+      return { success: false, archivedKeysDetected: 0, error: err, errorCode: 'SIMULATION_FAILED' }
     }
 
     if (isRestoreResponse(simResponse)) {
@@ -217,7 +230,12 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       if (!isConnected) {
         const err = 'Wallet is not connected'
         onRestoreFailed?.(err)
-        return { success: false, archivedKeysDetected: archivedKeys.length, error: err }
+        return {
+          success: false,
+          archivedKeysDetected: archivedKeys.length,
+          error: err,
+          errorCode: 'WALLET_NOT_CONNECTED',
+        }
       }
 
       const publicKey = await wallet.getPublicKey()
@@ -248,6 +266,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
           success: false,
           archivedKeysDetected: archivedKeys.length,
           error: err,
+          errorCode: 'RESTORE_TX_PARSE_FAILED',
         }
       }
 
@@ -256,12 +275,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       const restoreHash = asTxHash(restoreResult.hash)
       onRestoreSubmitted?.(restoreHash)
 
-      const restoreStatus = await waitForTransaction(
-        server,
-        restoreHash,
-        pollInterval,
-        pollTimeout,
-      )
+      const restoreStatus = await waitForTransaction(server, restoreHash, pollInterval, pollTimeout)
 
       if (restoreStatus.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
         const err = 'Restore transaction failed'
@@ -271,15 +285,23 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
           archivedKeysDetected: archivedKeys.length,
           restoreTxHash: restoreHash,
           error: err,
+          errorCode: 'RESTORE_TX_FAILED',
         }
       }
 
       onRestoreConfirmed?.(restoreHash)
 
-      const preparedTx = await buildOriginalAfterRestore(server, originalTx, networkPassphrase, originalTx.fee)
+      const preparedTx = await buildOriginalAfterRestore(
+        server,
+        originalTx,
+        networkPassphrase,
+        originalTx.fee,
+      )
 
       onSigningOriginal?.()
-      const signedOriginalXdr = await wallet.signTransaction(asXdrBase64(preparedTx.toXDR()), { networkPassphrase })
+      const signedOriginalXdr = await wallet.signTransaction(asXdrBase64(preparedTx.toXDR()), {
+        networkPassphrase,
+      })
 
       const signedOriginalTx = TransactionBuilder.fromXDR(signedOriginalXdr, networkPassphrase)
       if (!(signedOriginalTx instanceof Transaction)) {
@@ -289,6 +311,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
           success: false,
           archivedKeysDetected: archivedKeys.length,
           error: err,
+          errorCode: 'ORIGINAL_TX_PARSE_FAILED',
         }
       }
 
@@ -321,7 +344,12 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       const txStatus = await waitForTx(server, hash, config)
 
       if (txStatus.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
-        return { success: false, archivedKeysDetected: 0, error: 'Transaction failed to confirm' }
+        return {
+          success: false,
+          archivedKeysDetected: 0,
+          error: 'Transaction failed to confirm',
+          errorCode: 'ORIGINAL_TX_FAILED',
+        }
       }
 
       return {
@@ -333,11 +361,16 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
 
     const err = 'Unexpected simulation response type'
     onRestoreFailed?.(err)
-    return { success: false, archivedKeysDetected: 0, error: err }
+    return {
+      success: false,
+      archivedKeysDetected: 0,
+      error: err,
+      errorCode: 'UNEXPECTED_SIMULATION_RESPONSE',
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     onRestoreFailed?.(message)
-    return { success: false, archivedKeysDetected: 0, error: message }
+    return { success: false, archivedKeysDetected: 0, error: message, errorCode: 'UNKNOWN_ERROR' }
   }
 }
 
@@ -363,10 +396,13 @@ export async function sendTransaction(
         success: false,
         archivedKeysDetected: 0,
         error: 'Wallet is not connected',
+        errorCode: 'WALLET_NOT_CONNECTED' as const,
       }
     }
 
-    const signedXdr = await wallet.signTransaction(asXdrBase64(transaction.toXDR()), { networkPassphrase })
+    const signedXdr = await wallet.signTransaction(asXdrBase64(transaction.toXDR()), {
+      networkPassphrase,
+    })
 
     const signedTx = TransactionBuilder.fromXDR(signedXdr, networkPassphrase)
     if (!(signedTx instanceof Transaction)) {
@@ -374,6 +410,7 @@ export async function sendTransaction(
         success: false,
         archivedKeysDetected: 0,
         error: 'Failed to parse signed transaction',
+        errorCode: 'ORIGINAL_TX_PARSE_FAILED' as const,
       }
     }
 
@@ -390,6 +427,7 @@ export async function sendTransaction(
       success: false,
       archivedKeysDetected: 0,
       error: message,
+      errorCode: 'UNKNOWN_ERROR' as const,
     }
   }
 }

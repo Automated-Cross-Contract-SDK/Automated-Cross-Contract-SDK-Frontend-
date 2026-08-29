@@ -32,7 +32,10 @@ export type {
   HardwareWalletAdapter,
   LedgerAdapterConfig,
   TrezorAdapterConfig,
+  // Error types
+  ResurrectErrorCode,
 } from './types.js'
+export { ResurrectError } from './errors.js'
 
 // ---------------------------------------------------------------------------
 // TTL / ledger entry helpers (returned by SorobanResurrect.queryLedgerTTL etc.)
@@ -42,10 +45,7 @@ export type { LedgerEntryTTLInfo, TTLQueryResult } from './TTLHelpers.js'
 // ---------------------------------------------------------------------------
 // Transaction history (returned by SorobanResurrect.history / getHistory)
 // ---------------------------------------------------------------------------
-export type {
-  TransactionHistoryEntry,
-  TransactionAttemptStatus,
-} from './TransactionHistory.js'
+export type { TransactionHistoryEntry, TransactionAttemptStatus } from './TransactionHistory.js'
 
 // ---------------------------------------------------------------------------
 // Hardware wallet adapters
@@ -61,6 +61,7 @@ export {
 // Public constants
 // ---------------------------------------------------------------------------
 export {
+  SDK_DEFAULTS,
   DEFAULT_NETWORK_PASSPHRASE,
   DEFAULT_RPC_URL,
   POLL_INTERVAL_MS,
@@ -69,6 +70,7 @@ export {
   KNOWN_NETWORK_PASSPHRASES,
   resolveNetworkPassphrase,
 } from './constants.js'
+export type { SdkDefaults } from './constants.js'
 
 // ---------------------------------------------------------------------------
 // Typed event emitter (used by SorobanResurrect.on / once / off)
@@ -86,8 +88,5 @@ export {
   getExpiringSoonEntries,
   getArchivedEntries,
 } from './TTLHelpers.js'
-export type {
-  TransactionHistoryEntry,
-  TransactionAttemptStatus,
-} from './TransactionHistory.js'
+export type { TransactionHistoryEntry, TransactionAttemptStatus } from './TransactionHistory.js'
 export { TransactionHistory } from './TransactionHistory.js'
