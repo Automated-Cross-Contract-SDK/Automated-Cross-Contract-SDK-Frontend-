@@ -21,6 +21,7 @@ export default defineConfig({
           items: [
             { text: 'Getting Started', link: '/guide/getting-started' },
             { text: 'Tutorial: Common Use Cases', link: '/guide/tutorial' },
+            { text: 'RPC Client Injection', link: '/guide/rpc-client-injection' },
           ],
         },
       ],

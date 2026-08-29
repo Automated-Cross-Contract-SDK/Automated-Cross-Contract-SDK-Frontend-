@@ -16,6 +16,8 @@ For a narrative walkthrough of how these pieces fit together, see
   - [`executeWithRestore`](#executewithrestore)
   - [Archiver functions](#archiver-functions)
   - [Restorer functions](#restorer-functions)
+  - [RPC Client Injection](#rpc-client-injection)
+  - [Processing State Helpers](#processing-state-helpers)
   - [Types](#types)
 - [`@soroban-resurrect/react-hook`](#soroban-resurrectreact-hook)
   - [`SorobanResurrectProvider` / `useSorobanResurrectContext`](#sorobanresurrectprovider--usesorobanresurrectcontext)
@@ -42,7 +44,7 @@ new SorobanResurrect(config: SorobanResurrectConfig)
 | Member | Signature | Description |
 | --- | --- | --- |
 | `server` | `readonly rpc.Server` | The underlying Soroban RPC server instance. |
-| `config` | `readonly Required<SorobanResurrectConfig>` | Resolved configuration with defaults applied. |
+| `config` | `readonly Required<SorobanResurrectConfig>` | Resolved configuration with defaults applied. Builds a default `SorobanRpcClient` from `rpcUrl` unless `rpcClient` is supplied — see [RPC Client Injection](#rpc-client-injection). |
 | `state` | `get state(): RestoreState` | Current workflow state. |
 | `stateInfo` | `get stateInfo(): RestoreStateInfo` | Snapshot of state, message, archived keys, and error. |
 | `onStateChange` | `(listener: (info: RestoreStateInfo) => void) => () => void` | Subscribe to state transitions. Returns an unsubscribe function. |
@@ -113,11 +115,129 @@ Source: [`Restorer.ts`](../packages/sdk/src/Restorer.ts)
 | `buildOriginalAfterRestore(server, originalTx, networkPassphrase, fee)` | Rebuild the original transaction after a successful restore (fresh sequence number + re-simulation). **Throws** if restoration was insufficient. |
 | `prepareTransaction(server, tx)` | Simulate and assemble a transaction in one step. **Throws** on simulation error or if a restore is required. |
 
+### RPC Client Injection
+
+Source: [`RpcClient.ts`](../packages/sdk/src/RpcClient.ts)
+
+By default, `SorobanResurrect` talks to the network through a `SorobanRpcClient`
+that it builds internally from `config.rpcUrl`. To inject a custom transport —
+a caching proxy, a logging wrapper, a rate-limiter, or a test double — pass
+`config.rpcClient` instead. Every SDK function that talks to the network
+(`SorobanResurrect`, `executeWithRestore`, the `Archiver`/`Restorer` free
+functions) is typed against `ISorobanRpcClient`, not the concrete
+`rpc.Server` class, so any conforming object works.
+
+| Export | Description |
+| --- | --- |
+| `ISorobanRpcClient` (type) | Minimal interface covering the six `rpc.Server` methods the SDK uses: `simulateTransaction`, `sendTransaction`, `getTransaction`, `getAccount`, `getLedgerEntries`, `getLatestLedger`. |
+| `SorobanRpcClient` | Default implementation — a thin, transparent wrapper that delegates every call to an underlying `rpc.Server`. |
+| `createRpcClient(rpcUrl)` | Factory that returns a `SorobanRpcClient` bound to `rpcUrl`. The recommended way to build a client you intend to wrap or inject. |
+
+**Inject a custom client:**
+
+```ts
+import { createRpcClient, SorobanResurrect } from '@soroban-resurrect/sdk'
+
+const client = createRpcClient('https://soroban-testnet.stellar.org')
+const sdk = new SorobanResurrect({
+  rpcUrl: 'https://soroban-testnet.stellar.org',
+  rpcClient: client,
+})
+```
+
+**Wrap it with caching/logging** (see the runnable version in
+[`docs/guide/rpc-client-injection.md`](./guide/rpc-client-injection.md)):
+
+```ts
+import { createRpcClient, type ISorobanRpcClient } from '@soroban-resurrect/sdk'
+
+function withLogging(client: ISorobanRpcClient): ISorobanRpcClient {
+  return {
+    ...client,
+    async getLatestLedger(...args) {
+      console.log('[rpc] getLatestLedger')
+      return client.getLatestLedger(...args)
+    },
+  }
+}
+
+const sdk = new SorobanResurrect({
+  rpcUrl: 'https://soroban-testnet.stellar.org',
+  rpcClient: withLogging(createRpcClient('https://soroban-testnet.stellar.org')),
+})
+```
+
+**Test doubles:** implement `ISorobanRpcClient` directly — TypeScript enforces
+that every required method is present, so a mock can't silently omit one:
+
+```ts
+import type { ISorobanRpcClient } from '@soroban-resurrect/sdk'
+import { vi } from 'vitest'
+
+const mockClient: ISorobanRpcClient = {
+  simulateTransaction: vi.fn(),
+  sendTransaction: vi.fn(),
+  getTransaction: vi.fn(),
+  getAccount: vi.fn(),
+  getLedgerEntries: vi.fn(),
+  getLatestLedger: vi.fn(),
+}
+
+const sdk = new SorobanResurrect({ rpcUrl: '...', rpcClient: mockClient })
+```
+
+### Processing State Helpers
+
+Source: [`stateUtils.ts`](../packages/sdk/src/stateUtils.ts)
+
+Every framework hook (`react-hook`, `vue-hook`, `svelte-hook`) derives its
+`isProcessing` flag from these two exports rather than duplicating the state
+list — they are the single source of truth for what counts as "in flight".
+
+| Export | Description |
+| --- | --- |
+| `PROCESSING_STATES` | `Set<RestoreState>` containing every state considered actively in-flight. |
+| `isProcessingState(state)` | Predicate: `PROCESSING_STATES.has(state)`. |
+
+`PROCESSING_STATES` contains: `simulating`, `signing_restore`,
+`submitting_restore`, `confirming_restore`, `signing_original`,
+`submitting_original`.
+
+It excludes `idle`, `success`, and `error` because those are terminal or
+not-yet-started — no operation is running. It also excludes
+**`restore_needed`**: that state is set the instant archived entries are
+detected, as a notification that a restore is about to happen, but no
+network call or wallet prompt is in flight yet at that exact point — the
+workflow moves on to `signing_restore` (or, in `submitWithRestore`, straight
+into the restore flow) immediately after. Treating `restore_needed` as
+"processing" would make UI spinners appear one tick before there's actually
+anything to wait on.
+
+```ts
+import { isProcessingState, PROCESSING_STATES } from '@soroban-resurrect/sdk'
+
+isProcessingState('confirming_restore') // true
+isProcessingState('restore_needed')     // false
+isProcessingState('idle')               // false
+
+PROCESSING_STATES.has('signing_original') // true
+```
+
+Each hook's `isProcessing` field (React's `useSorobanResurrect` /
+`useSorobanResurrectContext`, Vue's `useSorobanResurrect` composable, and
+Svelte's `createSorobanResurrect` store) is computed by calling
+`isProcessingState(state.state)` — see
+[React Hook API](./api/react-hook.md#isprocessing-contract) for the React
+return shape, and each hook's source (`packages/vue-hook/src/useSorobanResurrect.ts`,
+`packages/svelte-hook/src/createSorobanResurrect.ts`) for the Vue/Svelte
+equivalents.
+
 ### Types
 
 Source: [`types.ts`](../packages/sdk/src/types.ts)
 
-- `SorobanResurrectConfig` — constructor options (`rpcUrl`, `networkPassphrase?`, `pollIntervalMs?`, `pollTimeoutMs?`, `restoreFeeMultiplier?`, `archiveDetectionMethod?`).
+- `SorobanResurrectConfig` — constructor options (`rpcUrl`, `networkPassphrase?`, `pollIntervalMs?`, `pollTimeoutMs?`, `restoreFeeMultiplier?`, `archiveDetectionMethod?`, `rpcClient?`). See [RPC Client Injection](#rpc-client-injection) for `rpcClient`.
+- `ISorobanRpcClient` — interface for injectable RPC transports/test doubles. See [RPC Client Injection](#rpc-client-injection).
 - `WalletAdapter` — `isConnected()`, `getPublicKey()`, `signTransaction(xdr, opts?)`.
 - `ArchivedLedgerEntry` — `{ key: xdr.LedgerKey, keyBase64: string }`.
 - `SimulateResponse` — alias for `rpc.Api.SimulateTransactionResponse`.

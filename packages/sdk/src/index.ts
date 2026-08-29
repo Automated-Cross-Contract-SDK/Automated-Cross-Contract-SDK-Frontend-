@@ -91,3 +91,14 @@ export type {
   TransactionAttemptStatus,
 } from './TransactionHistory.js'
 export { TransactionHistory } from './TransactionHistory.js'
+
+// ---------------------------------------------------------------------------
+// RPC abstraction layer — enables test doubles and custom transports
+// ---------------------------------------------------------------------------
+export type { ISorobanRpcClient } from './RpcClient.js'
+export { SorobanRpcClient, createRpcClient } from './RpcClient.js'
+
+// ---------------------------------------------------------------------------
+// Processing-state helper — single source of truth for hook `isProcessing`
+// ---------------------------------------------------------------------------
+export { isProcessingState, PROCESSING_STATES } from './stateUtils.js'

@@ -40,6 +40,18 @@ Hook to access the `SorobanResurrect` API from within a `<SorobanResurrectProvid
 - `isProcessing` is `true` while `state.state` is any of: `simulating`, `signing_restore`, `submitting_restore`, `confirming_restore`, `signing_original`, `submitting_original`.
 - `submitWithRestore` and `detectArchivedKeys` are safe to call before the underlying instance mounts — they return an idle-shaped fallback (`{ success: false, error: 'Not initialized' }` / `[]`) rather than throwing.
 
+#### `isProcessing` contract
+
+`isProcessing` is computed as `isProcessingState(state.state)`, using the
+`isProcessingState` / `PROCESSING_STATES` helpers exported by
+`@soroban-resurrect/sdk` — the same helpers the Vue and Svelte hooks use, so
+all three frameworks agree on what counts as "in flight". Notably,
+`restore_needed` is **not** treated as processing: it's a momentary
+notification state set the instant archived entries are detected, before
+any restore call or wallet prompt is actually in flight. See
+[Processing State Helpers](../API.md#processing-state-helpers) in the API
+reference for the full state set and rationale.
+
 ## Standalone Hook
 
 ### `useSorobanResurrect(options)`
