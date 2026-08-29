@@ -28,11 +28,59 @@ export type {
   RestoreState,
   RestoreStateInfo,
   SorobanResurrectEvents,
+  // Observability (#237)
+  Logger,
+  LogLevel,
+  LogContext,
+  RpcTimingEvent,
   // Hardware wallet types
   HardwareWalletAdapter,
   LedgerAdapterConfig,
   TrezorAdapterConfig,
 } from './types.js'
+
+// ---------------------------------------------------------------------------
+// Observability — injectable logger + RPC call timings (#237)
+// ---------------------------------------------------------------------------
+export {
+  NOOP_LOGGER,
+  resolveLogger,
+  isLoggingEnabled,
+  createRequestId,
+  LoggingRpcClient,
+  withRpcLogging,
+} from './Logger.js'
+
+// ---------------------------------------------------------------------------
+// Account / contract-level archived-entry scan (#239)
+// ---------------------------------------------------------------------------
+export {
+  getExpiringEntriesForContract,
+  getExpiringEntriesForAccount,
+  DEFAULT_EXPIRING_SOON_LEDGERS,
+} from './ContractScan.js'
+export type {
+  ContractScanOptions,
+  ContractScanResult,
+  AccountScanOptions,
+  AccountScanResult,
+  ClassicEntryStatus,
+} from './ContractScan.js'
+
+// ---------------------------------------------------------------------------
+// Multisig restore support (#240)
+// ---------------------------------------------------------------------------
+export { MultiSigWalletAdapter } from './MultiSigWalletAdapter.js'
+export type {
+  MultiSigSigner,
+  MultiSigConfig,
+  SignatureCollectionResult,
+} from './MultiSigWalletAdapter.js'
+
+// ---------------------------------------------------------------------------
+// State machine utilities (proactive / estimation states — #238)
+// ---------------------------------------------------------------------------
+export { isProcessingState, PROCESSING_STATES } from './stateUtils.js'
 
 // ---------------------------------------------------------------------------
 // TTL / ledger entry helpers (returned by SorobanResurrect.queryLedgerTTL etc.)
@@ -42,10 +90,7 @@ export type { LedgerEntryTTLInfo, TTLQueryResult } from './TTLHelpers.js'
 // ---------------------------------------------------------------------------
 // Transaction history (returned by SorobanResurrect.history / getHistory)
 // ---------------------------------------------------------------------------
-export type {
-  TransactionHistoryEntry,
-  TransactionAttemptStatus,
-} from './TransactionHistory.js'
+export type { TransactionHistoryEntry, TransactionAttemptStatus } from './TransactionHistory.js'
 
 // ---------------------------------------------------------------------------
 // Hardware wallet adapters
@@ -86,8 +131,5 @@ export {
   getExpiringSoonEntries,
   getArchivedEntries,
 } from './TTLHelpers.js'
-export type {
-  TransactionHistoryEntry,
-  TransactionAttemptStatus,
-} from './TransactionHistory.js'
+export type { TransactionHistoryEntry, TransactionAttemptStatus } from './TransactionHistory.js'
 export { TransactionHistory } from './TransactionHistory.js'

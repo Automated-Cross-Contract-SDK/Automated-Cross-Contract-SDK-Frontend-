@@ -82,6 +82,72 @@ export interface SorobanResurrectConfig {
    * ```
    */
   rpcClient?: ISorobanRpcClient
+
+  /**
+   * Optional structured logger. When omitted the SDK is completely silent
+   * (zero overhead — no string building, no calls).
+   *
+   * When provided, the SDK emits structured log lines for state
+   * transitions, RPC calls (with duration), restore steps, and retries.
+   * Each `submitWithRestore` call is tagged with a `requestId` so log
+   * lines from concurrent workflows can be correlated.
+   *
+   * @example
+   * ```ts
+   * const sdk = new SorobanResurrect({
+   *   rpcUrl: '...',
+   *   logger: {
+   *     debug: (msg, ctx) => console.debug(msg, ctx),
+   *     info:  (msg, ctx) => console.info(msg, ctx),
+   *     warn:  (msg, ctx) => console.warn(msg, ctx),
+   *     error: (msg, ctx) => console.error(msg, ctx),
+   *   },
+   * })
+   * ```
+   */
+  logger?: Logger
+}
+
+/** Severity levels emitted by the SDK, ordered least → most severe. */
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
+
+/**
+ * Structured logging sink supplied by the integrator via
+ * {@link SorobanResurrectConfig.logger}.
+ *
+ * Every method receives a human-readable `message` and an optional
+ * structured `context` object. Implementations must never throw — the SDK
+ * calls them on the hot path and does not guard individual calls.
+ */
+export interface Logger {
+  /** Fine-grained tracing: RPC calls, state transitions, retries. */
+  debug(message: string, context?: LogContext): void
+  /** Notable lifecycle milestones (restore submitted, workflow complete). */
+  info(message: string, context?: LogContext): void
+  /** Recoverable problems (retry scheduled, slow RPC). */
+  warn(message: string, context?: LogContext): void
+  /** Workflow failures. */
+  error(message: string, context?: LogContext): void
+}
+
+/** Arbitrary structured metadata attached to a log line. */
+export type LogContext = Record<string, unknown>
+
+/**
+ * Emitted (via `logger.debug`) once per RPC round-trip, carrying the
+ * method name, wall-clock duration, and correlation id.
+ */
+export interface RpcTimingEvent {
+  /** The `ISorobanRpcClient` method that was called. */
+  method: string
+  /** Wall-clock duration of the call in milliseconds. */
+  durationMs: number
+  /** Whether the call resolved (`true`) or rejected (`false`). */
+  ok: boolean
+  /** Correlation id for the enclosing workflow, when one is active. */
+  requestId?: string
+  /** Error message when `ok` is `false`. */
+  error?: string
 }
 
 /**
@@ -238,6 +304,16 @@ export interface SubmitWithRestoreOptions {
  * See {@link SorobanResurrect.onStateChange} for how to subscribe to
  * transitions between these states, and `ARCHITECTURE.md` in the repo
  * root for the full state diagram.
+ *
+ * The union is **additive** — the original reactive submit-flow states
+ * (`idle` → `simulating` → `restore_needed` → ... → `success` / `error`)
+ * are unchanged. Three extra states model long-running, non-submit
+ * activity that does not fit the submit flow:
+ *
+ * - `estimating` — a fee / resource estimation pass is running.
+ * - `watching_ttl` — a proactive TTL watcher is polling entry lifetimes.
+ * - `extending_ttl` — a `RestoreFootprint`/`ExtendFootprintTTL` bump is
+ *   being signed and submitted proactively (before archival).
  */
 export type RestoreState =
   | 'idle'
@@ -250,6 +326,10 @@ export type RestoreState =
   | 'submitting_original'
   | 'success'
   | 'error'
+  // --- Proactive / estimation states (additive, non-submit) ---
+  | 'estimating'
+  | 'watching_ttl'
+  | 'extending_ttl'
 
 /** Snapshot of the current workflow state, including message and optional error. */
 export interface RestoreStateInfo {

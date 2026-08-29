@@ -8,18 +8,17 @@ import type {
   ResurrectResult,
   SubmitWithRestoreOptions,
   SorobanResurrectEvents,
-  WalletAdapter,
+  Logger,
 } from './types.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
+import { resolveLogger, withRpcLogging, createRequestId } from './Logger.js'
 import { resolveConfig } from './SorobanResurrectConfig.js'
 import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
 import { SorobanResurrectSimulator } from './SorobanResurrectSimulation.js'
 import { SorobanResurrectExecutor } from './SorobanResurrectExecution.js'
+import { TransactionHistory } from './TransactionHistory.js'
 import type { TransactionHistoryEntry } from './TransactionHistory.js'
-import {
-  queryLedgerTTL,
-  queryLedgerEntryTTL,
-  getExpiringSoonEntries,
-} from './TTLHelpers.js'
+import { queryLedgerTTL, queryLedgerEntryTTL, getExpiringSoonEntries } from './TTLHelpers.js'
 import type { LedgerEntryTTLInfo, TTLQueryResult } from './TTLHelpers.js'
 
 /**
@@ -57,7 +56,22 @@ export class SorobanResurrect {
    */
   public readonly server: ISorobanRpcClient
   /** Resolved configuration with defaults applied. */
-  public readonly config: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & { rpcClient: ISorobanRpcClient }
+  public readonly config: Required<Omit<SorobanResurrectConfig, 'rpcClient' | 'logger'>> & {
+    rpcClient: ISorobanRpcClient
+  }
+
+  /**
+   * Structured logger for this instance. Resolves to a silent no-op sink
+   * when `config.logger` was not supplied, so callers may log
+   * unconditionally.
+   */
+  public readonly logger: Logger
+
+  /**
+   * Correlation id for the in-flight `submitWithRestore` call, attached to
+   * every log line the workflow emits. `undefined` when idle.
+   */
+  private _requestId: string | undefined
 
   private readonly _stateMgr: SorobanResurrectStateManager
   private readonly _simulator: SorobanResurrectSimulator
@@ -93,10 +107,22 @@ export class SorobanResurrect {
    */
   constructor(config: SorobanResurrectConfig) {
     const resolved = resolveConfig(config)
-    this.server = resolved.server
     this.config = resolved.config
+    this.logger = resolveLogger(config.logger)
+    // Wrap the RPC client so every call is timed and emitted via
+    // `logger.debug` (no-op / passthrough when no logger is configured).
+    this.server = withRpcLogging(resolved.server, this.logger, () => this._requestId)
 
     this._stateMgr = new SorobanResurrectStateManager()
+    // Mirror every state transition into the structured log.
+    this._stateMgr.onStateChange((info) => {
+      this.logger.debug(`state → ${info.state}`, {
+        requestId: this._requestId,
+        state: info.state,
+        message: info.message,
+        error: info.error,
+      })
+    })
     this._simulator = new SorobanResurrectSimulator(
       this.server,
       this.config,
@@ -356,7 +382,22 @@ export class SorobanResurrect {
    * ```
    */
   async submitWithRestore(options: SubmitWithRestoreOptions): Promise<ResurrectResult> {
-    return this._executor.submitWithRestore(options)
+    this._requestId = createRequestId()
+    this.logger.info('submitWithRestore: start', { requestId: this._requestId })
+    try {
+      const result = await this._executor.submitWithRestore(options)
+      this.logger[result.success ? 'info' : 'error']('submitWithRestore: finished', {
+        requestId: this._requestId,
+        success: result.success,
+        archivedKeysDetected: result.archivedKeysDetected,
+        restoreTxHash: result.restoreTxHash,
+        originalTxHash: result.originalTxHash,
+        error: result.error,
+      })
+      return result
+    } finally {
+      this._requestId = undefined
+    }
   }
 
   /**
@@ -447,10 +488,7 @@ export class SorobanResurrect {
    * Signs and submits a transaction directly, without automatic archive
    * restoration. Use `submitWithRestore` for the full workflow.
    */
-  async sendTransaction(
-    transaction: Transaction,
-    wallet: WalletAdapter,
-  ): Promise<ResurrectResult> {
+  async sendTransaction(transaction: Transaction, wallet: WalletAdapter): Promise<ResurrectResult> {
     return sendTransaction(this.server, transaction, wallet, this.config)
   }
 

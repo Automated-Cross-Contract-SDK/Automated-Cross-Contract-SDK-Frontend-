@@ -72,22 +72,22 @@ flowchart TB
 
 ## Packages
 
-| Package | Responsibility |
-| --- | --- |
-| `@soroban-resurrect/sdk` | Framework-agnostic core: detects archived entries, builds and submits restore transactions, and orchestrates the full restore-and-submit workflow. No React dependency. |
+| Package                         | Responsibility                                                                                                                                                                                     |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@soroban-resurrect/sdk`        | Framework-agnostic core: detects archived entries, builds and submits restore transactions, and orchestrates the full restore-and-submit workflow. No React dependency.                            |
 | `@soroban-resurrect/react-hook` | Thin React binding over the SDK — a context provider (`SorobanResurrectProvider`) and a standalone hook (`useSorobanResurrect`), both exposing the same reactive `state` / `isProcessing` surface. |
-| `examples/basic` | Vite + React demo app wiring the react-hook package to a Freighter wallet connect + withdraw flow. |
+| `examples/basic`                | Vite + React demo app wiring the react-hook package to a Freighter wallet connect + withdraw flow.                                                                                                 |
 
 Within `@soroban-resurrect/sdk`, responsibilities are split by module:
 
-| Module | Responsibility |
-| --- | --- |
-| `SorobanResurrect.ts` | Public facade class. Wraps the RPC server, exposes the state machine and listener API, and delegates the actual workflow to `Executor`. |
-| `Executor.ts` | `executeWithRestore` — the stateless orchestration function that runs simulate → (restore if needed) → submit, invoking lifecycle callbacks along the way. |
-| `Archiver.ts` | Simulation-response type guards and archived-key extraction/detection (`simulation` and `direct` strategies). |
-| `Restorer.ts` | Transaction building: `buildRestoreTransaction`, `buildOriginalAfterRestore`, `prepareTransaction`, plus `waitForTransaction` polling with backoff. |
-| `types.ts` | Shared TypeScript interfaces and the `RestoreState` union. |
-| `constants.ts` | Defaults (network passphrase, poll interval/timeout, fee multiplier). |
+| Module                | Responsibility                                                                                                                                             |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SorobanResurrect.ts` | Public facade class. Wraps the RPC server, exposes the state machine and listener API, and delegates the actual workflow to `Executor`.                    |
+| `Executor.ts`         | `executeWithRestore` — the stateless orchestration function that runs simulate → (restore if needed) → submit, invoking lifecycle callbacks along the way. |
+| `Archiver.ts`         | Simulation-response type guards and archived-key extraction/detection (`simulation` and `direct` strategies).                                              |
+| `Restorer.ts`         | Transaction building: `buildRestoreTransaction`, `buildOriginalAfterRestore`, `prepareTransaction`, plus `waitForTransaction` polling with backoff.        |
+| `types.ts`            | Shared TypeScript interfaces and the `RestoreState` union.                                                                                                 |
+| `constants.ts`        | Defaults (network passphrase, poll interval/timeout, fee multiplier).                                                                                      |
 
 ## Component interaction
 
@@ -252,10 +252,32 @@ stateDiagram-v2
     success --> idle: reset()
     error --> idle: reset()
     idle --> idle: reset()
+
+    %% --- Proactive / estimation states (additive, non-submit) ---
+    idle --> estimating: estimate()
+    idle --> watching_ttl: watchTtl()
+    idle --> extending_ttl: extendTtl()
+    watching_ttl --> extending_ttl: entry near expiry
+    estimating --> idle: done
+    estimating --> error: estimation fails
+    watching_ttl --> idle: stop()
+    extending_ttl --> success: bump submitted
+    extending_ttl --> error: bump fails
 ```
 
 `reset()` clears `error`/`archivedKeys` and returns to `idle` from any
 state, so a UI can always offer a "try again" action.
+
+### Proactive / estimation states
+
+`estimating`, `watching_ttl`, and `extending_ttl` are **additive** — they
+model long-running activity outside the reactive submit flow (fee
+estimation and proactive TTL watch-and-extend). The `RestoreState` union
+is a superset of the original states, so existing consumers keep working
+unchanged. `isProcessingState()` returns `true` for `estimating` and
+`extending_ttl` (active work) and `false` for `watching_ttl` (a passive
+background poll, like `idle`); its result for every pre-existing state is
+unchanged.
 
 ## Failure handling
 
@@ -290,7 +312,7 @@ initiation, independent of the specific failure point above.
   the RPC server itself returns a restore-required response
   (`Api.isSimulationRestore`). Cheap (one RPC call) and matches exactly
   what `submitWithRestore` will encounter, but only reports entries that
-  are actually in the transaction's footprint *and* currently archived.
+  are actually in the transaction's footprint _and_ currently archived.
 - **`direct`** — simulate in success mode to obtain the read-write
   footprint, then query `getLedgerEntries` directly (in chunks of 50) to
   see which of those keys are missing from the ledger. Useful for
