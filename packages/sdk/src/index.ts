@@ -13,6 +13,15 @@
 export { SorobanResurrect } from './SorobanResurrect.js'
 
 // ---------------------------------------------------------------------------
+// Network presets / switching helper
+// ---------------------------------------------------------------------------
+export { SorobanResurrectNetwork, NETWORK_PRESETS } from './SorobanResurrectNetwork.js'
+export type {
+  SorobanNetworkName,
+  SorobanNetworkPreset,
+} from './SorobanResurrectNetwork.js'
+
+// ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 export type {
@@ -91,3 +100,8 @@ export type {
   TransactionAttemptStatus,
 } from './TransactionHistory.js'
 export { TransactionHistory } from './TransactionHistory.js'
+
+// ---------------------------------------------------------------------------
+// Shared workflow-state helpers (used by every framework hook for `isProcessing`)
+// ---------------------------------------------------------------------------
+export { isProcessingState, PROCESSING_STATES } from './stateUtils.js'
