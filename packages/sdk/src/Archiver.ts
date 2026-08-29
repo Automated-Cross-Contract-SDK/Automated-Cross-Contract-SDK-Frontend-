@@ -2,6 +2,7 @@ import { rpc, Transaction } from '@stellar/stellar-sdk'
 import { xdr } from '@stellar/stellar-sdk'
 import { ArchivedLedgerEntry, SimulateResponse } from './types.js'
 import { asXdrBase64, asContractIdHex, type ContractIdHex } from './branded-types.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
 
 /**
  * Type guard — returns true if the simulation response indicates archived

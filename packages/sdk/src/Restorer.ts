@@ -3,11 +3,14 @@ import { TransactionBuilder, Operation, Transaction, xdr, FeeBumpTransaction } f
 import { SorobanResurrectConfig, FeeBumpSponsor } from './types.js'
 import { DEFAULT_NETWORK_PASSPHRASE } from './constants.js'
 import { calculateRestoreFee } from './feeCalculation.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
+import { asXdrBase64 } from './branded-types.js'
+import type { StellarPublicKey, SequenceNumber, TxHash, XdrBase64 } from './branded-types.js'
 
 /** Parameters for building a restore transaction. */
 export interface BuildRestoreTxParams {
   /** Soroban RPC server instance. */
-  server: rpc.Server
+  server: ISorobanRpcClient
   /** Source account public key (Stellar G-address). */
   sourcePublicKey: StellarPublicKey | string
   /** Soroban transaction data from the simulation response. */
@@ -102,7 +105,7 @@ export async function buildRestoreTransaction(params: BuildRestoreTxParams): Pro
  * ```
  */
 export async function waitForTransaction(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   hash: TxHash | string,
   pollIntervalMs: number = 1000,
   pollTimeoutMs: number = 60_000,
@@ -153,7 +156,7 @@ function isTerminalStatus(status: string): boolean {
  * @private
  */
 async function streamTransactionViaEvents(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   hash: TxHash | string,
   timeoutMs: number,
 ): Promise<rpc.Api.GetTransactionResponse | null> {
@@ -315,7 +318,7 @@ async function pollTransactionAdaptive(
  * @throws If the transaction does not complete within the timeout
  */
 export async function waitForTransactionSSE(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   hash: TxHash | string,
   pollTimeoutMs: number = 60_000,
 ): Promise<rpc.Api.GetTransactionResponse> {
@@ -555,7 +558,7 @@ export async function buildFeeBumpTransaction(
  * @returns The send transaction response with the hash.
  */
 export async function submitFeeBumpTransaction(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   feeBumpXdr: XdrBase64 | string,
   networkPassphrase: string,
 ): Promise<rpc.Api.SendTransactionResponse> {

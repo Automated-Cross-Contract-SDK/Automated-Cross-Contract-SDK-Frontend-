@@ -12,6 +12,7 @@ import type {
   SequenceNumber,
   HistoryEntryId,
 } from './branded-types.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
 
 export type {
   TxHash,
@@ -57,10 +58,27 @@ export interface SorobanResurrectConfig {
   restoreFeeMultiplier?: number
   /** Method for detecting archived keys: 'simulation' (default) or 'direct'. */
   archiveDetectionMethod?: 'simulation' | 'direct'
+  /**
+   * When the configured `archiveDetectionMethod` is `'simulation'` and the RPC
+   * response can't be classified as success/error/restore-required (e.g. an
+   * older soroban-rpc version), automatically fall back to the `'direct'`
+   * strategy instead of silently missing archived entries. Defaults to `true`.
+   */
+  archiveDetectionFallback?: boolean
   /** Enable simulation cache to reuse results and reduce RPC calls (default: false). */
   enableSimulationCache?: boolean
   /** Use SSE-based transaction status waiting when available (default: false). */
   useSSE?: boolean
+  /** Per-call timeout in ms for RPC calls made through the resilient transport (default: 10000). */
+  rpcTimeoutMs?: number
+  /** Number of retries (beyond the initial attempt) for transient RPC failures (default: 2). */
+  rpcRetryCount?: number
+  /** Base backoff in ms between RPC retries; doubles each attempt with jitter (default: 250). */
+  rpcRetryBackoffMs?: number
+  /** Consecutive RPC failures before the circuit breaker trips and fails fast (default: 5). */
+  rpcCircuitBreakerThreshold?: number
+  /** Cooldown in ms the circuit breaker stays open before allowing calls through again (default: 30000). */
+  rpcCircuitBreakerCooldownMs?: number
   /**
    * Optional pre-built RPC client to use instead of creating one from `rpcUrl`.
    *
@@ -263,60 +281,6 @@ export interface RestoreStateInfo {
   error?: string
 }
 
-// ---------------------------------------------------------------------------
-// Hardware wallet types
-// ---------------------------------------------------------------------------
-
-/**
- * Extended wallet adapter interface for hardware wallet devices (Ledger, Trezor).
- * Adds `connect`/`disconnect` lifecycle methods to the base `WalletAdapter`.
- */
-export interface HardwareWalletAdapter extends WalletAdapter {
-  /** Device type identifier. */
-  readonly type: 'ledger' | 'trezor'
-  /** Connects to the hardware device and prepares it for signing. */
-  connect(): Promise<void>
-  /** Disconnects from the hardware device and releases the transport. */
-  disconnect(): Promise<void>
-}
-
-/**
- * Configuration for `LedgerWalletAdapter`.
- *
- * @see {@link LedgerWalletAdapter}
- */
-export interface LedgerAdapterConfig {
-  /**
-   * A pre-opened Ledger transport instance (e.g. from `@ledgerhq/hw-transport-webusb`).
-   * When omitted, the adapter cannot sign — you must call `connect()` manually after
-   * supplying a transport via `setTransport()`.
-   */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  transport?: any
-  /** BIP44 account index for key derivation (default: 0). */
-  accountIndex?: number
-}
-
-/**
- * Configuration for `TrezorWalletAdapter`.
- *
- * @see {@link TrezorWalletAdapter}
- */
-export interface TrezorAdapterConfig {
-  /**
-   * Your application's manifest — required by Trezor Connect.
-   * See https://connect.trezor.io/9/methods/manifest/
-   */
-  manifest: {
-    /** Email address for the application maintainer. */
-    email: string
-    /** URL of the application's public repository. */
-    appUrl: string
-  }
-  /** BIP44 account index for key derivation (default: 0). */
-  accountIndex?: number
-}
-
 /**
  * Typed events emitted by SorobanResurrect for specific workflow transitions,
  * in addition to the general-purpose `onStateChange` observer.
@@ -336,6 +300,8 @@ export interface SorobanResurrectEvents {
   restoreComplete: ResurrectResult
   /** Fired when the workflow fails, with the error message. */
   error: string
+  /** Fired after `switchNetwork()` re-binds the RPC client and network passphrase. */
+  networkChanged: { rpcUrl: string; networkPassphrase: string }
 }
 
 // ---------------------------------------------------------------------------

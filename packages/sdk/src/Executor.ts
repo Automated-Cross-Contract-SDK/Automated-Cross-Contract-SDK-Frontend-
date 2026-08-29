@@ -134,7 +134,7 @@ async function simulateWithCache(
  * Helper: waits for a transaction using SSE if configured, otherwise polls.
  */
 async function waitForTx(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   hash: TxHash | string,
   config: SorobanResurrectConfig,
 ): Promise<rpc.Api.GetTransactionResponse> {
@@ -400,7 +400,7 @@ export async function sendTransaction(
  * helper from Restorer.ts but adds callback support.
  */
 async function waitForTransactionWithCallbacks(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   hash: TxHash | string,
   pollIntervalMs: number,
   pollTimeoutMs: number,

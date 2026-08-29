@@ -1,27 +1,35 @@
-import { rpc } from '@stellar/stellar-sdk'
 import { SorobanResurrectConfig } from './types.js'
 import {
   DEFAULT_NETWORK_PASSPHRASE,
   POLL_INTERVAL_MS,
   POLL_TIMEOUT_MS,
   RESTORE_FEE_MULTIPLIER,
+  RPC_TIMEOUT_MS,
+  RPC_RETRY_COUNT,
+  RPC_RETRY_BACKOFF_MS,
+  RPC_CIRCUIT_BREAKER_THRESHOLD,
+  RPC_CIRCUIT_BREAKER_COOLDOWN_MS,
   KNOWN_NETWORK_PASSPHRASES,
   resolveNetworkPassphrase,
 } from './constants.js'
 import { SimulationCache } from './SimulationCache.js'
+import { SorobanRpcClient, wrapWithResilience } from './RpcClient.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
 
 /**
  * Result of initialising the SDK configuration.
  *
- * Contains the fully resolved `Required<SorobanResurrectConfig>`, the
- * constructed `rpc.Server`, and an optional `SimulationCache` instance
- * (present only when `enableSimulationCache` is `true`).
+ * Contains the fully resolved config, the RPC client (the caller-supplied
+ * `rpcClient` or a `SorobanRpcClient` built from `rpcUrl`, wrapped in the
+ * resilient transport described in `RpcClient.ts`), and an optional
+ * `SimulationCache` instance (present only when `enableSimulationCache` is
+ * `true`).
  */
 export interface ResolvedConfig {
-  /** Soroban RPC server instance bound to the configured endpoint. */
-  server: rpc.Server
+  /** Soroban RPC client bound to the configured endpoint (resilient transport applied). */
+  server: ISorobanRpcClient
   /** Resolved configuration with all optional fields filled in. */
-  config: Required<SorobanResurrectConfig>
+  config: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & { rpcClient: ISorobanRpcClient }
   /**
    * Cache for simulation responses. Only present when
    * `config.enableSimulationCache` is `true`; `undefined` otherwise.
@@ -54,7 +62,21 @@ export interface ResolvedConfig {
  * ```
  */
 export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
-  const server = new rpc.Server(config.rpcUrl)
+  const baseClient: ISorobanRpcClient = config.rpcClient ?? new SorobanRpcClient(config.rpcUrl)
+
+  const rpcTimeoutMs = config.rpcTimeoutMs ?? RPC_TIMEOUT_MS
+  const rpcRetryCount = config.rpcRetryCount ?? RPC_RETRY_COUNT
+  const rpcRetryBackoffMs = config.rpcRetryBackoffMs ?? RPC_RETRY_BACKOFF_MS
+  const rpcCircuitBreakerThreshold = config.rpcCircuitBreakerThreshold ?? RPC_CIRCUIT_BREAKER_THRESHOLD
+  const rpcCircuitBreakerCooldownMs = config.rpcCircuitBreakerCooldownMs ?? RPC_CIRCUIT_BREAKER_COOLDOWN_MS
+
+  const server = wrapWithResilience(baseClient, {
+    timeoutMs: rpcTimeoutMs,
+    retryCount: rpcRetryCount,
+    retryBackoffMs: rpcRetryBackoffMs,
+    circuitBreakerThreshold: rpcCircuitBreakerThreshold,
+    circuitBreakerCooldownMs: rpcCircuitBreakerCooldownMs,
+  })
 
   const networkPassphrase =
     config.networkPassphrase ??
@@ -72,15 +94,22 @@ export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
 
   const simulationCache = config.enableSimulationCache ? new SimulationCache() : undefined
 
-  const resolved: Required<SorobanResurrectConfig> = {
+  const resolved: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & { rpcClient: ISorobanRpcClient } = {
     rpcUrl: config.rpcUrl,
     networkPassphrase,
     pollIntervalMs: config.pollIntervalMs ?? POLL_INTERVAL_MS,
     pollTimeoutMs: config.pollTimeoutMs ?? POLL_TIMEOUT_MS,
     restoreFeeMultiplier: config.restoreFeeMultiplier ?? RESTORE_FEE_MULTIPLIER,
     archiveDetectionMethod: config.archiveDetectionMethod ?? 'simulation',
+    archiveDetectionFallback: config.archiveDetectionFallback ?? true,
     enableSimulationCache: config.enableSimulationCache ?? false,
     useSSE: config.useSSE ?? false,
+    rpcTimeoutMs,
+    rpcRetryCount,
+    rpcRetryBackoffMs,
+    rpcCircuitBreakerThreshold,
+    rpcCircuitBreakerCooldownMs,
+    rpcClient: server,
   }
 
   return { server, config: resolved, simulationCache }
