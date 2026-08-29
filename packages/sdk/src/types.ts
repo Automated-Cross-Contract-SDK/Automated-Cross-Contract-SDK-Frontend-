@@ -12,6 +12,7 @@ import type {
   SequenceNumber,
   HistoryEntryId,
 } from './branded-types.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
 
 export type {
   TxHash,
@@ -82,6 +83,20 @@ export interface SorobanResurrectConfig {
    * ```
    */
   rpcClient?: ISorobanRpcClient
+  /**
+   * Maximum acceptable fee (in stroops) for a restore transaction. When set,
+   * `buildRestoreTransaction` throws a {@link RestoreFeeCapExceededError} if
+   * `minResourceFee * restoreFeeMultiplier` would exceed this cap, instead of
+   * silently signing an unexpectedly expensive transaction.
+   */
+  maxRestoreFeeStroops?: FeeStroops | string
+  /**
+   * Maximum number of times the restore workflow will rebuild the original
+   * transaction (with a fresh sequence number) and resubmit it after a
+   * `tx_bad_seq` submission error. Defaults to 3. Only `tx_bad_seq` triggers
+   * a retry — all other submission errors are surfaced immediately.
+   */
+  maxSequenceRetries?: number
 }
 
 /**
@@ -181,6 +196,24 @@ export interface ResurrectResult {
    * the workflow without rebuilding the original transaction.
    */
   historyId?: string
+  /**
+   * Number of `tx_bad_seq` rebuild-and-resubmit retries performed for the
+   * original transaction. Only present when a restore occurred; `0` means
+   * the original transaction was accepted on the first attempt.
+   */
+  sequenceRetries?: number
+}
+
+/** Options for {@link SorobanResurrect.restoreKeys}. */
+export interface RestoreKeysOptions {
+  /** Called when the wallet is prompted to sign the restore transaction. */
+  onSigningRestore?: () => void
+  /** Called right before the restore transaction is submitted. */
+  onSubmittingRestore?: () => void
+  /** Called after the restore transaction is submitted. */
+  onRestoreSubmitted?: (txHash: TxHash) => void
+  /** Called after the restore transaction is confirmed on-chain. */
+  onRestoreConfirmed?: (txHash: TxHash) => void
 }
 
 /**
@@ -261,60 +294,6 @@ export interface RestoreStateInfo {
   archivedKeys?: ArchivedLedgerEntry[]
   /** Error message (only set in error state). */
   error?: string
-}
-
-// ---------------------------------------------------------------------------
-// Hardware wallet types
-// ---------------------------------------------------------------------------
-
-/**
- * Extended wallet adapter interface for hardware wallet devices (Ledger, Trezor).
- * Adds `connect`/`disconnect` lifecycle methods to the base `WalletAdapter`.
- */
-export interface HardwareWalletAdapter extends WalletAdapter {
-  /** Device type identifier. */
-  readonly type: 'ledger' | 'trezor'
-  /** Connects to the hardware device and prepares it for signing. */
-  connect(): Promise<void>
-  /** Disconnects from the hardware device and releases the transport. */
-  disconnect(): Promise<void>
-}
-
-/**
- * Configuration for `LedgerWalletAdapter`.
- *
- * @see {@link LedgerWalletAdapter}
- */
-export interface LedgerAdapterConfig {
-  /**
-   * A pre-opened Ledger transport instance (e.g. from `@ledgerhq/hw-transport-webusb`).
-   * When omitted, the adapter cannot sign — you must call `connect()` manually after
-   * supplying a transport via `setTransport()`.
-   */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  transport?: any
-  /** BIP44 account index for key derivation (default: 0). */
-  accountIndex?: number
-}
-
-/**
- * Configuration for `TrezorWalletAdapter`.
- *
- * @see {@link TrezorWalletAdapter}
- */
-export interface TrezorAdapterConfig {
-  /**
-   * Your application's manifest — required by Trezor Connect.
-   * See https://connect.trezor.io/9/methods/manifest/
-   */
-  manifest: {
-    /** Email address for the application maintainer. */
-    email: string
-    /** URL of the application's public repository. */
-    appUrl: string
-  }
-  /** BIP44 account index for key derivation (default: 0). */
-  accountIndex?: number
 }
 
 /**

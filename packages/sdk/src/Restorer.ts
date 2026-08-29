@@ -1,13 +1,52 @@
-import { rpc, Account, Keypair } from '@stellar/stellar-sdk'
-import { TransactionBuilder, Operation, Transaction, xdr, FeeBumpTransaction } from '@stellar/stellar-sdk'
+import { rpc, Account, Keypair, BASE_FEE, SorobanDataBuilder } from '@stellar/stellar-sdk'
+import {
+  TransactionBuilder,
+  Operation,
+  Transaction,
+  xdr,
+  FeeBumpTransaction,
+} from '@stellar/stellar-sdk'
 import { SorobanResurrectConfig, FeeBumpSponsor } from './types.js'
 import { DEFAULT_NETWORK_PASSPHRASE } from './constants.js'
 import { calculateRestoreFee } from './feeCalculation.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
+import {
+  asXdrBase64,
+  type StellarPublicKey,
+  type SequenceNumber,
+  type TxHash,
+  type XdrBase64,
+} from './branded-types.js'
+
+/**
+ * Thrown by {@link buildRestoreTransaction} when the computed restore fee
+ * (`minResourceFee * restoreFeeMultiplier`) exceeds
+ * `config.maxRestoreFeeStroops`. Surfacing this as a typed error lets
+ * callers (and `submitWithRestore`) distinguish a fee-cap rejection from
+ * other build/signing failures.
+ */
+export class RestoreFeeCapExceededError extends Error {
+  /** The computed restore fee, in stroops. */
+  readonly computedFeeStroops: string
+  /** The configured cap, in stroops. */
+  readonly capFeeStroops: string
+
+  constructor(computedFeeStroops: string, capFeeStroops: string) {
+    super(
+      `Restore transaction fee (${computedFeeStroops} stroops) exceeds the configured cap ` +
+        `of ${capFeeStroops} stroops (maxRestoreFeeStroops). Raise maxRestoreFeeStroops, lower ` +
+        `restoreFeeMultiplier, or restore fewer keys at once.`,
+    )
+    this.name = 'RestoreFeeCapExceededError'
+    this.computedFeeStroops = computedFeeStroops
+    this.capFeeStroops = capFeeStroops
+  }
+}
 
 /** Parameters for building a restore transaction. */
 export interface BuildRestoreTxParams {
   /** Soroban RPC server instance. */
-  server: rpc.Server
+  server: ISorobanRpcClient
   /** Source account public key (Stellar G-address). */
   sourcePublicKey: StellarPublicKey | string
   /** Soroban transaction data from the simulation response. */
@@ -52,7 +91,14 @@ export interface BuildRestoreTxParams {
  * ```
  */
 export async function buildRestoreTransaction(params: BuildRestoreTxParams): Promise<Transaction> {
-  const { sourcePublicKey, transactionData, minResourceFee, config, account: preFetched, sequenceNumber } = params
+  const {
+    sourcePublicKey,
+    transactionData,
+    minResourceFee,
+    config,
+    account: preFetched,
+    sequenceNumber,
+  } = params
 
   const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
   let account = preFetched
@@ -66,6 +112,13 @@ export async function buildRestoreTransaction(params: BuildRestoreTxParams): Pro
 
   const restoreFee = calculateRestoreFee(minResourceFee, config)
 
+  if (config.maxRestoreFeeStroops !== undefined) {
+    const cap = BigInt(config.maxRestoreFeeStroops)
+    if (BigInt(restoreFee) > cap) {
+      throw new RestoreFeeCapExceededError(restoreFee, config.maxRestoreFeeStroops.toString())
+    }
+  }
+
   const restoreTx = new TransactionBuilder(account, {
     fee: restoreFee,
     networkPassphrase,
@@ -76,6 +129,91 @@ export async function buildRestoreTransaction(params: BuildRestoreTxParams): Pro
     .build()
 
   return restoreTx
+}
+
+/** Parameters for building a restore transaction from arbitrary ledger keys. */
+export interface BuildRestoreTxFromKeysParams {
+  /** Soroban RPC server instance. */
+  server: ISorobanRpcClient
+  /** Source account public key (Stellar G-address) that will pay for the restore. */
+  sourcePublicKey: StellarPublicKey | string
+  /** The ledger keys to restore (need not come from a simulated transaction's footprint). */
+  keys: xdr.LedgerKey[]
+  /** SDK configuration. */
+  config: SorobanResurrectConfig
+  /** Pre-fetched account (avoids sequence-number race when calling concurrently). */
+  account?: Account
+  /** Optional pre-fetched sequence number. If provided, avoids fetching the account. */
+  sequenceNumber?: SequenceNumber | string
+}
+
+/**
+ * Builds a restore transaction for an arbitrary set of ledger keys, without
+ * requiring a source transaction's simulated footprint. This enables
+ * proactive maintenance (e.g. restoring a contract's data ahead of an
+ * upgrade) where there is no "original" transaction to simulate.
+ *
+ * Since there is no source transaction to derive `minResourceFee` from, this
+ * builds a throwaway `restoreFootprint` transaction over the given keys and
+ * simulates it once to price the restore, then delegates to
+ * {@link buildRestoreTransaction} (which applies `restoreFeeMultiplier` and
+ * the `maxRestoreFeeStroops` cap identically to the tx-driven restore flow).
+ *
+ * @param params - See {@link BuildRestoreTxFromKeysParams}.
+ * @returns An unsigned restore `Transaction` ready to be signed.
+ * @throws {Error} If `keys` is empty, or if the pricing simulation fails.
+ * @throws {RestoreFeeCapExceededError} If the computed fee exceeds `config.maxRestoreFeeStroops`.
+ * @see {@link SorobanResurrect.restoreKeys} for the public facade method.
+ */
+export async function buildRestoreTransactionFromKeys(
+  params: BuildRestoreTxFromKeysParams,
+): Promise<Transaction> {
+  const { server, sourcePublicKey, keys, config, account: preFetched, sequenceNumber } = params
+
+  if (keys.length === 0) {
+    throw new Error('restoreKeys: at least one ledger key is required')
+  }
+
+  const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
+
+  let account = preFetched
+  if (!account) {
+    account =
+      sequenceNumber !== undefined
+        ? new Account(sourcePublicKey, sequenceNumber)
+        : await server.getAccount(sourcePublicKey)
+  }
+
+  // Capture the starting sequence before the draft build below consumes one,
+  // so the final transaction (built by buildRestoreTransaction) starts from
+  // the correct, unconsumed sequence number.
+  const initialSequence = account.sequenceNumber()
+
+  const sorobanData = new SorobanDataBuilder().setReadWrite(keys).build()
+
+  const draftTx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase,
+  })
+    .addOperation(Operation.restoreFootprint({}))
+    .setSorobanData(sorobanData)
+    .setTimeout(30)
+    .build()
+
+  const sim = await server.simulateTransaction(draftTx)
+
+  if (rpc.Api.isSimulationError(sim)) {
+    throw new Error(`Simulation error while pricing restore for arbitrary keys: ${sim.error}`)
+  }
+
+  return buildRestoreTransaction({
+    server,
+    sourcePublicKey,
+    transactionData: sim.transactionData.build(),
+    minResourceFee: parseInt(sim.minResourceFee, 10),
+    config,
+    account: new Account(sourcePublicKey, initialSequence),
+  })
 }
 
 /**
@@ -102,7 +240,7 @@ export async function buildRestoreTransaction(params: BuildRestoreTxParams): Pro
  * ```
  */
 export async function waitForTransaction(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   hash: TxHash | string,
   pollIntervalMs: number = 1000,
   pollTimeoutMs: number = 60_000,
@@ -153,7 +291,7 @@ function isTerminalStatus(status: string): boolean {
  * @private
  */
 async function streamTransactionViaEvents(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   hash: TxHash | string,
   timeoutMs: number,
 ): Promise<rpc.Api.GetTransactionResponse | null> {
@@ -184,7 +322,7 @@ async function streamTransactionViaEvents(
   const serverURL =
     typeof (server as any).serverURL === 'string'
       ? (server as any).serverURL
-      : (server as any).serverURL?.toString?.() ?? ''
+      : ((server as any).serverURL?.toString?.() ?? '')
 
   if (!serverURL) {
     return null
@@ -315,7 +453,7 @@ async function pollTransactionAdaptive(
  * @throws If the transaction does not complete within the timeout
  */
 export async function waitForTransactionSSE(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   hash: TxHash | string,
   pollTimeoutMs: number = 60_000,
 ): Promise<rpc.Api.GetTransactionResponse> {
@@ -377,7 +515,9 @@ export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
       return innerV1.tx().operations()
     }
 
-    throw new Error(`Unsupported inner transaction envelope type in fee-bump transaction: ${innerType.name}`)
+    throw new Error(
+      `Unsupported inner transaction envelope type in fee-bump transaction: ${innerType.name}`,
+    )
   }
 
   // Handle regular V0 transactions
@@ -555,7 +695,7 @@ export async function buildFeeBumpTransaction(
  * @returns The send transaction response with the hash.
  */
 export async function submitFeeBumpTransaction(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   feeBumpXdr: XdrBase64 | string,
   networkPassphrase: string,
 ): Promise<rpc.Api.SendTransactionResponse> {
@@ -564,4 +704,27 @@ export async function submitFeeBumpTransaction(
     throw new Error('Failed to parse fee-bump transaction XDR')
   }
   return server.sendTransaction(parsed)
+}
+
+/**
+ * Checks whether a `sendTransaction` response was rejected because of a
+ * `tx_bad_seq` result — i.e. the account's sequence number moved between
+ * when the transaction was built and when it was submitted (e.g. another
+ * client submitted a transaction for the same account in the meantime).
+ *
+ * @param response - The response from `server.sendTransaction(...)`.
+ * @returns `true` if the rejection reason is specifically `tx_bad_seq`.
+ * @see {@link executeWithRestore} in `Executor.ts`, which rebuilds the
+ *   original transaction with a fresh sequence number and retries when
+ *   this returns `true`.
+ */
+export function isTxBadSeqError(response: rpc.Api.SendTransactionResponse): boolean {
+  if (response.status !== 'ERROR' || !response.errorResult) {
+    return false
+  }
+  try {
+    return response.errorResult.result().switch().name === 'txBadSeq'
+  } catch {
+    return false
+  }
 }

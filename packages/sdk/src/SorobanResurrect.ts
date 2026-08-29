@@ -8,19 +8,17 @@ import type {
   ResurrectResult,
   SubmitWithRestoreOptions,
   SorobanResurrectEvents,
-  WalletAdapter,
+  RestoreKeysOptions,
 } from './types.js'
-import { resolveConfig } from './SorobanResurrectConfig.js'
+import { resolveConfig, type ResolvedSorobanResurrectConfig } from './SorobanResurrectConfig.js'
 import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
 import { SorobanResurrectSimulator } from './SorobanResurrectSimulation.js'
 import { SorobanResurrectExecutor } from './SorobanResurrectExecution.js'
 import type { TransactionHistoryEntry } from './TransactionHistory.js'
-import {
-  queryLedgerTTL,
-  queryLedgerEntryTTL,
-  getExpiringSoonEntries,
-} from './TTLHelpers.js'
+import { queryLedgerTTL, queryLedgerEntryTTL, getExpiringSoonEntries } from './TTLHelpers.js'
 import type { LedgerEntryTTLInfo, TTLQueryResult } from './TTLHelpers.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
+import type { StellarPublicKey } from './branded-types.js'
 
 /**
  * Main facade for the Soroban-Resurrect SDK.
@@ -57,23 +55,11 @@ export class SorobanResurrect {
    */
   public readonly server: ISorobanRpcClient
   /** Resolved configuration with defaults applied. */
-  public readonly config: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & { rpcClient: ISorobanRpcClient }
+  public readonly config: ResolvedSorobanResurrectConfig
 
   private readonly _stateMgr: SorobanResurrectStateManager
   private readonly _simulator: SorobanResurrectSimulator
   private readonly _executor: SorobanResurrectExecutor
-
-  // Optional simulation cache (enabled via config.enableSimulationCache).
-  private _simulationCache: SimulationCache | undefined
-
-  // Transaction history log.
-  private _history = new TransactionHistory()
-
-  // Last set of archived keys from a standalone detectArchivedKeys() call.
-  // The FSM context already stores archivedKeys for the full submit workflow;
-  // this field covers the standalone diagnostic path so stateInfo.archivedKeys
-  // is always populated regardless of which code path populated it.
-  private _standaloneArchivedKeys: ArchivedLedgerEntry[] = []
 
   /**
    * Creates a new SDK instance bound to a single Soroban RPC endpoint.
@@ -440,57 +426,38 @@ export class SorobanResurrect {
   }
 
   // ---------------------------------------------------------------------------
-  // Direct send (no restore)
+  // Arbitrary-key restore
   // ---------------------------------------------------------------------------
 
   /**
-   * Signs and submits a transaction directly, without automatic archive
-   * restoration. Use `submitWithRestore` for the full workflow.
-   */
-  async sendTransaction(
-    transaction: Transaction,
-    wallet: WalletAdapter,
-  ): Promise<ResurrectResult> {
-    return sendTransaction(this.server, transaction, wallet, this.config)
-  }
-
-  // ---------------------------------------------------------------------------
-  // TTL / expiry helpers
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Queries the current TTL information for one or more ledger keys.
+   * Restores an arbitrary list of ledger keys directly, without requiring a
+   * source transaction's simulated footprint. Builds a `restoreFootprint`
+   * transaction over exactly the given keys, signs it with the wallet,
+   * submits it, and polls to confirmation.
    *
-   * @param keys - Ledger keys to query.
-   * @returns Aggregated TTL result with per-entry info and query metadata.
-   */
-  async queryLedgerTTL(keys: xdr.LedgerKey[]): Promise<TTLQueryResult> {
-    return _queryLedgerTTL(this.server, keys)
-  }
-
-  /**
-   * Queries the current TTL information for a single ledger key.
+   * Useful for proactive maintenance — e.g. restoring a contract's data
+   * ahead of an upgrade — where there is no "original" transaction to
+   * simulate yet.
    *
-   * @param key - The ledger key to query.
-   * @returns TTL info for the requested entry.
-   */
-  async queryLedgerEntryTTL(key: xdr.LedgerKey): Promise<LedgerEntryTTLInfo> {
-    return _queryLedgerEntryTTL(this.server, key)
-  }
-
-  /**
-   * Returns ledger entries that are expiring within `ledgersThreshold` ledgers,
-   * including entries that are already archived.
+   * This method never throws — all failures are returned as
+   * `ResurrectResult { success: false, error: ... }`.
    *
-   * @param keys              - Ledger keys to query.
-   * @param ledgersThreshold  - Maximum ledgers remaining to be considered
-   *   "expiring soon" (defaults to 100,000 ≈ ~5.8 days at 5 s/ledger).
-   * @returns Entries expiring within the threshold (or already archived).
+   * @param keys   - The ledger keys to restore.
+   * @param wallet - Wallet adapter used for signing.
+   * @param opts   - Optional lifecycle callbacks.
+   * @returns {@link ResurrectResult} with `restoreTxHash` set on success.
+   *
+   * @example
+   * ```ts
+   * const result = await resurrect.restoreKeys([contractDataKey], wallet)
+   * if (result.success) console.log('Restored:', result.restoreTxHash)
+   * ```
    */
-  async getExpiringSoonEntries(
+  async restoreKeys(
     keys: xdr.LedgerKey[],
-    ledgersThreshold = 100_000,
-  ): Promise<LedgerEntryTTLInfo[]> {
-    return _getExpiringSoonEntries(this.server, keys, ledgersThreshold)
+    wallet: WalletAdapter,
+    opts?: RestoreKeysOptions,
+  ): Promise<ResurrectResult> {
+    return this._executor.restoreKeys(keys, wallet, opts)
   }
 }

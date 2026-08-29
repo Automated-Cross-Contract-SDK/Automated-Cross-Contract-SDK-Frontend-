@@ -1,27 +1,41 @@
-import { rpc } from '@stellar/stellar-sdk'
 import { SorobanResurrectConfig } from './types.js'
 import {
   DEFAULT_NETWORK_PASSPHRASE,
   POLL_INTERVAL_MS,
   POLL_TIMEOUT_MS,
   RESTORE_FEE_MULTIPLIER,
+  DEFAULT_MAX_SEQUENCE_RETRIES,
   KNOWN_NETWORK_PASSPHRASES,
   resolveNetworkPassphrase,
 } from './constants.js'
 import { SimulationCache } from './SimulationCache.js'
+import { SorobanRpcClient, type ISorobanRpcClient } from './RpcClient.js'
+
+/**
+ * A `SorobanResurrectConfig` with every field resolved to a concrete value,
+ * except `maxRestoreFeeStroops` — which stays optional since "no cap" is a
+ * meaningful, intentional default rather than a value to fall back from.
+ */
+export type ResolvedSorobanResurrectConfig = Required<
+  Omit<SorobanResurrectConfig, 'rpcClient' | 'maxRestoreFeeStroops'>
+> & {
+  rpcClient: ISorobanRpcClient
+  maxRestoreFeeStroops?: SorobanResurrectConfig['maxRestoreFeeStroops']
+}
 
 /**
  * Result of initialising the SDK configuration.
  *
- * Contains the fully resolved `Required<SorobanResurrectConfig>`, the
- * constructed `rpc.Server`, and an optional `SimulationCache` instance
+ * Contains the fully resolved configuration, the resolved RPC client
+ * (either the injected `config.rpcClient` or a `SorobanRpcClient` created
+ * from `config.rpcUrl`), and an optional `SimulationCache` instance
  * (present only when `enableSimulationCache` is `true`).
  */
 export interface ResolvedConfig {
-  /** Soroban RPC server instance bound to the configured endpoint. */
-  server: rpc.Server
+  /** RPC client used for all Soroban network calls. */
+  server: ISorobanRpcClient
   /** Resolved configuration with all optional fields filled in. */
-  config: Required<SorobanResurrectConfig>
+  config: ResolvedSorobanResurrectConfig
   /**
    * Cache for simulation responses. Only present when
    * `config.enableSimulationCache` is `true`; `undefined` otherwise.
@@ -54,7 +68,7 @@ export interface ResolvedConfig {
  * ```
  */
 export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
-  const server = new rpc.Server(config.rpcUrl)
+  const server: ISorobanRpcClient = config.rpcClient ?? new SorobanRpcClient(config.rpcUrl)
 
   const networkPassphrase =
     config.networkPassphrase ??
@@ -72,7 +86,7 @@ export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
 
   const simulationCache = config.enableSimulationCache ? new SimulationCache() : undefined
 
-  const resolved: Required<SorobanResurrectConfig> = {
+  const resolved = {
     rpcUrl: config.rpcUrl,
     networkPassphrase,
     pollIntervalMs: config.pollIntervalMs ?? POLL_INTERVAL_MS,
@@ -81,6 +95,9 @@ export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
     archiveDetectionMethod: config.archiveDetectionMethod ?? 'simulation',
     enableSimulationCache: config.enableSimulationCache ?? false,
     useSSE: config.useSSE ?? false,
+    maxSequenceRetries: config.maxSequenceRetries ?? DEFAULT_MAX_SEQUENCE_RETRIES,
+    maxRestoreFeeStroops: config.maxRestoreFeeStroops,
+    rpcClient: server,
   }
 
   return { server, config: resolved, simulationCache }

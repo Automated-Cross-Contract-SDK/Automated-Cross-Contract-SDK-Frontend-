@@ -1,8 +1,10 @@
-import { rpc, Transaction } from '@stellar/stellar-sdk'
-import { ArchivedLedgerEntry, SorobanResurrectConfig } from './types.js'
+import { Transaction, rpc } from '@stellar/stellar-sdk'
+import { ArchivedLedgerEntry } from './types.js'
 import { SimulationCache } from './SimulationCache.js'
 import { isRestoreResponse, extractArchivedKeys } from './Archiver.js'
 import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
+import type { ResolvedSorobanResurrectConfig } from './SorobanResurrectConfig.js'
 
 /**
  * Handles transaction simulation and archived-entry detection for a single
@@ -22,20 +24,20 @@ import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
  * throws so callers do not need to guard against network failures.
  */
 export class SorobanResurrectSimulator {
-  private readonly _server: rpc.Server
-  private readonly _config: Required<SorobanResurrectConfig>
+  private readonly _server: ISorobanRpcClient
+  private readonly _config: ResolvedSorobanResurrectConfig
   private readonly _cache: SimulationCache | undefined
   private readonly _stateMgr: SorobanResurrectStateManager
 
   /**
-   * @param server   - Soroban RPC server bound to the configured endpoint.
+   * @param server   - Soroban RPC client bound to the configured endpoint.
    * @param config   - Fully resolved SDK configuration.
    * @param cache    - Optional simulation cache; `undefined` disables caching.
    * @param stateMgr - State manager used to publish `'simulating'` transitions.
    */
   constructor(
-    server: rpc.Server,
-    config: Required<SorobanResurrectConfig>,
+    server: ISorobanRpcClient,
+    config: ResolvedSorobanResurrectConfig,
     cache: SimulationCache | undefined,
     stateMgr: SorobanResurrectStateManager,
   ) {

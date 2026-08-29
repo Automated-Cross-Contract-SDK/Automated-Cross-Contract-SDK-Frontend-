@@ -19,9 +19,16 @@ export const POLL_TIMEOUT_MS = 60_000
  */
 export const RESTORE_FEE_MULTIPLIER = 3
 
+/**
+ * Default maximum number of times the restore workflow will rebuild and
+ * resubmit the original transaction after a `tx_bad_seq` error.
+ * Can be overridden via `SorobanResurrectConfig.maxSequenceRetries`.
+ */
+export const DEFAULT_MAX_SEQUENCE_RETRIES = 3
+
 /** Known Stellar/Soroban network passphrases for validation. */
 export const KNOWN_NETWORK_PASSPHRASES = [
-  'Test SDF Network ; September 2015',        // Testnet
+  'Test SDF Network ; September 2015', // Testnet
   'Public Global Stellar Network ; September 2015', // Mainnet
   'Test SDF Future Network ; October 2022', // Futurenet
 ]
@@ -31,7 +38,7 @@ export const URL_TO_PASSPHRASE: Record<string, string> = {
   'soroban-testnet.stellar.org': 'Test SDF Network ; September 2015',
   'soroban-mainnet.stellar.org': 'Public Global Stellar Network ; September 2015',
   'futurenet.stellar.org': 'Test SDF Future Network ; September 2015',
-  'localhost': 'Test SDF Network ; September 2015',
+  localhost: 'Test SDF Network ; September 2015',
 }
 
 /**
