@@ -42,10 +42,7 @@ export type { LedgerEntryTTLInfo, TTLQueryResult } from './TTLHelpers.js'
 // ---------------------------------------------------------------------------
 // Transaction history (returned by SorobanResurrect.history / getHistory)
 // ---------------------------------------------------------------------------
-export type {
-  TransactionHistoryEntry,
-  TransactionAttemptStatus,
-} from './TransactionHistory.js'
+export type { TransactionHistoryEntry, TransactionAttemptStatus } from './TransactionHistory.js'
 
 // ---------------------------------------------------------------------------
 // Hardware wallet adapters
@@ -79,15 +76,12 @@ export type { ResolvedConfig } from './SorobanResurrectConfig.js'
 export { SorobanResurrectStateManager } from './SorobanResurrectState.js'
 export { SorobanResurrectSimulator } from './SorobanResurrectSimulation.js'
 export { SorobanResurrectExecutor } from './SorobanResurrectExecution.js'
-export type { LedgerEntryTTLInfo, TTLQueryResult } from './TTLHelpers.js'
 export {
   queryLedgerTTL,
   queryLedgerEntryTTL,
   getExpiringSoonEntries,
   getArchivedEntries,
 } from './TTLHelpers.js'
-export type {
-  TransactionHistoryEntry,
-  TransactionAttemptStatus,
-} from './TransactionHistory.js'
 export { TransactionHistory } from './TransactionHistory.js'
+export type { ISorobanRpcClient } from './RpcClient.js'
+export type { TTLWatchOptions, TTLWatchHandle } from './TTLWatch.js'

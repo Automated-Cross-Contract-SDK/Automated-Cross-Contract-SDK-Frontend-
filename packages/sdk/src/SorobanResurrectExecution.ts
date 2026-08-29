@@ -1,4 +1,4 @@
-import { rpc, Transaction } from '@stellar/stellar-sdk'
+import { rpc, Transaction, TransactionBuilder } from '@stellar/stellar-sdk'
 import {
   ArchivedLedgerEntry,
   ResurrectResult,
@@ -7,11 +7,18 @@ import {
   WalletAdapter,
 } from './types.js'
 import { executeWithRestore, sendTransaction as _sendTransaction } from './Executor.js'
-import { buildRestoreTransaction } from './Restorer.js'
+import {
+  buildRestoreTransaction,
+  buildBatchRestoreTransaction,
+  buildOriginalAfterRestore,
+  waitForTransaction,
+} from './Restorer.js'
 import { isRestoreResponse } from './Archiver.js'
 import { TransactionHistory, TransactionHistoryEntry } from './TransactionHistory.js'
 import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
 import { SorobanResurrectSimulator } from './SorobanResurrectSimulation.js'
+import { DEFAULT_NETWORK_PASSPHRASE, POLL_INTERVAL_MS, POLL_TIMEOUT_MS } from './constants.js'
+import { asXdrBase64, asTxHash, type TxHash } from './branded-types.js'
 
 /**
  * Handles all transaction execution concerns for a `SorobanResurrect` instance:
@@ -184,7 +191,10 @@ export class SorobanResurrectExecutor {
       },
 
       onRestoreConfirmed: (txHash: string) => {
-        stateMgr.setState('submitting_original', 'Restore confirmed. Preparing original transaction...')
+        stateMgr.setState(
+          'submitting_original',
+          'Restore confirmed. Preparing original transaction...',
+        )
         emitter.emit('restoreConfirmed', txHash)
         onRestoreConfirmed?.(txHash)
       },
@@ -264,7 +274,10 @@ export class SorobanResurrectExecutor {
         stateMgr.setState('confirming_restore', 'Waiting for restore confirmation...')
       },
       onRestoreConfirmed: (_txHash: string) => {
-        stateMgr.setState('submitting_original', 'Restore confirmed. Preparing original transaction...')
+        stateMgr.setState(
+          'submitting_original',
+          'Restore confirmed. Preparing original transaction...',
+        )
       },
       onSigningOriginal: () => {
         stateMgr.setState('signing_original', 'Signing original transaction...')
@@ -284,18 +297,179 @@ export class SorobanResurrectExecutor {
   }
 
   /**
-   * Submits multiple transactions sequentially with automatic restore.
-   * Sequential execution avoids sequence-number races for shared source accounts.
-   * A failure on one transaction does not stop processing of the remaining ones.
+   * Builds a single unsigned restore transaction covering the union of
+   * archived keys detected across every transaction in `transactions`.
+   *
+   * @param sourcePublicKey - Public key of the account that will sign/pay.
+   * @param transactions    - Transactions to inspect for archived keys.
+   * @returns An unsigned restore `Transaction`, or `null` if none of the
+   *   given transactions need restoring.
+   */
+  async buildBatchRestoreTx(
+    sourcePublicKey: string,
+    transactions: Transaction[],
+  ): Promise<Transaction | null> {
+    const { restoreTx } = await buildBatchRestoreTransaction({
+      server: this._server,
+      sourcePublicKey,
+      transactions,
+      config: this._config,
+    })
+    return restoreTx
+  }
+
+  /**
+   * Submits multiple transactions with automatic archive restoration.
+   *
+   * When two or more transactions need restoring, a single batch restore
+   * transaction (see {@link buildBatchRestoreTx}) covers the union of their
+   * archived keys — one restore fee instead of N. Once it confirms, every
+   * original transaction is resubmitted sequentially: each is rebuilt via
+   * `buildOriginalAfterRestore`, which fetches the account's current
+   * sequence number immediately before building, so back-to-back
+   * submissions never race on sequence numbers. Every returned result
+   * carries the same `restoreTxHash`.
+   *
+   * When none of the transactions need restoring, this falls back to
+   * plain sequential `submitWithRestore` calls (equivalent to direct
+   * submission, since there's nothing to share).
+   *
+   * A failure on one transaction does not stop processing of the remaining
+   * ones once past the shared restore step; if the shared restore itself
+   * fails, every item in the batch fails with that error.
    *
    * @param items - Array of `SubmitWithRestoreOptions`, one per transaction.
+   *   All items must share the same source account (the restore transaction
+   *   is built and paid for by `items[0].wallet`).
    * @returns Array of results in the same order as the input.
    */
   async submitBatchWithRestore(items: SubmitWithRestoreOptions[]): Promise<ResurrectResult[]> {
-    const results: ResurrectResult[] = []
-    for (const item of items) {
-      results.push(await this.submitWithRestore(item))
+    if (items.length === 0) return []
+    if (items.length === 1) return [await this.submitWithRestore(items[0])]
+
+    const wallet = items[0].wallet
+    const transactions = items.map((item) => item.transaction)
+
+    const isConnected = await wallet.isConnected()
+    if (!isConnected) {
+      const error = 'Wallet is not connected'
+      return items.map(() => ({ success: false, archivedKeysDetected: 0, error }))
     }
+    const publicKey = await wallet.getPublicKey()
+
+    const { restoreTx, archivedKeysByTx } = await buildBatchRestoreTransaction({
+      server: this._server,
+      sourcePublicKey: publicKey,
+      transactions,
+      config: this._config,
+    })
+
+    if (!restoreTx) {
+      // Nothing archived across the batch — no shared restore needed.
+      const results: ResurrectResult[] = []
+      for (const item of items) {
+        results.push(await this.submitWithRestore(item))
+      }
+      return results
+    }
+
+    const networkPassphrase = this._config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
+    const pollInterval = this._config.pollIntervalMs ?? POLL_INTERVAL_MS
+    const pollTimeout = this._config.pollTimeoutMs ?? POLL_TIMEOUT_MS
+    const stateMgr = this._stateMgr
+    const emitter = stateMgr.emitter
+
+    let restoreHash: TxHash
+    try {
+      stateMgr.setArchivedKeys(archivedKeysByTx.flat())
+      stateMgr.setState(
+        'restore_needed',
+        `Detected archived entries across ${archivedKeysByTx.filter((k) => k.length > 0).length} of ${items.length} transactions`,
+      )
+      emitter.emit('restoreNeeded', archivedKeysByTx.flat())
+
+      stateMgr.setState(
+        'signing_restore',
+        'Awaiting wallet signature for batch restore transaction...',
+      )
+      const signedXdr = await wallet.signTransaction(asXdrBase64(restoreTx.toXDR()), {
+        networkPassphrase,
+      })
+      const signedTx = TransactionBuilder.fromXDR(signedXdr, networkPassphrase)
+      if (!(signedTx instanceof Transaction)) {
+        throw new Error('Failed to parse signed batch restore transaction')
+      }
+
+      stateMgr.setState('submitting_restore', 'Submitting batch restore transaction...')
+      const sent = await this._server.sendTransaction(signedTx)
+      restoreHash = asTxHash(sent.hash)
+      emitter.emit('restoreSubmitted', restoreHash)
+
+      stateMgr.setState('confirming_restore', 'Waiting for batch restore confirmation...')
+      const status = await waitForTransaction(this._server, restoreHash, pollInterval, pollTimeout)
+      if (status.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
+        throw new Error('Batch restore transaction failed')
+      }
+      emitter.emit('restoreConfirmed', restoreHash)
+      stateMgr.setState(
+        'submitting_original',
+        'Batch restore confirmed. Submitting original transactions...',
+      )
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      stateMgr.setError(message)
+      emitter.emit('error', message)
+      return items.map((_, i) => ({
+        success: false,
+        archivedKeysDetected: archivedKeysByTx[i]?.length ?? 0,
+        error: message,
+      }))
+    }
+
+    const results: ResurrectResult[] = []
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
+      try {
+        const preparedTx = await buildOriginalAfterRestore(
+          this._server,
+          item.transaction,
+          networkPassphrase,
+          item.transaction.fee,
+        )
+        item.onSigningOriginal?.()
+        const signedXdr = await item.wallet.signTransaction(asXdrBase64(preparedTx.toXDR()), {
+          networkPassphrase,
+        })
+        const signedTx = TransactionBuilder.fromXDR(signedXdr, networkPassphrase)
+        if (!(signedTx instanceof Transaction)) {
+          throw new Error('Failed to parse signed transaction')
+        }
+
+        const sent = await this._server.sendTransaction(signedTx)
+        const hash = asTxHash(sent.hash)
+        item.onOriginalSubmitted?.(hash)
+        emitter.emit('originalSubmitted', hash)
+
+        results.push({
+          success: true,
+          originalTxHash: hash,
+          restoreTxHash: restoreHash,
+          archivedKeysDetected: archivedKeysByTx[i]?.length ?? 0,
+        })
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        item.onRestoreFailed?.(message)
+        emitter.emit('error', message)
+        results.push({
+          success: false,
+          restoreTxHash: restoreHash,
+          archivedKeysDetected: archivedKeysByTx[i]?.length ?? 0,
+          error: message,
+        })
+      }
+    }
+
+    stateMgr.setState('success', 'Batch submission complete')
     return results
   }
 }

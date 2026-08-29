@@ -7,6 +7,8 @@ import {
   RESTORE_FEE_MULTIPLIER,
   KNOWN_NETWORK_PASSPHRASES,
   resolveNetworkPassphrase,
+  TTL_WATCH_INTERVAL_MS,
+  TTL_WATCH_THRESHOLD_LEDGERS,
 } from './constants.js'
 import { SimulationCache } from './SimulationCache.js'
 
@@ -81,6 +83,9 @@ export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
     archiveDetectionMethod: config.archiveDetectionMethod ?? 'simulation',
     enableSimulationCache: config.enableSimulationCache ?? false,
     useSSE: config.useSSE ?? false,
+    ttlWatchIntervalMs: config.ttlWatchIntervalMs ?? TTL_WATCH_INTERVAL_MS,
+    ttlWatchThreshold: config.ttlWatchThreshold ?? TTL_WATCH_THRESHOLD_LEDGERS,
+    ttlWatchAutoExtend: config.ttlWatchAutoExtend ?? false,
   }
 
   return { server, config: resolved, simulationCache }

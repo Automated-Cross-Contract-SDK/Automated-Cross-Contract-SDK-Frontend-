@@ -19,9 +19,15 @@ export const POLL_TIMEOUT_MS = 60_000
  */
 export const RESTORE_FEE_MULTIPLIER = 3
 
+/** Default polling cadence (ms) for `SorobanResurrect.watchTTL()`. */
+export const TTL_WATCH_INTERVAL_MS = 60_000
+
+/** Default "expiring soon" threshold (ledgers remaining) for `watchTTL()` — ~24h at 5s/ledger. */
+export const TTL_WATCH_THRESHOLD_LEDGERS = 17_280
+
 /** Known Stellar/Soroban network passphrases for validation. */
 export const KNOWN_NETWORK_PASSPHRASES = [
-  'Test SDF Network ; September 2015',        // Testnet
+  'Test SDF Network ; September 2015', // Testnet
   'Public Global Stellar Network ; September 2015', // Mainnet
   'Test SDF Future Network ; October 2022', // Futurenet
 ]
@@ -31,7 +37,7 @@ export const URL_TO_PASSPHRASE: Record<string, string> = {
   'soroban-testnet.stellar.org': 'Test SDF Network ; September 2015',
   'soroban-mainnet.stellar.org': 'Public Global Stellar Network ; September 2015',
   'futurenet.stellar.org': 'Test SDF Future Network ; September 2015',
-  'localhost': 'Test SDF Network ; September 2015',
+  localhost: 'Test SDF Network ; September 2015',
 }
 
 /**

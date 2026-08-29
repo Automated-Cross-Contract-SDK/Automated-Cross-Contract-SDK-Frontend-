@@ -1,5 +1,7 @@
 import { Transaction, xdr } from '@stellar/stellar-sdk'
 import { rpc } from '@stellar/stellar-sdk'
+import type { ISorobanRpcClient } from './RpcClient.js'
+import type { LedgerEntryTTLInfo } from './TTLHelpers.js'
 import type {
   TxHash,
   XdrBase64,
@@ -61,6 +63,24 @@ export interface SorobanResurrectConfig {
   enableSimulationCache?: boolean
   /** Use SSE-based transaction status waiting when available (default: false). */
   useSSE?: boolean
+  /**
+   * Default polling cadence (ms) for `watchTTL()` when a call doesn't
+   * override it via `TTLWatchOptions.intervalMs`. Defaults to 60_000 (1 min).
+   */
+  ttlWatchIntervalMs?: number
+  /**
+   * Default "expiring soon" threshold (in remaining ledgers) for
+   * `watchTTL()` when a call doesn't override it via
+   * `TTLWatchOptions.thresholdLedgers`. Defaults to 17_280 (~24h at 5s/ledger).
+   */
+  ttlWatchThreshold?: number
+  /**
+   * Default for whether `watchTTL()` automatically submits a restore
+   * transaction when an entry crosses the threshold, when a call doesn't
+   * override it via `TTLWatchOptions.autoExtend`. Defaults to `false`
+   * (observe-only — the caller decides what to do with `ttlLow`).
+   */
+  ttlWatchAutoExtend?: boolean
   /**
    * Optional pre-built RPC client to use instead of creating one from `rpcUrl`.
    *
@@ -263,60 +283,6 @@ export interface RestoreStateInfo {
   error?: string
 }
 
-// ---------------------------------------------------------------------------
-// Hardware wallet types
-// ---------------------------------------------------------------------------
-
-/**
- * Extended wallet adapter interface for hardware wallet devices (Ledger, Trezor).
- * Adds `connect`/`disconnect` lifecycle methods to the base `WalletAdapter`.
- */
-export interface HardwareWalletAdapter extends WalletAdapter {
-  /** Device type identifier. */
-  readonly type: 'ledger' | 'trezor'
-  /** Connects to the hardware device and prepares it for signing. */
-  connect(): Promise<void>
-  /** Disconnects from the hardware device and releases the transport. */
-  disconnect(): Promise<void>
-}
-
-/**
- * Configuration for `LedgerWalletAdapter`.
- *
- * @see {@link LedgerWalletAdapter}
- */
-export interface LedgerAdapterConfig {
-  /**
-   * A pre-opened Ledger transport instance (e.g. from `@ledgerhq/hw-transport-webusb`).
-   * When omitted, the adapter cannot sign — you must call `connect()` manually after
-   * supplying a transport via `setTransport()`.
-   */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  transport?: any
-  /** BIP44 account index for key derivation (default: 0). */
-  accountIndex?: number
-}
-
-/**
- * Configuration for `TrezorWalletAdapter`.
- *
- * @see {@link TrezorWalletAdapter}
- */
-export interface TrezorAdapterConfig {
-  /**
-   * Your application's manifest — required by Trezor Connect.
-   * See https://connect.trezor.io/9/methods/manifest/
-   */
-  manifest: {
-    /** Email address for the application maintainer. */
-    email: string
-    /** URL of the application's public repository. */
-    appUrl: string
-  }
-  /** BIP44 account index for key derivation (default: 0). */
-  accountIndex?: number
-}
-
 /**
  * Typed events emitted by SorobanResurrect for specific workflow transitions,
  * in addition to the general-purpose `onStateChange` observer.
@@ -336,6 +302,10 @@ export interface SorobanResurrectEvents {
   restoreComplete: ResurrectResult
   /** Fired when the workflow fails, with the error message. */
   error: string
+  /** Fired by `watchTTL()` when one or more watched entries cross the configured threshold. */
+  ttlLow: LedgerEntryTTLInfo[]
+  /** Fired by `watchTTL()` after an auto-extend restore transaction confirms. */
+  ttlExtended: { restoreTxHash: TxHash; entries: LedgerEntryTTLInfo[] }
 }
 
 // ---------------------------------------------------------------------------

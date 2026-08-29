@@ -8,19 +8,17 @@ import type {
   ResurrectResult,
   SubmitWithRestoreOptions,
   SorobanResurrectEvents,
-  WalletAdapter,
 } from './types.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
+import type { StellarPublicKey } from './branded-types.js'
 import { resolveConfig } from './SorobanResurrectConfig.js'
 import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
 import { SorobanResurrectSimulator } from './SorobanResurrectSimulation.js'
 import { SorobanResurrectExecutor } from './SorobanResurrectExecution.js'
 import type { TransactionHistoryEntry } from './TransactionHistory.js'
-import {
-  queryLedgerTTL,
-  queryLedgerEntryTTL,
-  getExpiringSoonEntries,
-} from './TTLHelpers.js'
+import { queryLedgerTTL, queryLedgerEntryTTL, getExpiringSoonEntries } from './TTLHelpers.js'
 import type { LedgerEntryTTLInfo, TTLQueryResult } from './TTLHelpers.js'
+import { watchTTL, type TTLWatchOptions, type TTLWatchHandle } from './TTLWatch.js'
 
 /**
  * Main facade for the Soroban-Resurrect SDK.
@@ -36,6 +34,7 @@ import type { LedgerEntryTTLInfo, TTLQueryResult } from './TTLHelpers.js'
  * - **Simulation & detection** → `SorobanResurrectSimulator` (`SorobanResurrectSimulation.ts`)
  * - **Execution & history** → `SorobanResurrectExecutor` (`SorobanResurrectExecution.ts`)
  * - **TTL helpers** → functions in `TTLHelpers.ts`
+ * - **Proactive TTL watching** → {@link watchTTL} (`TTLWatch.ts`)
  *
  * @see {@link SorobanResurrectConfig} for constructor options.
  * @see {@link onStateChange} to subscribe to workflow state transitions.
@@ -57,23 +56,13 @@ export class SorobanResurrect {
    */
   public readonly server: ISorobanRpcClient
   /** Resolved configuration with defaults applied. */
-  public readonly config: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & { rpcClient: ISorobanRpcClient }
+  public readonly config: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & {
+    rpcClient: ISorobanRpcClient
+  }
 
   private readonly _stateMgr: SorobanResurrectStateManager
   private readonly _simulator: SorobanResurrectSimulator
   private readonly _executor: SorobanResurrectExecutor
-
-  // Optional simulation cache (enabled via config.enableSimulationCache).
-  private _simulationCache: SimulationCache | undefined
-
-  // Transaction history log.
-  private _history = new TransactionHistory()
-
-  // Last set of archived keys from a standalone detectArchivedKeys() call.
-  // The FSM context already stores archivedKeys for the full submit workflow;
-  // this field covers the standalone diagnostic path so stateInfo.archivedKeys
-  // is always populated regardless of which code path populated it.
-  private _standaloneArchivedKeys: ArchivedLedgerEntry[] = []
 
   /**
    * Creates a new SDK instance bound to a single Soroban RPC endpoint.
@@ -98,13 +87,13 @@ export class SorobanResurrect {
 
     this._stateMgr = new SorobanResurrectStateManager()
     this._simulator = new SorobanResurrectSimulator(
-      this.server,
+      resolved.server,
       this.config,
       resolved.simulationCache,
       this._stateMgr,
     )
     this._executor = new SorobanResurrectExecutor(
-      this.server,
+      resolved.server,
       this.config,
       this._stateMgr,
       this._simulator,
@@ -319,6 +308,33 @@ export class SorobanResurrect {
   }
 
   /**
+   * Builds a single unsigned restore transaction covering the union of
+   * archived keys detected across every transaction in `transactions` —
+   * so a multi-contract batch (e.g. a portfolio sweep) pays one restore
+   * fee instead of one per transaction.
+   *
+   * @param sourcePublicKey - The source account public key that will pay.
+   * @param transactions    - The transactions to inspect for archived keys.
+   * @returns An unsigned restore `Transaction`, or `null` if none of the
+   *   given transactions need restoring.
+   * @see {@link submitBatchWithRestore} for the full sign-and-submit workflow.
+   *
+   * @example
+   * ```ts
+   * const restoreTx = await resurrect.buildBatchRestoreTx(publicKey, [tx1, tx2, tx3])
+   * if (restoreTx) {
+   *   const signedXdr = await wallet.signTransaction(restoreTx.toXDR())
+   * }
+   * ```
+   */
+  async buildBatchRestoreTx(
+    sourcePublicKey: StellarPublicKey | string,
+    transactions: Transaction[],
+  ): Promise<Transaction | null> {
+    return this._executor.buildBatchRestoreTx(sourcePublicKey, transactions)
+  }
+
+  /**
    * Signs and submits a transaction directly, without automatic archive
    * restoration. Use `submitWithRestore` when restoration may be needed.
    *
@@ -372,8 +388,15 @@ export class SorobanResurrect {
   }
 
   /**
-   * Submits multiple transactions with automatic archive restoration,
-   * sequentially to avoid sequence-number races.
+   * Submits multiple transactions with automatic archive restoration.
+   *
+   * When two or more of the given transactions need restoring, a single
+   * batch restore transaction covers the union of their archived keys
+   * (see {@link buildBatchRestoreTx}) instead of one restore per
+   * transaction. Once that shared restore confirms, the original
+   * transactions are submitted sequentially (sequence-aware, so no
+   * sequence-number races) and every returned result carries the same
+   * `restoreTxHash`.
    *
    * @param items - Array of `SubmitWithRestoreOptions`, one per transaction.
    * @returns Array of results in the same order as the input.
@@ -439,58 +462,25 @@ export class SorobanResurrect {
     return getExpiringSoonEntries(this.server, keys, ledgersThreshold)
   }
 
-  // ---------------------------------------------------------------------------
-  // Direct send (no restore)
-  // ---------------------------------------------------------------------------
-
   /**
-   * Signs and submits a transaction directly, without automatic archive
-   * restoration. Use `submitWithRestore` for the full workflow.
-   */
-  async sendTransaction(
-    transaction: Transaction,
-    wallet: WalletAdapter,
-  ): Promise<ResurrectResult> {
-    return sendTransaction(this.server, transaction, wallet, this.config)
-  }
-
-  // ---------------------------------------------------------------------------
-  // TTL / expiry helpers
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Queries the current TTL information for one or more ledger keys.
+   * Proactively monitors `keys` and either notifies (`ttlLow` event) or,
+   * with `autoExtend: true`, automatically restores them before they
+   * archive — instead of only reacting once a submission fails.
    *
-   * @param keys - Ledger keys to query.
-   * @returns Aggregated TTL result with per-entry info and query metadata.
-   */
-  async queryLedgerTTL(keys: xdr.LedgerKey[]): Promise<TTLQueryResult> {
-    return _queryLedgerTTL(this.server, keys)
-  }
-
-  /**
-   * Queries the current TTL information for a single ledger key.
+   * @param keys - Ledger keys to watch.
+   * @param opts - Per-call overrides for interval / threshold / auto-extend
+   *   (falls back to `config.ttlWatch*` when omitted). See {@link TTLWatchOptions}.
+   * @returns A {@link TTLWatchHandle}; call `.stop()` to end polling.
    *
-   * @param key - The ledger key to query.
-   * @returns TTL info for the requested entry.
+   * @example
+   * ```ts
+   * const handle = resurrect.watchTTL([ledgerKey], { wallet, autoExtend: true })
+   * resurrect.on('ttlExtended', ({ restoreTxHash }) => console.log('extended', restoreTxHash))
+   * // later:
+   * handle.stop()
+   * ```
    */
-  async queryLedgerEntryTTL(key: xdr.LedgerKey): Promise<LedgerEntryTTLInfo> {
-    return _queryLedgerEntryTTL(this.server, key)
-  }
-
-  /**
-   * Returns ledger entries that are expiring within `ledgersThreshold` ledgers,
-   * including entries that are already archived.
-   *
-   * @param keys              - Ledger keys to query.
-   * @param ledgersThreshold  - Maximum ledgers remaining to be considered
-   *   "expiring soon" (defaults to 100,000 ≈ ~5.8 days at 5 s/ledger).
-   * @returns Entries expiring within the threshold (or already archived).
-   */
-  async getExpiringSoonEntries(
-    keys: xdr.LedgerKey[],
-    ledgersThreshold = 100_000,
-  ): Promise<LedgerEntryTTLInfo[]> {
-    return _getExpiringSoonEntries(this.server, keys, ledgersThreshold)
+  watchTTL(keys: xdr.LedgerKey[], opts: TTLWatchOptions = {}): TTLWatchHandle {
+    return watchTTL(this.server, this.config, this._stateMgr.emitter, keys, opts)
   }
 }
