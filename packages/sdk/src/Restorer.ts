@@ -1,4 +1,4 @@
-import { rpc, Account, Keypair } from '@stellar/stellar-sdk'
+import { rpc, Account, Keypair, Memo } from '@stellar/stellar-sdk'
 import { TransactionBuilder, Operation, Transaction, xdr, FeeBumpTransaction } from '@stellar/stellar-sdk'
 import { SorobanResurrectConfig, FeeBumpSponsor } from './types.js'
 import { DEFAULT_NETWORK_PASSPHRASE } from './constants.js'
@@ -23,6 +23,31 @@ export interface BuildRestoreTxParams {
    *  Note: When omitted, fetches the latest account via RPC, which may race with
    *  concurrent calls. Callers should either provide this parameter or serialize calls. */
   sequenceNumber?: SequenceNumber | string
+  /**
+   * Optional memo to attach to the restore transaction. When omitted, falls
+   * back to `config.restoreTxMemo` / `config.restoreTxMemoText`. When none of
+   * those are set, no memo is attached (default, no behaviour change).
+   */
+  memo?: Memo
+}
+
+/**
+ * Resolves the memo to attach to a restore transaction from an explicit
+ * parameter and the SDK config, in precedence order:
+ * explicit `memo` → `config.restoreTxMemo` → `Memo.text(config.restoreTxMemoText)`.
+ *
+ * @returns The resolved `Memo`, or `undefined` when no memo is configured.
+ */
+export function resolveRestoreMemo(
+  explicit: Memo | undefined,
+  config: Pick<SorobanResurrectConfig, 'restoreTxMemo' | 'restoreTxMemoText'>,
+): Memo | undefined {
+  if (explicit) return explicit
+  if (config.restoreTxMemo) return config.restoreTxMemo
+  if (config.restoreTxMemoText !== undefined && config.restoreTxMemoText !== '') {
+    return Memo.text(config.restoreTxMemoText)
+  }
+  return undefined
 }
 
 /**
@@ -66,16 +91,21 @@ export async function buildRestoreTransaction(params: BuildRestoreTxParams): Pro
 
   const restoreFee = calculateRestoreFee(minResourceFee, config)
 
-  const restoreTx = new TransactionBuilder(account, {
+  const memo = resolveRestoreMemo(params.memo, config)
+
+  const builder = new TransactionBuilder(account, {
     fee: restoreFee,
     networkPassphrase,
   })
     .addOperation(Operation.restoreFootprint({}))
     .setSorobanData(transactionData)
     .setTimeout(30)
-    .build()
 
-  return restoreTx
+  if (memo) {
+    builder.addMemo(memo)
+  }
+
+  return builder.build()
 }
 
 /**

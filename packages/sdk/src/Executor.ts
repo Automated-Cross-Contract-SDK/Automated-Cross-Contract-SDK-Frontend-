@@ -23,6 +23,8 @@ import {
   submitFeeBumpTransaction,
 } from './Restorer.js'
 import { SimulationCache } from './SimulationCache.js'
+import { ensureAddressAuthorization } from './Authorization.js'
+import { parseTransactionDiagnostics } from './Diagnostics.js'
 import { DEFAULT_NETWORK_PASSPHRASE, POLL_INTERVAL_MS, POLL_TIMEOUT_MS } from './constants.js'
 import { asTxHash, asXdrBase64, type TxHash, type XdrBase64 } from './branded-types.js'
 
@@ -266,11 +268,13 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       if (restoreStatus.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
         const err = 'Restore transaction failed'
         onRestoreFailed?.(err)
+        const diagnostics = parseTransactionDiagnostics(restoreStatus)
         return {
           success: false,
           archivedKeysDetected: archivedKeys.length,
           restoreTxHash: restoreHash,
           error: err,
+          ...(diagnostics ? { diagnostics } : {}),
         }
       }
 
@@ -305,8 +309,20 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
     }
 
     if (isSuccessResponse(simResponse)) {
+      // CAP-0046 fine-grained auth: if simulation surfaced address-credential
+      // auth entries, sign + attach them with the wallet's signAuthEntry
+      // before signing the transaction itself. If the wallet can't sign them
+      // and they're required, ensureAddressAuthorization throws a clear error
+      // which the outer catch turns into { success: false, error }.
+      const { transaction: txToSubmit } = await ensureAddressAuthorization({
+        transaction: originalTx,
+        simulation: simResponse,
+        wallet,
+        networkPassphrase,
+      })
+
       const { hash } = await signAndMaybeFeeBump({
-        tx: originalTx,
+        tx: txToSubmit,
         wallet,
         feeBumpConfig,
         networkPassphrase,
@@ -321,7 +337,13 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       const txStatus = await waitForTx(server, hash, config)
 
       if (txStatus.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
-        return { success: false, archivedKeysDetected: 0, error: 'Transaction failed to confirm' }
+        const diagnostics = parseTransactionDiagnostics(txStatus)
+        return {
+          success: false,
+          archivedKeysDetected: 0,
+          error: 'Transaction failed to confirm',
+          ...(diagnostics ? { diagnostics } : {}),
+        }
       }
 
       return {

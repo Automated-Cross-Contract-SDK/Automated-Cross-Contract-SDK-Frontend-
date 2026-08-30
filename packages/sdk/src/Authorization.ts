@@ -15,7 +15,7 @@
  * - Provide an interface for wallets that support signing individual auth entries
  */
 
-import { xdr, Transaction, hash } from '@stellar/stellar-sdk'
+import { xdr, Transaction, TransactionBuilder, hash } from '@stellar/stellar-sdk'
 import { asXdrBase64, type XdrBase64 } from './branded-types.js'
 
 // ---------------------------------------------------------------------------
@@ -318,4 +318,154 @@ export function getAddressAuthEntries(
     (entry) =>
       entry.credentials().switch().name !== 'sorobanCredentialsSourceAccount',
   )
+}
+
+// ---------------------------------------------------------------------------
+// High-level integration helper (used by the submitWithRestore executor)
+// ---------------------------------------------------------------------------
+
+/**
+ * Narrowing type guard: does this wallet implement CAP-0046 per-entry
+ * authorization signing (`signAuthEntry`)?
+ */
+export function supportsAuthEntrySigning(
+  wallet: unknown,
+): wallet is AuthorizationWalletAdapter {
+  return (
+    wallet != null &&
+    typeof (wallet as { signAuthEntry?: unknown }).signAuthEntry === 'function'
+  )
+}
+
+/** Minimal shape of the simulation response fields this helper reads. */
+interface SimulationWithAuth {
+  result?: { auth?: xdr.SorobanAuthorizationEntry[] } | null
+}
+
+/**
+ * Extracts the authorization entries produced by a Soroban transaction
+ * simulation (`SimulateTransactionResponse.result.auth`).
+ */
+export function extractSimulationAuthEntries(
+  simulation: SimulationWithAuth,
+): xdr.SorobanAuthorizationEntry[] {
+  return simulation?.result?.auth ?? []
+}
+
+/** Result of {@link ensureAddressAuthorization}. */
+export interface EnsureAddressAuthResult {
+  /**
+   * The transaction to sign and submit. When address-auth entries were signed
+   * and attached, this is a freshly rebuilt `Transaction` carrying them; it is
+   * otherwise the input transaction unchanged.
+   */
+  transaction: Transaction
+  /** `true` when address-auth entries were signed and attached. */
+  signed: boolean
+  /** Number of address-credential entries that were signed. */
+  signedEntryCount: number
+}
+
+/** Options for {@link ensureAddressAuthorization}. */
+export interface EnsureAddressAuthorizationOptions {
+  /** The transaction whose `InvokeHostFunction` op carries the auth entries. */
+  transaction: Transaction
+  /** The simulation response for `transaction` (source of the auth entries). */
+  simulation: SimulationWithAuth
+  /**
+   * The signing wallet. When it implements `signAuthEntry`
+   * ({@link AuthorizationWalletAdapter}), address-auth entries are signed and
+   * attached. When it does not and address-auth is required, this throws.
+   */
+  wallet: unknown
+  /** Network passphrase, required for computing auth-entry hashes. */
+  networkPassphrase: string
+}
+
+/**
+ * Ensures a Soroban transaction carries valid CAP-0046 address-based
+ * authorization before it is signed and submitted.
+ *
+ * - If the simulation produced no entries, or only `source_account` entries,
+ *   the transaction is returned unchanged (`signed: false`).
+ * - If it produced `address`-credential entries and `wallet` implements
+ *   `signAuthEntry`, those entries are signed and attached, and a rebuilt
+ *   transaction is returned (`signed: true`).
+ * - If it produced `address`-credential entries and `wallet` does **not**
+ *   implement `signAuthEntry`, a descriptive `Error` is thrown so the caller
+ *   can surface an actionable message instead of silently submitting a
+ *   transaction that will fail on-chain.
+ *
+ * @throws {Error} When address auth is required but the wallet cannot sign it,
+ *   or when the transaction has no `InvokeHostFunction` operation to attach to.
+ */
+export async function ensureAddressAuthorization(
+  options: EnsureAddressAuthorizationOptions,
+): Promise<EnsureAddressAuthResult> {
+  const { transaction, simulation, wallet, networkPassphrase } = options
+
+  const authEntries = extractSimulationAuthEntries(simulation)
+  if (authEntries.length === 0 || !requiresAddressAuthorization(authEntries)) {
+    return { transaction, signed: false, signedEntryCount: 0 }
+  }
+
+  if (!supportsAuthEntrySigning(wallet)) {
+    const addressCount = getAddressAuthEntries(authEntries).length
+    throw new Error(
+      `This transaction requires ${addressCount} address-based authorization ` +
+        `signature(s) (CAP-0046 fine-grained auth), but the provided wallet does ` +
+        `not implement signAuthEntry(). Use a wallet adapter that implements ` +
+        `AuthorizationWalletAdapter, or pre-sign the entries with ` +
+        `signAuthorizationEntries() and attach them via attachAuthorizationEntries().`,
+    )
+  }
+
+  const categorized = categorizeAuthEntries(authEntries)
+  const signedEntries = await signAuthorizationEntries({
+    entries: categorized,
+    wallet,
+    networkPassphrase,
+  })
+
+  const rebuilt = attachSignedAuthEntries(transaction, signedEntries, networkPassphrase)
+  const signedEntryCount = categorized.filter((c) => c.credentialType === 'address').length
+
+  return { transaction: rebuilt, signed: true, signedEntryCount }
+}
+
+/**
+ * Attaches signed auth entries to the first `InvokeHostFunction` op and
+ * returns a rebuilt `Transaction` (so the change survives re-serialisation,
+ * regardless of whether `Transaction.toEnvelope()` returns a live reference).
+ */
+function attachSignedAuthEntries(
+  transaction: Transaction,
+  authEntries: xdr.SorobanAuthorizationEntry[],
+  networkPassphrase: string,
+): Transaction {
+  const envelope = transaction.toEnvelope()
+  const envelopeType = envelope.switch()
+
+  const rawOps: xdr.Operation[] =
+    envelopeType.name === 'envelopeTypeTxV0'
+      ? envelope.v0().tx().operations()
+      : envelope.v1().tx().operations()
+
+  const invokeIdx = rawOps.findIndex(
+    (op) => op.body().switch().name === 'invokeHostFunction',
+  )
+  if (invokeIdx === -1) {
+    throw new Error(
+      'ensureAddressAuthorization: transaction has no InvokeHostFunction operation to attach auth entries to',
+    )
+  }
+
+  const invokeBody = rawOps[invokeIdx].body().value() as unknown as xdr.InvokeHostFunctionOp
+  invokeBody.auth(authEntries)
+
+  const rebuilt = TransactionBuilder.fromXDR(envelope.toXDR('base64'), networkPassphrase)
+  if (!(rebuilt instanceof Transaction)) {
+    throw new Error('ensureAddressAuthorization: failed to rebuild transaction after attaching auth entries')
+  }
+  return rebuilt
 }

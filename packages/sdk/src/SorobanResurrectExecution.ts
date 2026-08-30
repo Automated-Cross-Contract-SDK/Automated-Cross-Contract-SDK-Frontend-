@@ -154,11 +154,21 @@ export class SorobanResurrectExecutor {
     const stateMgr = this._stateMgr
     const emitter = stateMgr.emitter
 
+    // Per-call restore-tx memo override (falls back to instance config).
+    const effectiveConfig =
+      options.restoreTxMemo !== undefined || options.restoreTxMemoText !== undefined
+        ? {
+            ...this._config,
+            restoreTxMemo: options.restoreTxMemo ?? this._config.restoreTxMemo,
+            restoreTxMemoText: options.restoreTxMemoText ?? this._config.restoreTxMemoText,
+          }
+        : this._config
+
     const result = await executeWithRestore({
       server: this._server,
       transaction,
       wallet,
-      config: this._config,
+      config: effectiveConfig,
 
       onSigningRestore: () => {
         stateMgr.setState('signing_restore', 'Awaiting wallet signature for restore transaction...')

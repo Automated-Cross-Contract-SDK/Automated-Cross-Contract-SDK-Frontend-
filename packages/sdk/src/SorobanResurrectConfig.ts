@@ -81,7 +81,10 @@ export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
     archiveDetectionMethod: config.archiveDetectionMethod ?? 'simulation',
     enableSimulationCache: config.enableSimulationCache ?? false,
     useSSE: config.useSSE ?? false,
-  }
+    // Restore-tx memo passthrough: preserved as-is; `undefined`/`''` means "no memo".
+    restoreTxMemo: config.restoreTxMemo,
+    restoreTxMemoText: config.restoreTxMemoText ?? '',
+  } as Required<SorobanResurrectConfig>
 
   return { server, config: resolved, simulationCache }
 }

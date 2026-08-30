@@ -23,6 +23,7 @@ export type {
   ArchivedLedgerEntry,
   SimulateResponse,
   ResurrectResult,
+  TxDiagnostics,
   DryRunResult,
   SubmitWithRestoreOptions,
   RestoreState,
@@ -33,6 +34,12 @@ export type {
   LedgerAdapterConfig,
   TrezorAdapterConfig,
 } from './types.js'
+
+// ---------------------------------------------------------------------------
+// Wallet-adapter factory
+// ---------------------------------------------------------------------------
+export { createAdapter, isKnownWallet, SUPPORTED_WALLETS } from './createAdapter.js'
+export type { KnownWallet, AdapterImporter, CreateAdapterOptions } from './createAdapter.js'
 
 // ---------------------------------------------------------------------------
 // TTL / ledger entry helpers (returned by SorobanResurrect.queryLedgerTTL etc.)
