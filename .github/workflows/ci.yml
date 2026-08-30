@@ -35,6 +35,12 @@ jobs:
       - name: Test (all packages via Turbo)
         run: npm test
 
+      - name: SSR-safety import tests (react/vue/svelte hooks)
+        run: |
+          npm run test -w packages/react-hook -- src/__tests__/ssr.test.ts
+          npm run test -w packages/vue-hook -- src/__tests__/ssr.test.ts
+          npm run test -w packages/svelte-hook -- src/__tests__/ssr.test.ts
+
       - name: Test with coverage (sdk)
         run: npm run test -w packages/sdk -- --coverage
 

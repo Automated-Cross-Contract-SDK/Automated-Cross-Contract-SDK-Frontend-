@@ -1,4 +1,8 @@
-export { SorobanResurrectProvider, useSorobanResurrectContext } from './SorobanResurrectContext.js'
+export {
+  SorobanResurrectProvider,
+  useSorobanResurrectContext,
+  useSorobanResurrectSelector,
+} from './SorobanResurrectContext.js'
 
 export { useSorobanResurrect } from './useSorobanResurrect.js'
 

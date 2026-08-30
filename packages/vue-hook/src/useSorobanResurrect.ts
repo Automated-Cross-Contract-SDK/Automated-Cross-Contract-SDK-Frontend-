@@ -25,8 +25,14 @@ import type { Transaction } from '@stellar/stellar-sdk'
 export interface UseSorobanResurrectReturn {
   /** Current workflow state snapshot. */
   state: ReturnType<typeof ref<RestoreStateInfo>>
-  /** Whether a restore/submit operation is in progress. */
+  /** Whether a restore/submit operation is in progress. Derived from `state`. */
   isProcessing: ComputedRef<boolean>
+  /** Whether the workflow is idle (no operation started or fully reset). */
+  isIdle: ComputedRef<boolean>
+  /** Whether the last operation completed successfully. */
+  isSuccess: ComputedRef<boolean>
+  /** Whether the last operation ended in an error. */
+  isError: ComputedRef<boolean>
   /** Submit a transaction with automatic archive restoration. */
   submitWithRestore: (transaction: Transaction, wallet: WalletAdapter) => Promise<ResurrectResult>
   /** Check if a transaction requires archive restoration. */
@@ -84,7 +90,12 @@ export function useSorobanResurrect(
     }
   })
 
+  // Derived helpers so consumers don't re-implement state checks. `isProcessing`
+  // reuses the SDK's shared `isProcessingState` (single source of truth).
   const isProcessing = computed(() => isProcessingState(state.value.state))
+  const isIdle = computed(() => state.value.state === 'idle')
+  const isSuccess = computed(() => state.value.state === 'success')
+  const isError = computed(() => state.value.state === 'error')
 
   const submitWithRestore = async (
     transaction: Transaction,
@@ -110,6 +121,9 @@ export function useSorobanResurrect(
   return {
     state,
     isProcessing,
+    isIdle,
+    isSuccess,
+    isError,
     submitWithRestore,
     detectArchivedKeys,
     reset,
