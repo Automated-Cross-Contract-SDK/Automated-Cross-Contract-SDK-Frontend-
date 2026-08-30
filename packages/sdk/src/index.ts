@@ -35,6 +35,15 @@ export type {
 } from './types.js'
 
 // ---------------------------------------------------------------------------
+// Branded-type cast helpers
+//
+// Needed by first-party wallet adapter packages (adapter-freighter, -xbull,
+// -albedo, -lobstr) to brand the plain strings returned by the underlying
+// wallet libraries at the SDK boundary.
+// ---------------------------------------------------------------------------
+export { asStellarPublicKey, asXdrBase64 } from './branded-types.js'
+
+// ---------------------------------------------------------------------------
 // TTL / ledger entry helpers (returned by SorobanResurrect.queryLedgerTTL etc.)
 // ---------------------------------------------------------------------------
 export type { LedgerEntryTTLInfo, TTLQueryResult } from './TTLHelpers.js'
@@ -42,10 +51,7 @@ export type { LedgerEntryTTLInfo, TTLQueryResult } from './TTLHelpers.js'
 // ---------------------------------------------------------------------------
 // Transaction history (returned by SorobanResurrect.history / getHistory)
 // ---------------------------------------------------------------------------
-export type {
-  TransactionHistoryEntry,
-  TransactionAttemptStatus,
-} from './TransactionHistory.js'
+export type { TransactionHistoryEntry, TransactionAttemptStatus } from './TransactionHistory.js'
 
 // ---------------------------------------------------------------------------
 // Hardware wallet adapters
@@ -86,8 +92,5 @@ export {
   getExpiringSoonEntries,
   getArchivedEntries,
 } from './TTLHelpers.js'
-export type {
-  TransactionHistoryEntry,
-  TransactionAttemptStatus,
-} from './TransactionHistory.js'
+export type { TransactionHistoryEntry, TransactionAttemptStatus } from './TransactionHistory.js'
 export { TransactionHistory } from './TransactionHistory.js'

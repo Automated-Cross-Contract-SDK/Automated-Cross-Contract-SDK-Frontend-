@@ -21,8 +21,10 @@ export class LobstrAdapter implements WalletAdapter {
 
   async signTransaction(
     tx: string,
-    opts?: { networkPassphrase?: string; network?: string },
+    // LOBSTR's signer API signs for the network the extension is configured
+    // for and takes only the transaction XDR — network options are ignored.
+    _opts?: { networkPassphrase?: string; network?: string },
   ) {
-    return asXdrBase64(await lobstrSignTransaction(tx, opts?.networkPassphrase))
+    return asXdrBase64(await lobstrSignTransaction(tx))
   }
 }

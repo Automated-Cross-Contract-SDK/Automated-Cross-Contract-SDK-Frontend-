@@ -17,7 +17,9 @@
     "build": "tsc",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint 'src/**/*.{ts,tsx}'"
+    "lint": "eslint 'src/**/*.{ts,tsx}'",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@lobstrco/signer-extension-api": "^2.0.0"
@@ -26,6 +28,7 @@
     "@soroban-resurrect/sdk": "^0.1.0"
   },
   "devDependencies": {
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "vitest": "^2.1.9"
   }
 }
