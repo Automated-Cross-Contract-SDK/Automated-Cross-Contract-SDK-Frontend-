@@ -57,6 +57,24 @@ export interface SorobanResurrectConfig {
   restoreFeeMultiplier?: number
   /** Method for detecting archived keys: 'simulation' (default) or 'direct'. */
   archiveDetectionMethod?: 'simulation' | 'direct'
+  /**
+   * Max serialized restore-transaction size (bytes) to compare against when
+   * running the footprint-size guard. Defaults to the Soroban limit
+   * ({@link SOROBAN_MAX_TX_XDR_BYTES}, 128 KiB).
+   */
+  maxRestoreTxSizeBytes?: number
+  /**
+   * Fraction of `maxRestoreTxSizeBytes` at which `buildRestoreTransaction`
+   * emits a "restore footprint approaching ledger limits" warning. Range
+   * `0..1`, default `0.8` ({@link RESTORE_TX_SIZE_WARN_RATIO}).
+   */
+  restoreSizeWarnRatio?: number
+  /**
+   * When `true`, `buildRestoreTransaction` throws instead of only warning once
+   * the built transaction exceeds `maxRestoreTxSizeBytes`. Default `false`
+   * (warn only), so callers opt in to the stricter behaviour.
+   */
+  throwOnRestoreSizeLimit?: boolean
   /** Enable simulation cache to reuse results and reduce RPC calls (default: false). */
   enableSimulationCache?: boolean
   /** Use SSE-based transaction status waiting when available (default: false). */

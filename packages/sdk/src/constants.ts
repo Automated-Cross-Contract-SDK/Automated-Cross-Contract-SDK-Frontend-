@@ -19,6 +19,24 @@ export const POLL_TIMEOUT_MS = 60_000
  */
 export const RESTORE_FEE_MULTIPLIER = 3
 
+/**
+ * Maximum serialized transaction (envelope) size accepted by Soroban, in bytes.
+ *
+ * Soroban caps the total transaction size at 128 KiB. A `restoreFootprint`
+ * operation whose footprint contains many ledger keys can approach this limit
+ * and be rejected by the network *after* the wallet has already signed it.
+ *
+ * @see https://developers.stellar.org/docs/networks/resource-limits-fees
+ */
+export const SOROBAN_MAX_TX_XDR_BYTES = 128 * 1024
+
+/**
+ * Fraction of {@link SOROBAN_MAX_TX_XDR_BYTES} at which a restore transaction is
+ * considered "approaching the limit" and a warning is emitted. Override via
+ * `SorobanResurrectConfig.restoreSizeWarnRatio`.
+ */
+export const RESTORE_TX_SIZE_WARN_RATIO = 0.8
+
 /** Known Stellar/Soroban network passphrases for validation. */
 export const KNOWN_NETWORK_PASSPHRASES = [
   'Test SDF Network ; September 2015',        // Testnet

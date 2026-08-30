@@ -3,6 +3,13 @@ import { TransactionBuilder, Operation, Transaction, xdr, FeeBumpTransaction } f
 import { SorobanResurrectConfig, FeeBumpSponsor } from './types.js'
 import { DEFAULT_NETWORK_PASSPHRASE } from './constants.js'
 import { calculateRestoreFee } from './feeCalculation.js'
+import {
+  estimateRestoreTxSizeBytes,
+  evaluateRestoreFootprint,
+  resolveFootprintGuardOptions,
+  restoreSizeGuidance,
+  type RestoreTxDiagnostics,
+} from './footprintGuard.js'
 
 /** Parameters for building a restore transaction. */
 export interface BuildRestoreTxParams {
@@ -34,9 +41,24 @@ export interface BuildRestoreTxParams {
  * parameter. If neither is provided, this function will fetch the account from RPC,
  * which may cause the second concurrent call to get an out-of-sync sequence number.
  *
+ * ### Footprint-size guard
+ *
+ * A restore footprint with many ledger keys produces a large XDR that can hit
+ * Soroban's transaction-size limit — and it fails only *after* the wallet has
+ * signed. This function estimates the serialized size and resource fee of the
+ * built transaction and attaches them as a non-enumerable `restoreDiagnostics`
+ * property ({@link RestoreTxDiagnostics}). When the size reaches
+ * `restoreSizeWarnRatio` of `maxRestoreTxSizeBytes` (defaults: 80% of 128 KiB)
+ * it logs a warning with guidance to batch the restore; set
+ * `throwOnRestoreSizeLimit: true` to throw instead once the limit is exceeded.
+ *
  * @param params - See {@link BuildRestoreTxParams}.
  * @returns An unsigned `Transaction` with a single `restoreFootprint`
  *   operation and the simulation-derived `SorobanTransactionData` attached.
+ *   The returned object also carries a non-enumerable `restoreDiagnostics`
+ *   ({@link RestoreTxDiagnostics}).
+ * @throws {Error} When `config.throwOnRestoreSizeLimit` is `true` and the built
+ *   transaction exceeds `config.maxRestoreTxSizeBytes`.
  * @see {@link SorobanResurrect.buildRestoreTx} for the higher-level facade
  *   method that also runs the simulation for you.
  *
@@ -51,7 +73,12 @@ export interface BuildRestoreTxParams {
  * })
  * ```
  */
-export async function buildRestoreTransaction(params: BuildRestoreTxParams): Promise<Transaction> {
+/** A restore {@link Transaction} carrying attached size/fee diagnostics. */
+export type RestoreTransaction = Transaction & { restoreDiagnostics: RestoreTxDiagnostics }
+
+export async function buildRestoreTransaction(
+  params: BuildRestoreTxParams,
+): Promise<RestoreTransaction> {
   const { sourcePublicKey, transactionData, minResourceFee, config, account: preFetched, sequenceNumber } = params
 
   const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
@@ -75,7 +102,31 @@ export async function buildRestoreTransaction(params: BuildRestoreTxParams): Pro
     .setTimeout(30)
     .build()
 
-  return restoreTx
+  // --- Footprint-size guard -------------------------------------------------
+  // Estimate the serialized size + resource fee and flag transactions that get
+  // close to the Soroban limit before the wallet is asked to sign.
+  const guard = resolveFootprintGuardOptions(config)
+  const diagnostics = evaluateRestoreFootprint(
+    estimateRestoreTxSizeBytes(restoreTx),
+    minResourceFee,
+    { maxSizeBytes: guard.maxSizeBytes, warnRatio: guard.warnRatio },
+  )
+
+  if (diagnostics.exceedsLimit && guard.throwOnLimit) {
+    throw new Error(restoreSizeGuidance(diagnostics))
+  }
+  if (diagnostics.approachingLimit) {
+    console.warn(restoreSizeGuidance(diagnostics), diagnostics)
+  }
+
+  Object.defineProperty(restoreTx, 'restoreDiagnostics', {
+    value: diagnostics,
+    enumerable: false,
+    writable: false,
+    configurable: true,
+  })
+
+  return restoreTx as RestoreTransaction
 }
 
 /**
