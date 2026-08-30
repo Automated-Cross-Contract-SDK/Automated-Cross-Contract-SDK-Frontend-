@@ -1,5 +1,5 @@
 import albedo from '@albedo-link/intent'
-import type { WalletAdapter } from '@soroban-resurrect/sdk'
+import type { WalletAdapter, WalletCapabilities } from '@soroban-resurrect/sdk'
 import { asStellarPublicKey, asXdrBase64 } from '@soroban-resurrect/sdk'
 
 /**
@@ -7,6 +7,17 @@ import { asStellarPublicKey, asXdrBase64 } from '@soroban-resurrect/sdk'
  * Wraps `@albedo-link/intent` to satisfy the SDK's WalletAdapter contract.
  */
 export class AlbedoAdapter implements WalletAdapter {
+  /**
+   * Albedo is a software web wallet. It signs full transaction envelopes
+   * (including fee-bump envelopes) via `albedo.tx`; it does not expose
+   * CAP-0046 per-entry signing through this adapter.
+   */
+  readonly capabilities: WalletCapabilities = {
+    signAuthEntry: false,
+    feeBump: true,
+    hardware: false,
+  }
+
   private publicKey: string | undefined
 
   async isConnected(): Promise<boolean> {

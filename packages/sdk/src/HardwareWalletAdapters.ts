@@ -44,6 +44,18 @@ const STELLAR_COIN_TYPE = 148
 export class LedgerWalletAdapter implements HardwareWalletAdapter {
   readonly type = 'ledger' as const
 
+  /**
+   * The Ledger Stellar app signs the transaction hash and this adapter attaches
+   * the signature to the parsed envelope, so fee-bump envelopes are supported.
+   * The app does not implement CAP-0046 per-entry signing. `hardware` is `true`:
+   * signing requires physical confirmation and may be subject to blind-signing.
+   */
+  readonly capabilities = {
+    signAuthEntry: false,
+    feeBump: true,
+    hardware: true,
+  } as const
+
   private readonly accountIndex: number
   private transport: unknown
   private strApp: LedgerStrApp | null = null
@@ -222,6 +234,18 @@ export class LedgerWalletAdapter implements HardwareWalletAdapter {
  */
 export class TrezorWalletAdapter implements HardwareWalletAdapter {
   readonly type = 'trezor' as const
+
+  /**
+   * TrezorConnect signs the transaction and this adapter attaches the signature
+   * to the parsed envelope, so fee-bump envelopes are supported. It does not
+   * implement CAP-0046 per-entry signing. `hardware` is `true`: signing requires
+   * physical confirmation on the device.
+   */
+  readonly capabilities = {
+    signAuthEntry: false,
+    feeBump: true,
+    hardware: true,
+  } as const
 
   private readonly accountIndex: number
   private readonly manifest: { email: string; appUrl: string }

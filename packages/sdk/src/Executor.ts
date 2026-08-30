@@ -23,6 +23,7 @@ import {
   submitFeeBumpTransaction,
 } from './Restorer.js'
 import { SimulationCache } from './SimulationCache.js'
+import { assertWalletCapability } from './walletCapabilities.js'
 import { DEFAULT_NETWORK_PASSPHRASE, POLL_INTERVAL_MS, POLL_TIMEOUT_MS } from './constants.js'
 import { asTxHash, asXdrBase64, type TxHash, type XdrBase64 } from './branded-types.js'
 
@@ -77,6 +78,12 @@ async function signAndMaybeFeeBump(params: {
 }): Promise<{ hash: TxHash }> {
   const { tx, wallet, feeBumpConfig, networkPassphrase, server, onSigning, onSigningFeeBump, onSubmitting } =
     params
+
+  // Fail fast when a fee-bump is requested but the wallet has opted out of it,
+  // rather than prompting the user only to reject the envelope later.
+  if (feeBumpConfig) {
+    assertWalletCapability(wallet, 'feeBump', 'submitWithRestore (fee-bump)')
+  }
 
   onSigning?.()
   const signedXdr = await wallet.signTransaction(asXdrBase64(tx.toXDR()), { networkPassphrase })
