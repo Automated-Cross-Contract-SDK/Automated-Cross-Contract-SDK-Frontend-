@@ -12,6 +12,7 @@ import type {
   SequenceNumber,
   HistoryEntryId,
 } from './branded-types.js'
+import type { OnchainError } from './TransactionFailure.js'
 
 export type {
   TxHash,
@@ -25,6 +26,7 @@ export type {
   SequenceNumber,
   HistoryEntryId,
 }
+export type { OnchainError } from './TransactionFailure.js'
 
 /**
  * Configuration options for creating a SorobanResurrect instance.
@@ -171,6 +173,14 @@ export interface ResurrectResult {
   archivedKeysDetected: number
   /** Error message if the workflow failed. */
   error?: string
+  /**
+   * Structured, human-readable details when a submitted transaction confirmed
+   * on-chain in a `FAILED` state (revert message, failed operation index,
+   * result codes). Absent when the failure happened before submission or the
+   * response could not be decoded. Produced by
+   * {@link parseTransactionFailure}.
+   */
+  onchainError?: OnchainError
   /** True when the result came from a dry-run (no transactions submitted). */
   dryRun?: boolean
   /** Detailed dry-run information (present when dryRun is true). */
@@ -291,7 +301,7 @@ export interface LedgerAdapterConfig {
    * When omitted, the adapter cannot sign — you must call `connect()` manually after
    * supplying a transport via `setTransport()`.
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   transport?: any
   /** BIP44 account index for key derivation (default: 0). */
   accountIndex?: number

@@ -28,11 +28,18 @@ export type {
   RestoreState,
   RestoreStateInfo,
   SorobanResurrectEvents,
+  OnchainError,
   // Hardware wallet types
   HardwareWalletAdapter,
   LedgerAdapterConfig,
   TrezorAdapterConfig,
 } from './types.js'
+
+// ---------------------------------------------------------------------------
+// On-chain failure parsing (populates ResurrectResult.onchainError)
+// ---------------------------------------------------------------------------
+export { parseTransactionFailure } from './TransactionFailure.js'
+export type { ParsableTransactionResponse } from './TransactionFailure.js'
 
 // ---------------------------------------------------------------------------
 // TTL / ledger entry helpers (returned by SorobanResurrect.queryLedgerTTL etc.)
@@ -42,10 +49,7 @@ export type { LedgerEntryTTLInfo, TTLQueryResult } from './TTLHelpers.js'
 // ---------------------------------------------------------------------------
 // Transaction history (returned by SorobanResurrect.history / getHistory)
 // ---------------------------------------------------------------------------
-export type {
-  TransactionHistoryEntry,
-  TransactionAttemptStatus,
-} from './TransactionHistory.js'
+export type { TransactionHistoryEntry, TransactionAttemptStatus } from './TransactionHistory.js'
 
 // ---------------------------------------------------------------------------
 // Hardware wallet adapters
@@ -86,8 +90,5 @@ export {
   getExpiringSoonEntries,
   getArchivedEntries,
 } from './TTLHelpers.js'
-export type {
-  TransactionHistoryEntry,
-  TransactionAttemptStatus,
-} from './TransactionHistory.js'
+export type { TransactionHistoryEntry, TransactionAttemptStatus } from './TransactionHistory.js'
 export { TransactionHistory } from './TransactionHistory.js'
