@@ -159,10 +159,25 @@ export {
   POLL_INTERVAL_MS,
   POLL_TIMEOUT_MS,
   RESTORE_FEE_MULTIPLIER,
+  SOROBAN_MAX_TX_XDR_BYTES,
+  RESTORE_TX_SIZE_WARN_RATIO,
   KNOWN_NETWORK_PASSPHRASES,
   resolveNetworkPassphrase,
 } from './constants.js'
 export type { SdkDefaults } from './constants.js'
+
+// ---------------------------------------------------------------------------
+// Restore footprint-size guard
+// ---------------------------------------------------------------------------
+export {
+  estimateRestoreTxSizeBytes,
+  evaluateRestoreFootprint,
+  restoreSizeGuidance,
+} from './footprintGuard.js'
+export type {
+  RestoreTxDiagnostics,
+  EvaluateRestoreFootprintOptions,
+} from './footprintGuard.js'
 
 // ---------------------------------------------------------------------------
 // Typed event emitter (used by SorobanResurrect.on / once / off)

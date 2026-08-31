@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useMemo } from 'react'
 import { SorobanResurrectProvider, useSorobanResurrectContext } from '@soroban-resurrect/react-hook'
 import { TransactionBuilder, Operation, Networks, nativeToScVal, rpc } from '@stellar/stellar-sdk'
 import { ProgressIndicator } from './components/ProgressIndicator.js'
@@ -14,14 +14,124 @@ function getEnvVariable(key: string, fallback: string): string {
   }
 }
 
-const RPC_URL = getEnvVariable('VITE_RPC_URL', 'https://soroban-testnet.stellar.org')
-const NETWORK = Networks.TESTNET
+const DEFAULT_RPC_URL = getEnvVariable('VITE_RPC_URL', 'https://soroban-testnet.stellar.org')
+const DEFAULT_NETWORK_PASSPHRASE = getEnvVariable('VITE_NETWORK_PASSPHRASE', Networks.TESTNET)
 const CONTRACT_ID = getEnvVariable(
   'VITE_CONTRACT_ID',
   'CCJZ5DGASBWQXR5G4GXEJM2Q4FI5L3QJ6TQ3QFJTQH7GJ6KJ3J2Q2K2Q',
 )
-const NETWORK_PASSPHRASE = getEnvVariable('VITE_NETWORK_PASSPHRASE', NETWORK)
-const server = new rpc.Server(RPC_URL)
+
+// ---------------------------------------------------------------------------
+// Network selector (issue #138)
+// ---------------------------------------------------------------------------
+
+type NetworkId = 'testnet' | 'mainnet' | 'futurenet' | 'custom'
+
+interface NetworkConfig {
+  rpcUrl: string
+  networkPassphrase: string
+}
+
+const NETWORK_PRESETS: Record<Exclude<NetworkId, 'custom'>, NetworkConfig & { label: string }> = {
+  testnet: {
+    label: 'Testnet',
+    rpcUrl: 'https://soroban-testnet.stellar.org',
+    networkPassphrase: Networks.TESTNET,
+  },
+  mainnet: {
+    label: 'Mainnet',
+    rpcUrl: 'https://mainnet.sorobanrpc.com',
+    networkPassphrase: Networks.PUBLIC,
+  },
+  futurenet: {
+    label: 'Futurenet',
+    rpcUrl: 'https://rpc-futurenet.stellar.org',
+    networkPassphrase: Networks.FUTURENET,
+  },
+}
+
+function NetworkSelector({
+  networkId,
+  custom,
+  onNetworkChange,
+  onCustomChange,
+}: {
+  networkId: NetworkId
+  custom: NetworkConfig
+  onNetworkChange: (id: NetworkId) => void
+  onCustomChange: (cfg: NetworkConfig) => void
+}) {
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <label style={{ fontSize: 13, fontWeight: 600, marginRight: 8 }}>Network:</label>
+      <select
+        aria-label="Network"
+        value={networkId}
+        onChange={(e) => onNetworkChange(e.target.value as NetworkId)}
+        style={{ padding: '4px 8px', borderRadius: 4 }}
+      >
+        <option value="testnet">Testnet</option>
+        <option value="mainnet">Mainnet</option>
+        <option value="futurenet">Futurenet</option>
+        <option value="custom">Custom</option>
+      </select>
+
+      {networkId === 'custom' && (
+        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 480 }}>
+          <input
+            aria-label="Custom RPC URL"
+            placeholder="RPC URL (https://...)"
+            value={custom.rpcUrl}
+            onChange={(e) => onCustomChange({ ...custom, rpcUrl: e.target.value })}
+            style={{ padding: '4px 8px', borderRadius: 4 }}
+          />
+          <input
+            aria-label="Custom network passphrase"
+            placeholder="Network passphrase"
+            value={custom.networkPassphrase}
+            onChange={(e) => onCustomChange({ ...custom, networkPassphrase: e.target.value })}
+            style={{ padding: '4px 8px', borderRadius: 4 }}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Wallet connection status indicator (issue #137)
+// ---------------------------------------------------------------------------
+
+type WalletStatus = 'disconnected' | 'connecting' | 'connected'
+
+const WALLET_STATUS_META: Record<WalletStatus, { label: string; color: string }> = {
+  disconnected: { label: 'Disconnected', color: '#dc3545' },
+  connecting: { label: 'Connecting…', color: '#ffc107' },
+  connected: { label: 'Connected', color: '#28a745' },
+}
+
+function WalletStatusIndicator({ status }: { status: WalletStatus }) {
+  const meta = WALLET_STATUS_META[status]
+  return (
+    <span
+      role="status"
+      aria-label={`Wallet ${meta.label}`}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13 }}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          width: 10,
+          height: 10,
+          borderRadius: '50%',
+          backgroundColor: meta.color,
+          boxShadow: status === 'connecting' ? `0 0 0 3px ${meta.color}33` : 'none',
+        }}
+      />
+      Wallet: {meta.label}
+    </span>
+  )
+}
 
 function getStellarWallet(): StellarWallet {
   if (typeof window === 'undefined' || !window.stellar) {
@@ -32,17 +142,19 @@ function getStellarWallet(): StellarWallet {
 
 function WalletButton() {
   const [publicKey, setPublicKey] = useState<string | null>(null)
-  const [walletConnected, setWalletConnected] = useState(false)
+  const [status, setStatus] = useState<WalletStatus>('disconnected')
 
   const connectWallet = useCallback(async () => {
+    setStatus('connecting')
     try {
       const stellar = getStellarWallet()
       await stellar.connect()
       const pubKey = await stellar.getPublicKey()
       setPublicKey(pubKey)
-      setWalletConnected(true)
+      setStatus('connected')
     } catch (err) {
       console.error('Failed to connect wallet:', err)
+      setStatus('disconnected')
       alert('Failed to connect wallet. Please ensure Freighter is installed and unlocked.')
     }
   }, [])
@@ -65,7 +177,7 @@ function WalletButton() {
   )
 }
 
-function WithdrawButton() {
+function WithdrawButton({ networkPassphrase }: { networkPassphrase: string }) {
   const { submitWithRestore, state, isProcessing, detectArchivedKeys, reset, resurrect } =
     useSorobanResurrectContext()
 
@@ -75,12 +187,12 @@ function WithdrawButton() {
   const buildSampleTransaction = useCallback(async () => {
     const stellar = getStellarWallet()
     const pubKey = await stellar.getPublicKey()
-    const sdkServer = resurrect?.server ?? server
+    const sdkServer = resurrect?.server ?? new rpc.Server(DEFAULT_RPC_URL)
     const account = await sdkServer.getAccount(pubKey)
 
     const tx = new TransactionBuilder(account, {
       fee: '100',
-      networkPassphrase: NETWORK,
+      networkPassphrase,
     })
       .addOperation(
         Operation.invokeContractFunction({
@@ -93,7 +205,7 @@ function WithdrawButton() {
       .build()
 
     return tx
-  }, [])
+  }, [networkPassphrase, resurrect])
 
   const handleWithdraw = useCallback(async () => {
     setLastResult(null)
@@ -182,14 +294,40 @@ function WithdrawButton() {
 }
 
 export default function App() {
+  const [networkId, setNetworkId] = useState<NetworkId>('testnet')
+  const [custom, setCustom] = useState<NetworkConfig>({
+    rpcUrl: DEFAULT_RPC_URL,
+    networkPassphrase: DEFAULT_NETWORK_PASSPHRASE,
+  })
+
+  const activeNetwork: NetworkConfig = useMemo(() => {
+    if (networkId === 'custom') return custom
+    const preset = NETWORK_PRESETS[networkId]
+    return { rpcUrl: preset.rpcUrl, networkPassphrase: preset.networkPassphrase }
+  }, [networkId, custom])
+
   return (
-    <SorobanResurrectProvider
-      config={{
-        rpcUrl: RPC_URL,
-        networkPassphrase: NETWORK_PASSPHRASE,
-      }}
-    >
-      <WithdrawButton />
-    </SorobanResurrectProvider>
+    <div style={{ maxWidth: 600, margin: '0 auto', padding: 24 }}>
+      <h2>Soroban-Resurrect Demo</h2>
+
+      <NetworkSelector
+        networkId={networkId}
+        custom={custom}
+        onNetworkChange={setNetworkId}
+        onCustomChange={setCustom}
+      />
+      <WalletButton />
+
+      <SorobanResurrectProvider
+        // Re-mount the provider when the network changes so the SDK picks up the new RPC.
+        key={`${activeNetwork.rpcUrl}|${activeNetwork.networkPassphrase}`}
+        config={{
+          rpcUrl: activeNetwork.rpcUrl,
+          networkPassphrase: activeNetwork.networkPassphrase,
+        }}
+      >
+        <WithdrawButton networkPassphrase={activeNetwork.networkPassphrase} />
+      </SorobanResurrectProvider>
+    </div>
   )
 }
