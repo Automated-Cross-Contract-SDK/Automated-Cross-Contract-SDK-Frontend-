@@ -190,7 +190,9 @@ fires the corresponding optional callback passed to `submitWithRestore()`.
 4. **Build the restore transaction** — `buildRestoreTransaction()`
    constructs a transaction with a single `Operation.restoreFootprint({})`,
    using the simulation's `transactionData` and a fee of
-   `minResourceFee × restoreFeeMultiplier` (default multiplier: `100`).
+   `minResourceFee × restoreFeeMultiplier` (default multiplier: `3` — see
+   [Choosing `restoreFeeMultiplier`](docs/api/types.md#choosing-restorefeemultiplier)
+   for how to tune it under congestion).
 5. **Sign and submit the restore transaction** — the wallet is prompted to
    sign (state: `signing_restore`, then `submitting_restore` once sent via
    `server.sendTransaction()`).
@@ -268,16 +270,38 @@ stateDiagram-v2
 `reset()` clears `error`/`archivedKeys` and returns to `idle` from any
 state, so a UI can always offer a "try again" action.
 
-### Proactive / estimation states
+### Batch restore
 
-`estimating`, `watching_ttl`, and `extending_ttl` are **additive** — they
-model long-running activity outside the reactive submit flow (fee
-estimation and proactive TTL watch-and-extend). The `RestoreState` union
-is a superset of the original states, so existing consumers keep working
-unchanged. `isProcessingState()` returns `true` for `estimating` and
-`extending_ttl` (active work) and `false` for `watching_ttl` (a passive
-background poll, like `idle`); its result for every pre-existing state is
-unchanged.
+`submitBatchWithRestore(items)` drives the same state machine, but
+`restore_needed` → `confirming_restore` covers _one_ restore transaction
+built from the union of archived keys across every transaction in the
+batch (`buildBatchRestoreTx`), instead of one restore per transaction.
+Once that shared restore confirms, `signing_original` /
+`submitting_original` repeat once per transaction, sequentially — each
+resubmission fetches the account's current sequence number immediately
+before building, so there's no sequence-number race between them. Every
+result in the returned `ResurrectResult[]` carries the same
+`restoreTxHash`. If none of the batch's transactions need restoring, this
+degrades to plain sequential `submitWithRestore()` calls.
+
+### Proactive TTL watching
+
+`watchTTL(keys, opts)` sits outside the reactive `submitWithRestore` state
+machine — it's a standalone poller, not a workflow state. On a configurable
+cadence (`ttlWatchIntervalMs`) it calls `getExpiringSoonEntries()` for the
+watched keys and, when any cross `ttlWatchThreshold` (remaining ledgers):
+
+- emits `ttlLow` with the affected entries, always; and
+- if `ttlWatchAutoExtend` (or `opts.autoExtend`) is on, builds, signs (via
+  `opts.wallet`), submits, and confirms a restore transaction for exactly
+  those entries — with no user "original" transaction involved — then
+  emits `ttlExtended` with the restore tx hash.
+
+This turns restoration from _reactive_ (an entry archives, the user's next
+transaction fails, `submitWithRestore` restores it) into _proactive_
+(the SDK notices TTL dropping and restores before archival ever happens).
+`handle.stop()` ends polling; a poll failure or a failed auto-extend calls
+`opts.onError` and the watch keeps running on its next tick.
 
 ## Failure handling
 

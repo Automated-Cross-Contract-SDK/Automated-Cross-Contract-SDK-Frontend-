@@ -1,0 +1,162 @@
+[
+  {
+    "id": "GHSA-2v37-7h3g-55p8",
+    "reason": "nanoid indefinite loop; transitive dep, remediation requires major bump upstream",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-36qx-fr4f-26g5",
+    "reason": "next.js i18n middleware bypass; fix requires next@16 major upgrade",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-3g8h-86w9-wvmq",
+    "reason": "next.js middleware/proxy cache poisoning; fix requires next@16 major upgrade",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-3x4c-7xq6-9pq8",
+    "reason": "next.js image optimizer disk cache growth; fix requires next@16 major upgrade",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-4633-3j49-mh5q",
+    "reason": "next.js cache confusion (invalid UTF-8); fix requires next@16 major upgrade",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-4c39-4ccg-62r3",
+    "reason": "next.js unbounded Server Action payload (edge runtime); fix requires next@16 major upgrade",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-5p2g-fcmc-qvqq",
+    "reason": "image-size ReDoS; transitive dep of metro/react-native tooling",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-5p4m-2wfm-xmqj",
+    "reason": "js-yaml quadratic CPU on !!omap; transitive build-tooling dep, not used at runtime",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-68g3-v927-f742",
+    "reason": "next.js response body cache confusion; fix requires next@16 major upgrade",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-6g55-p6wh-862q",
+    "reason": "postcss sourceMappingURL file disclosure; transitive dep of next, fix requires next@16 major upgrade",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-89xv-2m56-2m9x",
+    "reason": "next.js SSRF in Server Actions on custom servers; fix requires next@16 major upgrade",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-8h8q-6873-q5fj",
+    "reason": "next.js Server Components DoS; fix requires next@16 major upgrade",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-955p-x3mx-jcvp",
+    "reason": "next.js unauthenticated Server Function endpoint disclosure; fix requires next@16 major upgrade",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-9g9p-9gw9-jx7f",
+    "reason": "next.js image optimizer DoS via remotePatterns; fix requires next@16 major upgrade",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-c4j6-fc7j-m34r",
+    "reason": "next.js SSRF via WebSocket upgrades; fix requires next@16 major upgrade",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-ffhc-5mcf-pf4q",
+    "reason": "next.js CSP nonce XSS in App Router; fix requires next@16 major upgrade",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-fxqj-rqcc-2cmp",
+    "reason": "postcss sourceMappingURL disclosure (incomplete fix follow-up); transitive dep of next",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-gh4j-gqv2-49f6",
+    "reason": "transitive react-native tooling advisory, no direct fix available yet",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-ggv3-7p47-pfv8",
+    "reason": "next.js HTTP request smuggling in rewrites; fix requires next@16 major upgrade",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-gx5p-jg67-6x7h",
+    "reason": "next.js beforeInteractive script XSS; fix requires next@16 major upgrade",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-h25m-26qc-wcjf",
+    "reason": "next.js RSC request deserialization DoS; fix requires next@16 major upgrade",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-h64f-5h5j-jqjh",
+    "reason": "next.js Image Optimization API DoS; fix requires next@16 major upgrade",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-m99w-x7hq-7vfj",
+    "reason": "next.js Server Actions DoS; fix requires next@16 major upgrade",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-mh99-v99m-4gvg",
+    "reason": "brace-expansion ReDoS; transitive build-tooling dep",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-p9j2-gv94-2wf4",
+    "reason": "next.js SSRF via rewrites destination hostname; fix requires next@16 major upgrade",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-q4gf-8mx6-v5v3",
+    "reason": "next.js Server Components DoS; fix requires next@16 major upgrade",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-qx2v-qp2m-jg93",
+    "reason": "postcss XSS via unescaped </style>; transitive dep of next",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-r28c-9q8g-f849",
+    "reason": "postcss path traversal via source map auto-loading; transitive dep of next",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-rgw5-rvv9-x895",
+    "reason": "brace-expansion ReDoS (second advisory); transitive build-tooling dep",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-vfv6-92ff-j949",
+    "reason": "next.js RSC cache poisoning; fix requires next@16 major upgrade",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-w3rx-r6r6-pgpr",
+    "reason": "image-size advisory; transitive dep of metro/react-native tooling",
+    "expires": "2026-11-27"
+  },
+  {
+    "id": "GHSA-wfc6-r584-vfw7",
+    "reason": "next.js RSC response cache poisoning; fix requires next@16 major upgrade",
+    "expires": "2026-11-27"
+  }
+]
