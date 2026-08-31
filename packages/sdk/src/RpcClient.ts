@@ -62,6 +62,13 @@
  */
 
 import { rpc, Transaction, Account, xdr } from '@stellar/stellar-sdk'
+import {
+  RPC_TIMEOUT_MS,
+  RPC_RETRY_COUNT,
+  RPC_RETRY_BACKOFF_MS,
+  RPC_CIRCUIT_BREAKER_THRESHOLD,
+  RPC_CIRCUIT_BREAKER_COOLDOWN_MS,
+} from './constants.js'
 
 // ---------------------------------------------------------------------------
 // Interface
@@ -119,6 +126,17 @@ export interface ISorobanRpcClient {
    * Used as the starting point for TTL calculations and SSE streaming.
    */
   getLatestLedger(): Promise<rpc.Api.GetLatestLedgerResponse>
+
+  /**
+   * The base URL of the underlying RPC endpoint, if known.
+   *
+   * Used by {@link waitForTransactionSSE} in `Restorer.ts` to open an SSE
+   * stream without reaching into `rpc.Server`'s undocumented internals.
+   * Implementations that don't expose a URL (e.g. some test doubles or
+   * custom transports) may omit it — SSE waiting then falls back to
+   * adaptive polling.
+   */
+  readonly serverURL?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -225,4 +243,172 @@ export class SorobanRpcClient implements ISorobanRpcClient {
  */
 export function createRpcClient(rpcUrl: string): SorobanRpcClient {
   return new SorobanRpcClient(rpcUrl)
+}
+
+// ---------------------------------------------------------------------------
+// Resilient transport (timeout + retry with backoff + circuit breaker)
+// ---------------------------------------------------------------------------
+
+/** Configuration for the resilient RPC transport wrapper. */
+export interface RpcResilienceOptions {
+  /** Per-call timeout in ms. `0` disables the timeout. */
+  timeoutMs?: number
+  /** Number of retries beyond the initial attempt for transient failures. */
+  retryCount?: number
+  /** Base backoff in ms between retries; doubles each attempt with jitter. */
+  retryBackoffMs?: number
+  /** Consecutive failures before the circuit breaker trips and fails fast. */
+  circuitBreakerThreshold?: number
+  /** Cooldown in ms the circuit breaker stays open before allowing calls through again. */
+  circuitBreakerCooldownMs?: number
+}
+
+type ResolvedRpcResilienceOptions = Required<RpcResilienceOptions>
+
+const DEFAULT_RESILIENCE: ResolvedRpcResilienceOptions = {
+  timeoutMs: RPC_TIMEOUT_MS,
+  retryCount: RPC_RETRY_COUNT,
+  retryBackoffMs: RPC_RETRY_BACKOFF_MS,
+  circuitBreakerThreshold: RPC_CIRCUIT_BREAKER_THRESHOLD,
+  circuitBreakerCooldownMs: RPC_CIRCUIT_BREAKER_COOLDOWN_MS,
+}
+
+/** Thrown when an RPC call exceeds its configured `timeoutMs`. */
+export class RpcTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`RPC call timed out after ${timeoutMs}ms`)
+    this.name = 'RpcTimeoutError'
+  }
+}
+
+/** Thrown when the circuit breaker is open and calls are failing fast. */
+export class RpcCircuitOpenError extends Error {
+  constructor(retryAfterMs: number) {
+    super(`RPC circuit breaker is open; retry after ${retryAfterMs}ms`)
+    this.name = 'RpcCircuitOpenError'
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  if (!timeoutMs) return promise
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new RpcTimeoutError(timeoutMs)), timeoutMs)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (err) => {
+        clearTimeout(timer)
+        reject(err)
+      },
+    )
+  })
+}
+
+/**
+ * Wraps an {@link ISorobanRpcClient} with a resilient transport:
+ * - a per-call timeout (`timeoutMs`)
+ * - retry with exponential backoff + jitter for transient failures (`retryCount`, `retryBackoffMs`)
+ * - a circuit breaker that fails fast for `circuitBreakerCooldownMs` after
+ *   `circuitBreakerThreshold` consecutive failures
+ *
+ * Every method on {@link ISorobanRpcClient} is wrapped identically, including
+ * `getTransaction` — callers such as `waitForTransaction` keep their own
+ * polling/backoff loop untouched; this only governs each individual RPC call.
+ */
+export class ResilientRpcClient implements ISorobanRpcClient {
+  private readonly _inner: ISorobanRpcClient
+  private readonly _opts: ResolvedRpcResilienceOptions
+  private _consecutiveFailures = 0
+  private _circuitOpenUntil = 0
+
+  constructor(inner: ISorobanRpcClient, opts: RpcResilienceOptions = {}) {
+    this._inner = inner
+    this._opts = { ...DEFAULT_RESILIENCE, ...opts }
+  }
+
+  /**
+   * Forwards `serverURL` from the wrapped client when present (e.g. a
+   * {@link SorobanRpcClient}), so callers relying on it for SSE URL
+   * construction (`Restorer.ts`) keep working through the resilient wrapper.
+   */
+  get serverURL(): string | undefined {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (this._inner as any).serverURL
+  }
+
+  simulateTransaction(transaction: Transaction): Promise<rpc.Api.SimulateTransactionResponse> {
+    return this._call(() => this._inner.simulateTransaction(transaction))
+  }
+
+  sendTransaction(
+    transaction: Transaction | import('@stellar/stellar-sdk').FeeBumpTransaction,
+  ): Promise<rpc.Api.SendTransactionResponse> {
+    return this._call(() => this._inner.sendTransaction(transaction))
+  }
+
+  getTransaction(hash: string): Promise<rpc.Api.GetTransactionResponse> {
+    return this._call(() => this._inner.getTransaction(hash))
+  }
+
+  getAccount(publicKey: string): Promise<Account> {
+    return this._call(() => this._inner.getAccount(publicKey))
+  }
+
+  getLedgerEntries(...keys: xdr.LedgerKey[]): Promise<rpc.Api.GetLedgerEntriesResponse> {
+    return this._call(() => this._inner.getLedgerEntries(...keys))
+  }
+
+  getLatestLedger(): Promise<rpc.Api.GetLatestLedgerResponse> {
+    return this._call(() => this._inner.getLatestLedger())
+  }
+
+  private async _call<T>(fn: () => Promise<T>): Promise<T> {
+    const now = Date.now()
+    if (this._circuitOpenUntil > now) {
+      throw new RpcCircuitOpenError(this._circuitOpenUntil - now)
+    }
+
+    let lastError: unknown
+    for (let attempt = 0; attempt <= this._opts.retryCount; attempt++) {
+      try {
+        const result = await withTimeout(fn(), this._opts.timeoutMs)
+        this._consecutiveFailures = 0
+        this._circuitOpenUntil = 0
+        return result
+      } catch (err) {
+        lastError = err
+        this._consecutiveFailures++
+        if (this._consecutiveFailures >= this._opts.circuitBreakerThreshold) {
+          this._circuitOpenUntil = Date.now() + this._opts.circuitBreakerCooldownMs
+          break
+        }
+        if (attempt < this._opts.retryCount) {
+          const backoff = this._opts.retryBackoffMs * 2 ** attempt
+          const jitter = Math.random() * backoff * 0.5
+          await sleep(backoff + jitter)
+        }
+      }
+    }
+
+    throw lastError
+  }
+}
+
+/**
+ * Wraps a client with the resilient transport described in {@link ResilientRpcClient}.
+ *
+ * @param client - The client to wrap (a {@link SorobanRpcClient} or any test double).
+ * @param opts   - Timeout/retry/circuit-breaker configuration; unset fields use SDK defaults.
+ */
+export function wrapWithResilience(
+  client: ISorobanRpcClient,
+  opts?: RpcResilienceOptions,
+): ISorobanRpcClient {
+  return new ResilientRpcClient(client, opts)
 }

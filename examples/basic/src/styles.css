@@ -1,0 +1,283 @@
+/*
+ * Soroban-Resurrect basic example — global styles.
+ *
+ * Uses CSS custom properties for theming. Light is the default; the dark
+ * palette is applied automatically via `prefers-color-scheme: dark`.
+ */
+
+:root {
+  --sr-bg: #f6f7f9;
+  --sr-surface: #ffffff;
+  --sr-surface-alt: #f1f3f5;
+  --sr-border: #e2e5e9;
+  --sr-text: #1b1f24;
+  --sr-text-muted: #6c757d;
+  --sr-primary: #3b6ef5;
+  --sr-primary-contrast: #ffffff;
+  --sr-primary-hover: #2f59d6;
+  --sr-success: #1a7f37;
+  --sr-warning: #b8860b;
+  --sr-error: #d1242f;
+  --sr-radius: 8px;
+  --sr-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --sr-font:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+  --sr-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --sr-bg: #0f1115;
+    --sr-surface: #191c22;
+    --sr-surface-alt: #21252d;
+    --sr-border: #2c313a;
+    --sr-text: #e6e8eb;
+    --sr-text-muted: #9aa4b2;
+    --sr-primary: #5b8bff;
+    --sr-primary-contrast: #0f1115;
+    --sr-primary-hover: #7aa1ff;
+    --sr-success: #3fb950;
+    --sr-warning: #d6a02c;
+    --sr-error: #ff6b6b;
+    --sr-shadow: 0 1px 3px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.3);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--sr-bg);
+  color: var(--sr-text);
+  font-family: var(--sr-font);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+.sr-app {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: clamp(16px, 4vw, 40px);
+}
+
+.sr-app h2 {
+  margin: 0 0 4px;
+  font-size: clamp(1.4rem, 4vw, 1.75rem);
+}
+
+.sr-app .sr-tagline {
+  margin: 0 0 24px;
+  color: var(--sr-text-muted);
+  font-size: 0.95rem;
+}
+
+.sr-card {
+  background: var(--sr-surface);
+  border: 1px solid var(--sr-border);
+  border-radius: var(--sr-radius);
+  box-shadow: var(--sr-shadow);
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+/* --- Buttons --- */
+
+.sr-btn {
+  appearance: none;
+  font: inherit;
+  font-weight: 600;
+  border: 1px solid var(--sr-border);
+  background: var(--sr-surface-alt);
+  color: var(--sr-text);
+  padding: 9px 16px;
+  border-radius: var(--sr-radius);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    opacity 0.15s ease;
+}
+
+.sr-btn:hover:not(:disabled) {
+  background: var(--sr-border);
+}
+
+.sr-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.sr-btn--primary {
+  background: var(--sr-primary);
+  border-color: var(--sr-primary);
+  color: var(--sr-primary-contrast);
+}
+
+.sr-btn--primary:hover:not(:disabled) {
+  background: var(--sr-primary-hover);
+  border-color: var(--sr-primary-hover);
+}
+
+.sr-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* --- Wallet --- */
+
+.sr-wallet {
+  margin-bottom: 16px;
+  font-size: 0.95rem;
+}
+
+.sr-wallet code,
+code.sr-code {
+  font-family: var(--sr-mono);
+  background: var(--sr-surface-alt);
+  border: 1px solid var(--sr-border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.85em;
+}
+
+/* --- Result --- */
+
+.sr-result {
+  margin-top: 16px;
+  padding: 12px;
+  background: var(--sr-surface-alt);
+  border: 1px solid var(--sr-border);
+  border-radius: var(--sr-radius);
+  font-family: var(--sr-mono);
+  font-size: 0.8rem;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+/* --- Progress indicator --- */
+
+.sr-progress {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sr-progress__step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 0;
+  color: var(--sr-text-muted);
+  font-size: 0.9rem;
+}
+
+.sr-progress__step--done {
+  color: var(--sr-text);
+}
+
+.sr-progress__step--active {
+  color: var(--sr-text);
+  font-weight: 600;
+}
+
+.sr-progress__step--error {
+  color: var(--sr-error);
+  font-weight: 600;
+}
+
+.sr-progress__marker {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  display: grid;
+  place-items: center;
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
+.sr-progress__step--done .sr-progress__marker {
+  background: var(--sr-success);
+  border-color: var(--sr-success);
+  color: #fff;
+}
+
+.sr-progress__step--active .sr-progress__marker {
+  border-color: var(--sr-primary);
+  color: var(--sr-primary);
+  animation: sr-pulse 1.2s ease-in-out infinite;
+}
+
+.sr-progress__step--error .sr-progress__marker {
+  background: var(--sr-error);
+  border-color: var(--sr-error);
+  color: #fff;
+}
+
+@keyframes sr-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sr-progress__step--active .sr-progress__marker {
+    animation: none;
+  }
+}
+
+/* --- Error display --- */
+
+.sr-error {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--sr-error);
+  border-left-width: 4px;
+  border-radius: var(--sr-radius);
+  background: var(--sr-surface);
+  background: color-mix(in srgb, var(--sr-error) 8%, var(--sr-surface));
+}
+
+.sr-error__title {
+  margin: 0 0 6px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--sr-error);
+}
+
+.sr-error__message {
+  margin: 0 0 10px;
+  font-size: 0.9rem;
+}
+
+.sr-error__hint-label {
+  margin: 0 0 4px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--sr-text-muted);
+}
+
+.sr-error__hints {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.9rem;
+}
+
+.sr-error__hints li {
+  margin: 2px 0;
+}

@@ -83,13 +83,13 @@ const sr = new SorobanResurrect({
 ```typescript
 const sr = new SorobanResurrect({
   rpcUrl: 'https://soroban-testnet.stellar.org',
-  restoreFeeMultiplier: 150, // default: 100
+  restoreFeeMultiplier: 5, // default: 3
   pollIntervalMs: 2000, // default: 1000
   pollTimeoutMs: 90_000, // default: 60000
 })
 ```
 
-`restoreFeeMultiplier` scales the resource fee reported by simulation to compute the restore transaction's fee — raise it on networks with volatile fees to reduce the chance of underpaying.
+`restoreFeeMultiplier` scales the resource fee reported by simulation to compute the restore transaction's fee — raise it on networks with volatile fees to reduce the chance of underpaying. See [Choosing `restoreFeeMultiplier`](/api/types#choosing-restorefeemultiplier) for the full trade-off.
 
 ## 7. Resetting state between actions
 

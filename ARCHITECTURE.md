@@ -72,22 +72,22 @@ flowchart TB
 
 ## Packages
 
-| Package | Responsibility |
-| --- | --- |
-| `@soroban-resurrect/sdk` | Framework-agnostic core: detects archived entries, builds and submits restore transactions, and orchestrates the full restore-and-submit workflow. No React dependency. |
+| Package                         | Responsibility                                                                                                                                                                                     |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@soroban-resurrect/sdk`        | Framework-agnostic core: detects archived entries, builds and submits restore transactions, and orchestrates the full restore-and-submit workflow. No React dependency.                            |
 | `@soroban-resurrect/react-hook` | Thin React binding over the SDK — a context provider (`SorobanResurrectProvider`) and a standalone hook (`useSorobanResurrect`), both exposing the same reactive `state` / `isProcessing` surface. |
-| `examples/basic` | Vite + React demo app wiring the react-hook package to a Freighter wallet connect + withdraw flow. |
+| `examples/basic`                | Vite + React demo app wiring the react-hook package to a Freighter wallet connect + withdraw flow.                                                                                                 |
 
 Within `@soroban-resurrect/sdk`, responsibilities are split by module:
 
-| Module | Responsibility |
-| --- | --- |
-| `SorobanResurrect.ts` | Public facade class. Wraps the RPC server, exposes the state machine and listener API, and delegates the actual workflow to `Executor`. |
-| `Executor.ts` | `executeWithRestore` — the stateless orchestration function that runs simulate → (restore if needed) → submit, invoking lifecycle callbacks along the way. |
-| `Archiver.ts` | Simulation-response type guards and archived-key extraction/detection (`simulation` and `direct` strategies). |
-| `Restorer.ts` | Transaction building: `buildRestoreTransaction`, `buildOriginalAfterRestore`, `prepareTransaction`, plus `waitForTransaction` polling with backoff. |
-| `types.ts` | Shared TypeScript interfaces and the `RestoreState` union. |
-| `constants.ts` | Defaults (network passphrase, poll interval/timeout, fee multiplier). |
+| Module                | Responsibility                                                                                                                                             |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SorobanResurrect.ts` | Public facade class. Wraps the RPC server, exposes the state machine and listener API, and delegates the actual workflow to `Executor`.                    |
+| `Executor.ts`         | `executeWithRestore` — the stateless orchestration function that runs simulate → (restore if needed) → submit, invoking lifecycle callbacks along the way. |
+| `Archiver.ts`         | Simulation-response type guards and archived-key extraction/detection (`simulation` and `direct` strategies).                                              |
+| `Restorer.ts`         | Transaction building: `buildRestoreTransaction`, `buildOriginalAfterRestore`, `prepareTransaction`, plus `waitForTransaction` polling with backoff.        |
+| `types.ts`            | Shared TypeScript interfaces and the `RestoreState` union.                                                                                                 |
+| `constants.ts`        | Defaults (network passphrase, poll interval/timeout, fee multiplier).                                                                                      |
 
 ## Component interaction
 
@@ -190,7 +190,9 @@ fires the corresponding optional callback passed to `submitWithRestore()`.
 4. **Build the restore transaction** — `buildRestoreTransaction()`
    constructs a transaction with a single `Operation.restoreFootprint({})`,
    using the simulation's `transactionData` and a fee of
-   `minResourceFee × restoreFeeMultiplier` (default multiplier: `100`).
+   `minResourceFee × restoreFeeMultiplier` (default multiplier: `3` — see
+   [Choosing `restoreFeeMultiplier`](docs/api/types.md#choosing-restorefeemultiplier)
+   for how to tune it under congestion).
 5. **Sign and submit the restore transaction** — the wallet is prompted to
    sign (state: `signing_restore`, then `submitting_restore` once sent via
    `server.sendTransaction()`).
@@ -252,10 +254,54 @@ stateDiagram-v2
     success --> idle: reset()
     error --> idle: reset()
     idle --> idle: reset()
+
+    %% --- Proactive / estimation states (additive, non-submit) ---
+    idle --> estimating: estimate()
+    idle --> watching_ttl: watchTtl()
+    idle --> extending_ttl: extendTtl()
+    watching_ttl --> extending_ttl: entry near expiry
+    estimating --> idle: done
+    estimating --> error: estimation fails
+    watching_ttl --> idle: stop()
+    extending_ttl --> success: bump submitted
+    extending_ttl --> error: bump fails
 ```
 
 `reset()` clears `error`/`archivedKeys` and returns to `idle` from any
 state, so a UI can always offer a "try again" action.
+
+### Batch restore
+
+`submitBatchWithRestore(items)` drives the same state machine, but
+`restore_needed` → `confirming_restore` covers _one_ restore transaction
+built from the union of archived keys across every transaction in the
+batch (`buildBatchRestoreTx`), instead of one restore per transaction.
+Once that shared restore confirms, `signing_original` /
+`submitting_original` repeat once per transaction, sequentially — each
+resubmission fetches the account's current sequence number immediately
+before building, so there's no sequence-number race between them. Every
+result in the returned `ResurrectResult[]` carries the same
+`restoreTxHash`. If none of the batch's transactions need restoring, this
+degrades to plain sequential `submitWithRestore()` calls.
+
+### Proactive TTL watching
+
+`watchTTL(keys, opts)` sits outside the reactive `submitWithRestore` state
+machine — it's a standalone poller, not a workflow state. On a configurable
+cadence (`ttlWatchIntervalMs`) it calls `getExpiringSoonEntries()` for the
+watched keys and, when any cross `ttlWatchThreshold` (remaining ledgers):
+
+- emits `ttlLow` with the affected entries, always; and
+- if `ttlWatchAutoExtend` (or `opts.autoExtend`) is on, builds, signs (via
+  `opts.wallet`), submits, and confirms a restore transaction for exactly
+  those entries — with no user "original" transaction involved — then
+  emits `ttlExtended` with the restore tx hash.
+
+This turns restoration from _reactive_ (an entry archives, the user's next
+transaction fails, `submitWithRestore` restores it) into _proactive_
+(the SDK notices TTL dropping and restores before archival ever happens).
+`handle.stop()` ends polling; a poll failure or a failed auto-extend calls
+`opts.onError` and the watch keeps running on its next tick.
 
 ## Failure handling
 
@@ -290,7 +336,7 @@ initiation, independent of the specific failure point above.
   the RPC server itself returns a restore-required response
   (`Api.isSimulationRestore`). Cheap (one RPC call) and matches exactly
   what `submitWithRestore` will encounter, but only reports entries that
-  are actually in the transaction's footprint *and* currently archived.
+  are actually in the transaction's footprint _and_ currently archived.
 - **`direct`** — simulate in success mode to obtain the read-write
   footprint, then query `getLedgerEntries` directly (in chunks of 50) to
   see which of those keys are missing from the ledger. Useful for

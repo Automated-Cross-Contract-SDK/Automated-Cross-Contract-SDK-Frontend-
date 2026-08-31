@@ -1,5 +1,5 @@
 import { XBullWalletConnect } from '@creit.tech/xbull-wallet-connect'
-import type { WalletAdapter } from '@soroban-resurrect/sdk'
+import type { WalletAdapter, WalletCapabilities } from '@soroban-resurrect/sdk'
 import { asStellarPublicKey, asXdrBase64 } from '@soroban-resurrect/sdk'
 
 /**
@@ -7,6 +7,17 @@ import { asStellarPublicKey, asXdrBase64 } from '@soroban-resurrect/sdk'
  * Wraps `@creit.tech/xbull-wallet-connect` to satisfy the SDK's WalletAdapter contract.
  */
 export class XBullAdapter implements WalletAdapter {
+  /**
+   * xBull is a software extension wallet. It signs full transaction envelopes
+   * (including fee-bump envelopes) via its connector; it does not expose
+   * CAP-0046 per-entry signing through this adapter.
+   */
+  readonly capabilities: WalletCapabilities = {
+    signAuthEntry: false,
+    feeBump: true,
+    hardware: false,
+  }
+
   private readonly connector = new XBullWalletConnect()
   private publicKey: string | undefined
 
