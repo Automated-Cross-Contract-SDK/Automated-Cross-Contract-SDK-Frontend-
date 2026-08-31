@@ -6,16 +6,6 @@ export { useSorobanResurrectWatcher } from './useSorobanResurrectWatcher.js'
 
 export type { UseSorobanResurrectReturn } from './useSorobanResurrect.js'
 
-export type { ResolveResurrectOptions } from './resolveResurrect.js'
+export { SorobanResurrectPlugin, injectSorobanResurrect, SOROBAN_RESURRECT_KEY } from './plugin.js'
 
-export type {
-  SorobanFeeEstimate,
-  UseSorobanResurrectEstimateOptions,
-  UseSorobanResurrectEstimateReturn,
-} from './useSorobanResurrectEstimate.js'
-
-export type {
-  RestoreWatchStatus,
-  UseSorobanResurrectWatcherOptions,
-  UseSorobanResurrectWatcherReturn,
-} from './useSorobanResurrectWatcher.js'
+export type { SorobanResurrectPluginOptions } from './plugin.js'

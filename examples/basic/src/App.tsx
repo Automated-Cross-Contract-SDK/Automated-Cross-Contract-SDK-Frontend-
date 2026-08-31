@@ -1,6 +1,8 @@
 import React, { useState, useCallback } from 'react'
 import { SorobanResurrectProvider, useSorobanResurrectContext } from '@soroban-resurrect/react-hook'
 import { TransactionBuilder, Operation, Networks, nativeToScVal, rpc } from '@stellar/stellar-sdk'
+import { ProgressIndicator } from './components/ProgressIndicator.js'
+import { ErrorDisplay } from './components/ErrorDisplay.js'
 
 // Safely read environment variables with fallback defaults
 function getEnvVariable(key: string, fallback: string): string {
@@ -46,9 +48,11 @@ function WalletButton() {
   }, [])
 
   return (
-    <div style={{ marginBottom: 16 }}>
+    <div className="sr-wallet">
       {!walletConnected ? (
-        <button onClick={connectWallet}>Connect Freighter Wallet</button>
+        <button className="sr-btn" onClick={connectWallet}>
+          Connect Freighter Wallet
+        </button>
       ) : (
         <div>
           Connected:{' '}
@@ -66,6 +70,7 @@ function WithdrawButton() {
     useSorobanResurrectContext()
 
   const [lastResult, setLastResult] = useState<string | null>(null)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   const buildSampleTransaction = useCallback(async () => {
     const stellar = getStellarWallet()
@@ -92,6 +97,7 @@ function WithdrawButton() {
 
   const handleWithdraw = useCallback(async () => {
     setLastResult(null)
+    setErrorMessage(null)
     try {
       const stellar = getStellarWallet()
       const wallet = {
@@ -107,11 +113,12 @@ function WithdrawButton() {
       const result = await submitWithRestore(tx, wallet)
       setLastResult(JSON.stringify(result, null, 2))
     } catch (err) {
-      setLastResult(`Error: ${err instanceof Error ? err.message : String(err)}`)
+      setErrorMessage(err instanceof Error ? err.message : String(err))
     }
   }, [submitWithRestore, buildSampleTransaction])
 
   const handleCheckArchived = useCallback(async () => {
+    setErrorMessage(null)
     try {
       const tx = await buildSampleTransaction()
       const keys = await detectArchivedKeys(tx)
@@ -121,87 +128,55 @@ function WithdrawButton() {
         alert(`Detected ${keys.length} archived ledger entries that need restoration.`)
       }
     } catch (err) {
-      alert(`Error: ${err instanceof Error ? err.message : String(err)}`)
+      setErrorMessage(err instanceof Error ? err.message : String(err))
     }
   }, [detectArchivedKeys, buildSampleTransaction])
 
-  const statusColor = (() => {
-    switch (state.state) {
-      case 'error':
-        return '#dc3545'
-      case 'success':
-        return '#28a745'
-      case 'restore_needed':
-        return '#ffc107'
-      default:
-        return '#6c757d'
-    }
-  })()
+  const handleReset = useCallback(() => {
+    reset()
+    setLastResult(null)
+    setErrorMessage(null)
+  }, [reset])
+
+  // Prefer the SDK-reported error, fall back to a locally caught one.
+  const shownError = state.state === 'error' ? (state.error ?? state.message) : errorMessage
 
   return (
-    <div style={{ maxWidth: 600, margin: '0 auto', padding: 24 }}>
+    <div className="sr-app">
       <h2>Soroban-Resurrect Demo</h2>
-      <WalletButton />
+      <p className="sr-tagline">
+        Submit a contract call that transparently restores any archived state it touches.
+      </p>
 
-      <div style={{ marginTop: 20 }}>
-        <button onClick={handleCheckArchived} disabled={isProcessing} style={{ marginRight: 8 }}>
-          Check Archived Keys
-        </button>
-        <button
-          onClick={handleWithdraw}
-          disabled={isProcessing}
-          style={{
-            backgroundColor: isProcessing ? '#ccc' : '#007bff',
-            color: '#fff',
-            border: 'none',
-            padding: '8px 16px',
-            borderRadius: 4,
-            cursor: isProcessing ? 'not-allowed' : 'pointer',
-          }}
-        >
-          {isProcessing ? 'Processing...' : 'Submit Withdraw'}
-        </button>
-        {(state.state !== 'idle' || lastResult) && (
-          <button onClick={() => reset()} style={{ marginLeft: 8 }}>
-            Reset
+      <div className="sr-card">
+        <WalletButton />
+
+        <div className="sr-actions">
+          <button className="sr-btn" onClick={handleCheckArchived} disabled={isProcessing}>
+            Check Archived Keys
           </button>
+          <button className="sr-btn sr-btn--primary" onClick={handleWithdraw} disabled={isProcessing}>
+            {isProcessing ? 'Processing...' : 'Submit Withdraw'}
+          </button>
+          {(state.state !== 'idle' || lastResult || errorMessage) && (
+            <button className="sr-btn" onClick={handleReset}>
+              Reset
+            </button>
+          )}
+        </div>
+
+        {state.archivedKeys && state.archivedKeys.length > 0 && (
+          <div style={{ marginTop: 12, fontSize: 13, color: 'var(--sr-text-muted)' }}>
+            <strong>Archived entries detected:</strong> {state.archivedKeys.length}
+          </div>
         )}
       </div>
 
-      {state.message && (
-        <div
-          style={{
-            marginTop: 16,
-            padding: 12,
-            borderRadius: 4,
-            border: `1px solid ${statusColor}`,
-            color: statusColor,
-          }}
-        >
-          <strong>Status:</strong> {state.message}
-        </div>
-      )}
+      <ProgressIndicator state={state.state} message={state.message} />
 
-      {state.archivedKeys && state.archivedKeys.length > 0 && (
-        <div style={{ marginTop: 12, fontSize: 13, opacity: 0.7 }}>
-          <strong>Archived entries detected:</strong> {state.archivedKeys.length}
-        </div>
-      )}
+      {shownError && <ErrorDisplay message={shownError} onRetry={handleWithdraw} />}
 
-      {lastResult && (
-        <pre
-          style={{
-            marginTop: 16,
-            padding: 12,
-            backgroundColor: '#f5f5f5',
-            borderRadius: 4,
-            fontSize: 13,
-            overflow: 'auto',
-          }}
-        >
-          {lastResult}
-        </pre>
-      )}
+      {lastResult && <pre className="sr-result">{lastResult}</pre>}
     </div>
   )
 }

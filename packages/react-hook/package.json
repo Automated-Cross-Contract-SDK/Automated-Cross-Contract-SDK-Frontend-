@@ -2,6 +2,16 @@
   "name": "@soroban-resurrect/react-hook",
   "version": "0.1.0",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-.git",
+    "directory": "packages/react-hook"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -37,6 +47,7 @@
     "@testing-library/dom": "^10.4.0",
     "@testing-library/react": "^16.3.2",
     "@types/react": "^18.3.0",
+    "@vitest/coverage-v8": "^2.1.9",
     "jsdom": "^29.1.1",
     "react": "^18.3.0",
     "tsup": "^8.5.1",

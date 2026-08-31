@@ -8,20 +8,18 @@ const mockReset = vi.fn()
 const mockDetectArchivedKeys = vi.fn()
 const mockSubmitWithRestore = vi.fn()
 
-vi.mock('@soroban-resurrect/sdk', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@soroban-resurrect/sdk')>()
-  return {
-    ...actual,
-    SorobanResurrect: vi.fn().mockImplementation(() => ({
-      onStateChange: mockOnStateChange,
-      reset: mockReset,
-      detectArchivedKeys: mockDetectArchivedKeys,
-      submitWithRestore: mockSubmitWithRestore,
-      config: { rpcUrl: 'https://test' },
-      state: 'idle',
-    })),
-  }
-})
+vi.mock('@soroban-resurrect/sdk', () => ({
+  isProcessingState: (state: string) =>
+    state !== 'idle' && state !== 'success' && state !== 'error',
+  SorobanResurrect: vi.fn().mockImplementation(() => ({
+    onStateChange: mockOnStateChange,
+    reset: mockReset,
+    detectArchivedKeys: mockDetectArchivedKeys,
+    submitWithRestore: mockSubmitWithRestore,
+    config: { rpcUrl: 'https://test' },
+    state: 'idle',
+  })),
+}))
 
 const testConfig = { rpcUrl: 'https://soroban-testnet.stellar.org' }
 

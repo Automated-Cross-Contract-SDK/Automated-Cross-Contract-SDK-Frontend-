@@ -1,10 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, renderHook, screen, act } from '@testing-library/react'
 import React from 'react'
-import {
-  SorobanResurrectProvider,
-  useSorobanResurrectContext,
-} from '../SorobanResurrectContext.js'
+import { SorobanResurrectProvider, useSorobanResurrectContext } from '../SorobanResurrectContext.js'
 import { SorobanResurrect } from '@soroban-resurrect/sdk'
 
 const mockOnStateChange = vi.fn()
@@ -12,20 +9,18 @@ const mockReset = vi.fn()
 const mockDetectArchivedKeys = vi.fn()
 const mockSubmitWithRestore = vi.fn()
 
-vi.mock('@soroban-resurrect/sdk', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@soroban-resurrect/sdk')>()
-  return {
-    ...actual,
-    SorobanResurrect: vi.fn().mockImplementation(() => ({
-      onStateChange: mockOnStateChange,
-      reset: mockReset,
-      detectArchivedKeys: mockDetectArchivedKeys,
-      submitWithRestore: mockSubmitWithRestore,
-      config: { rpcUrl: 'https://test' },
-      state: 'idle',
-    })),
-  }
-})
+vi.mock('@soroban-resurrect/sdk', () => ({
+  isProcessingState: (state: string) =>
+    state !== 'idle' && state !== 'success' && state !== 'error',
+  SorobanResurrect: vi.fn().mockImplementation(() => ({
+    onStateChange: mockOnStateChange,
+    reset: mockReset,
+    detectArchivedKeys: mockDetectArchivedKeys,
+    submitWithRestore: mockSubmitWithRestore,
+    config: { rpcUrl: 'https://test' },
+    state: 'idle',
+  })),
+}))
 
 const testConfig = { rpcUrl: 'https://soroban-testnet.stellar.org' }
 
@@ -261,10 +256,11 @@ describe('SorobanResurrectProvider', () => {
   })
 
   it('does not recreate SDK when config is unchanged', () => {
-    const { rerender } = renderHook(() => useSorobanResurrectContext(), {
-      wrapper: ({ children }) => (
-        <SorobanResurrectProvider config={testConfig}>{children}</SorobanResurrectProvider>
+    const { rerender } = renderHook((config: { rpcUrl: string }) => useSorobanResurrectContext(), {
+      wrapper: ({ children, config }: any) => (
+        <SorobanResurrectProvider config={config}>{children}</SorobanResurrectProvider>
       ),
+      initialProps: testConfig,
     })
 
     rerender()
