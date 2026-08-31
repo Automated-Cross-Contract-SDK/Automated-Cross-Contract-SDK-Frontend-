@@ -10,9 +10,7 @@ import { RESTORE_FEE_MULTIPLIER } from './constants.js'
  * @param config - SDK configuration, optionally carrying a custom multiplier.
  * @returns The effective fee multiplier (always >= 1).
  */
-export function resolveRestoreFeeMultiplier(
-  config: SorobanResurrectConfig,
-): number {
+export function resolveRestoreFeeMultiplier(config: SorobanResurrectConfig): number {
   return (config as Required<SorobanResurrectConfig>).restoreFeeMultiplier ?? RESTORE_FEE_MULTIPLIER
 }
 

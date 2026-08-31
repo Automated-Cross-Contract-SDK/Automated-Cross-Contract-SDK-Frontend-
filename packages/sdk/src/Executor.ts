@@ -1,4 +1,12 @@
-import { rpc, TransactionBuilder, Transaction } from '@stellar/stellar-sdk'
+import {
+  rpc,
+  TransactionBuilder,
+  Transaction,
+  Operation,
+  SorobanDataBuilder,
+  BASE_FEE,
+  xdr,
+} from '@stellar/stellar-sdk'
 import type { ISorobanRpcClient } from './RpcClient.js'
 import type {
   SorobanResurrectConfig,
@@ -364,6 +372,9 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
           error: err,
           sequenceRetries,
         }
+
+        originalHash = asTxHash(originalResult.hash)
+        break
       }
 
       const originalHash = asTxHash(originalResult!.hash)
@@ -531,4 +542,145 @@ async function waitForTransactionWithCallbacks(
   }
 
   throw new Error(`Transaction ${hash} did not complete within ${pollTimeoutMs}ms`)
+}
+
+/** Parameters for {@link restoreKeys}. */
+export interface RestoreKeysParams {
+  /** RPC client used for all Soroban network calls. */
+  server: ISorobanRpcClient
+  /**
+   * Ledger keys to restore — `LedgerKeyContractData` and/or
+   * `LedgerKeyContractCode` entries. Unlike `submitWithRestore`, these are
+   * not derived from simulating a source transaction: pass any keys you
+   * already know need restoring (proactive maintenance, restoring a
+   * contract's data ahead of an upgrade, etc.).
+   */
+  keys: xdr.LedgerKey[]
+  /** Wallet adapter used for signing. */
+  wallet: WalletAdapter
+  /** SDK configuration. */
+  config: SorobanResurrectConfig
+}
+
+/**
+ * Restores an arbitrary list of ledger keys, with no source transaction
+ * required.
+ *
+ * Every other restore path in this SDK discovers archived keys by simulating
+ * a transaction that touches them. This is for the case where the caller
+ * already knows which keys need restoring — a scheduled sweep of entries
+ * approaching TTL expiry (see `TTLHelpers.getExpiringSoonEntries`), or
+ * restoring a contract's storage before an upgrade touches it.
+ *
+ * A `restoreFootprint` transaction is built directly from `keys` and
+ * simulated once — not to detect whether restore is needed (it always is,
+ * here), but because that simulation is how the real `minResourceFee` for
+ * exactly these keys is obtained, same as every other restore fee in this
+ * SDK. `config.maxRestoreFeeStroops`, if set, applies here too.
+ *
+ * Never throws — every failure path returns
+ * `ResurrectResult { success: false, error }`.
+ *
+ * @example
+ * ```ts
+ * const result = await resurrect.restoreKeys([contractDataKey, contractCodeKey], wallet)
+ * if (result.success) console.log('Restored:', result.restoreTxHash)
+ * ```
+ */
+export async function restoreKeys(params: RestoreKeysParams): Promise<ResurrectResult> {
+  const { server, keys, wallet, config } = params
+  const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
+
+  if (keys.length === 0) {
+    return {
+      success: false,
+      archivedKeysDetected: 0,
+      error: 'restoreKeys called with an empty key list',
+    }
+  }
+
+  try {
+    const isConnected = await wallet.isConnected()
+    if (!isConnected) {
+      return { success: false, archivedKeysDetected: keys.length, error: 'Wallet is not connected' }
+    }
+
+    const publicKey = await wallet.getPublicKey()
+    const account = await server.getAccount(publicKey)
+
+    // A placeholder-fee restoreFootprint tx over exactly these keys, built
+    // only so it can be simulated for its real minResourceFee — mirrors what
+    // simulating a source transaction gives the footprint-derived restore
+    // path, without requiring one.
+    const placeholderData = new SorobanDataBuilder().setReadWrite(keys).build()
+    const placeholderTx = new TransactionBuilder(account, { fee: BASE_FEE, networkPassphrase })
+      .addOperation(Operation.restoreFootprint({}))
+      .setSorobanData(placeholderData)
+      .setTimeout(30)
+      .build()
+
+    const simResponse = await server.simulateTransaction(placeholderTx)
+    if (isErrorResponse(simResponse)) {
+      return {
+        success: false,
+        archivedKeysDetected: keys.length,
+        error: `Simulation error: ${simResponse.error}`,
+      }
+    }
+
+    const minResourceFee = parseInt(simResponse.minResourceFee, 10)
+    const transactionData = isSuccessResponse(simResponse)
+      ? simResponse.transactionData.build()
+      : placeholderData
+
+    const restoreTx = await buildRestoreTransaction({
+      server,
+      sourcePublicKey: publicKey,
+      transactionData,
+      minResourceFee,
+      config,
+      account,
+    })
+
+    const signedXdr = await wallet.signTransaction(asXdrBase64(restoreTx.toXDR()), {
+      networkPassphrase,
+    })
+    const signedTx = TransactionBuilder.fromXDR(signedXdr, networkPassphrase)
+    if (!(signedTx instanceof Transaction)) {
+      return {
+        success: false,
+        archivedKeysDetected: keys.length,
+        error: 'Failed to parse signed restore transaction',
+      }
+    }
+
+    const sendResult = await server.sendTransaction(signedTx)
+    if (isTxBadSeqError(sendResult)) {
+      return {
+        success: false,
+        archivedKeysDetected: keys.length,
+        error: 'Restore transaction rejected with tx_bad_seq',
+      }
+    }
+    const restoreHash = asTxHash(sendResult.hash)
+
+    const status = await waitForTx(server, restoreHash, config)
+    if (status.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
+      return {
+        success: false,
+        archivedKeysDetected: keys.length,
+        restoreTxHash: restoreHash,
+        error: 'Restore transaction failed to confirm',
+      }
+    }
+
+    return {
+      success: true,
+      restoreTxHash: restoreHash,
+      archivedKeysDetected: keys.length,
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return { success: false, archivedKeysDetected: keys.length, error: message }
+  }
 }

@@ -541,6 +541,30 @@ export class SorobanResurrect {
     return this._executor.submitBatchWithRestore(items)
   }
 
+  /**
+   * Restores an arbitrary list of ledger keys — `LedgerKeyContractData`
+   * and/or `LedgerKeyContractCode` — with no source transaction required.
+   * Use this for proactive maintenance (e.g. keys returned by
+   * `getExpiringSoonEntries`) or restoring a contract's storage ahead of an
+   * upgrade, where `submitWithRestore`'s simulate-a-transaction-first flow
+   * doesn't apply because there is no transaction yet.
+   *
+   * Never throws — failures come back as `ResurrectResult { success: false, error }`.
+   *
+   * @param keys   - Ledger keys to restore.
+   * @param wallet - Wallet adapter used for signing.
+   * @returns {@link ResurrectResult} with `restoreTxHash` on success.
+   *
+   * @example
+   * ```ts
+   * const expiring = await resurrect.getExpiringSoonEntries(keys)
+   * const result = await resurrect.restoreKeys(expiring.map((e) => e.key), wallet)
+   * ```
+   */
+  async restoreKeys(keys: xdr.LedgerKey[], wallet: WalletAdapter): Promise<ResurrectResult> {
+    return this._executor.restoreKeys(keys, wallet)
+  }
+
   // ---------------------------------------------------------------------------
   // TTL / expiry helpers
   // ---------------------------------------------------------------------------

@@ -55,6 +55,13 @@ export function isErrorResponse(
  * The read-write entries in the transaction footprint represent the keys that
  * need to be restored.
  *
+ * Covers both `LedgerKeyContractData` and `LedgerKeyContractCode` entries —
+ * Soroban's `restoreFootprint` operates on whatever the transaction's
+ * read-write footprint contains, wasm blobs included, and this function
+ * copies that footprint verbatim without filtering by key discriminant. A
+ * transaction that deploys/upgrades a contract and also touches its storage
+ * can therefore need both key types restored in the same call.
+ *
  * @param response - A restore simulation response, as narrowed by
  *   {@link isRestoreResponse}.
  * @returns Array of {@link ArchivedLedgerEntry}. Empty if the response has

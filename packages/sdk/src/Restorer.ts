@@ -120,6 +120,7 @@ export async function buildRestoreTransaction(params: BuildRestoreTxParams): Pro
   }
 
   const restoreFee = calculateRestoreFee(minResourceFee, config)
+  assertRestoreFeeWithinCap(restoreFee, config)
 
   if (config.maxRestoreFeeStroops !== undefined) {
     const cap = BigInt(config.maxRestoreFeeStroops)

@@ -85,6 +85,17 @@ export const SOROBAN_MAX_TX_XDR_BYTES = 128 * 1024
  */
 export const RESTORE_TX_SIZE_WARN_RATIO = 0.8
 
+/**
+ * Default number of times to rebuild-and-resubmit the original transaction
+ * after a `tx_bad_seq` rejection before giving up. The account can be bumped
+ * by another client (or by the restore transaction itself, on some RPC
+ * timing) between rebuilding the original tx and its submission; each retry
+ * fetches a fresh sequence number, so this bounds how many times that race
+ * can be re-run rather than surfacing as a hard failure. Configurable via
+ * `SorobanResurrectConfig.maxSequenceRetries`.
+ */
+export const MAX_SEQUENCE_RETRIES = 3
+
 /** Known Stellar/Soroban network passphrases for validation. */
 export const KNOWN_NETWORK_PASSPHRASES = [
   'Test SDF Network ; September 2015', // Testnet

@@ -266,6 +266,20 @@ export class SorobanResurrectExecutor {
   }
 
   /**
+   * Restores an arbitrary list of ledger keys, with no source transaction
+   * required. See {@link restoreKeys} in `Executor.ts` for the full
+   * behavior — this is a thin pass-through binding this instance's server
+   * and config.
+   *
+   * @param keys   - Ledger keys to restore.
+   * @param wallet - Wallet adapter used for signing.
+   * @returns {@link ResurrectResult}; never throws.
+   */
+  async restoreKeys(keys: xdr.LedgerKey[], wallet: WalletAdapter): Promise<ResurrectResult> {
+    return _restoreKeys({ server: this._server, keys, wallet, config: this._config })
+  }
+
+  /**
    * Submits a transaction with automatic archive restoration.
    *
    * Records the attempt in history and returns a `historyId` in the result
