@@ -1,5 +1,5 @@
-import { rpc, Transaction } from '@stellar/stellar-sdk'
-import { ArchivedLedgerEntry, SorobanResurrectConfig } from './types.js'
+import { Transaction, rpc } from '@stellar/stellar-sdk'
+import { ArchivedLedgerEntry } from './types.js'
 import { SimulationCache } from './SimulationCache.js'
 import { isRestoreResponse, isSuccessResponse, isErrorResponse, extractArchivedKeys } from './Archiver.js'
 import { SorobanResurrectStateManager } from './SorobanResurrectState.js'

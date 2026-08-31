@@ -22,9 +22,15 @@ import {
   buildOriginalAfterRestore,
   buildFeeBumpTransaction,
   submitFeeBumpTransaction,
+  isTxBadSeqError,
 } from './Restorer.js'
 import { SimulationCache } from './SimulationCache.js'
-import { DEFAULT_NETWORK_PASSPHRASE, POLL_INTERVAL_MS, POLL_TIMEOUT_MS } from './constants.js'
+import {
+  DEFAULT_NETWORK_PASSPHRASE,
+  POLL_INTERVAL_MS,
+  POLL_TIMEOUT_MS,
+  DEFAULT_MAX_SEQUENCE_RETRIES,
+} from './constants.js'
 import { asTxHash, asXdrBase64, type TxHash, type XdrBase64 } from './branded-types.js'
 
 /** Parameters for the full restore-and-submit execution flow. */
@@ -76,8 +82,16 @@ async function signAndMaybeFeeBump(params: {
   onSigningFeeBump?: () => void
   onSubmitting?: () => void
 }): Promise<{ hash: TxHash }> {
-  const { tx, wallet, feeBumpConfig, networkPassphrase, server, onSigning, onSigningFeeBump, onSubmitting } =
-    params
+  const {
+    tx,
+    wallet,
+    feeBumpConfig,
+    networkPassphrase,
+    server,
+    onSigning,
+    onSigningFeeBump,
+    onSubmitting,
+  } = params
 
   onSigning?.()
   const signedXdr = await wallet.signTransaction(asXdrBase64(tx.toXDR()), { networkPassphrase })
@@ -196,11 +210,15 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
   const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
 
   // Extract optional fields that may not be destructured from params
-  const onSigningRestore = (params as ExecuteParams & { onSigningRestore?: () => void }).onSigningRestore
-  const onSubmittingRestore = (params as ExecuteParams & { onSubmittingRestore?: () => void }).onSubmittingRestore
-  const onSigningOriginal = (params as ExecuteParams & { onSigningOriginal?: () => void }).onSigningOriginal
+  const onSigningRestore = (params as ExecuteParams & { onSigningRestore?: () => void })
+    .onSigningRestore
+  const onSubmittingRestore = (params as ExecuteParams & { onSubmittingRestore?: () => void })
+    .onSubmittingRestore
+  const onSigningOriginal = (params as ExecuteParams & { onSigningOriginal?: () => void })
+    .onSigningOriginal
   const feeBumpConfig = (params as ExecuteParams & { feeBumpConfig?: FeeBumpConfig }).feeBumpConfig
-  const simulationCache = (params as ExecuteParams & { simulationCache?: SimulationCache }).simulationCache
+  const simulationCache = (params as ExecuteParams & { simulationCache?: SimulationCache })
+    .simulationCache
   const pollInterval = config.pollIntervalMs ?? POLL_INTERVAL_MS
   const pollTimeout = config.pollTimeoutMs ?? POLL_TIMEOUT_MS
 
@@ -260,12 +278,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       const restoreHash = asTxHash(restoreResult.hash)
       onRestoreSubmitted?.(restoreHash)
 
-      const restoreStatus = await waitForTransaction(
-        server,
-        restoreHash,
-        pollInterval,
-        pollTimeout,
-      )
+      const restoreStatus = await waitForTransaction(server, restoreHash, pollInterval, pollTimeout)
 
       if (restoreStatus.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
         const err = 'Restore transaction failed'
@@ -280,24 +293,63 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
 
       onRestoreConfirmed?.(restoreHash)
 
-      const preparedTx = await buildOriginalAfterRestore(server, originalTx, networkPassphrase, originalTx.fee)
+      const maxSequenceRetries = config.maxSequenceRetries ?? DEFAULT_MAX_SEQUENCE_RETRIES
 
-      onSigningOriginal?.()
-      const signedOriginalXdr = await wallet.signTransaction(asXdrBase64(preparedTx.toXDR()), { networkPassphrase })
+      let sequenceRetries = 0
+      let originalResult: rpc.Api.SendTransactionResponse | undefined
 
-      const signedOriginalTx = TransactionBuilder.fromXDR(signedOriginalXdr, networkPassphrase)
-      if (!(signedOriginalTx instanceof Transaction)) {
-        const err = 'Failed to parse signed original transaction'
+      // Rebuild + sign + submit the original transaction. Retried (with a
+      // freshly-fetched sequence number) if the network rejects it with
+      // tx_bad_seq — the account may have been bumped by another client
+      // between the rebuild above and this submission.
+      for (;;) {
+        const preparedTx = await buildOriginalAfterRestore(
+          server,
+          originalTx,
+          networkPassphrase,
+          originalTx.fee,
+        )
+
+        onSigningOriginal?.()
+        const signedOriginalXdr = await wallet.signTransaction(asXdrBase64(preparedTx.toXDR()), {
+          networkPassphrase,
+        })
+
+        const signedOriginalTx = TransactionBuilder.fromXDR(signedOriginalXdr, networkPassphrase)
+        if (!(signedOriginalTx instanceof Transaction)) {
+          const err = 'Failed to parse signed original transaction'
+          onRestoreFailed?.(err)
+          return {
+            success: false,
+            archivedKeysDetected: archivedKeys.length,
+            restoreTxHash: restoreHash,
+            error: err,
+            sequenceRetries,
+          }
+        }
+
+        originalResult = await server.sendTransaction(signedOriginalTx)
+
+        if (!isTxBadSeqError(originalResult) || sequenceRetries >= maxSequenceRetries) {
+          break
+        }
+
+        sequenceRetries++
+      }
+
+      if (isTxBadSeqError(originalResult!)) {
+        const err = `Original transaction rejected with tx_bad_seq after ${sequenceRetries} retries`
         onRestoreFailed?.(err)
         return {
           success: false,
           archivedKeysDetected: archivedKeys.length,
+          restoreTxHash: restoreHash,
           error: err,
+          sequenceRetries,
         }
       }
 
-      const originalResult = await server.sendTransaction(signedOriginalTx)
-      const originalHash = asTxHash(originalResult.hash)
+      const originalHash = asTxHash(originalResult!.hash)
       onOriginalSubmitted?.(originalHash)
 
       return {
@@ -305,6 +357,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
         originalTxHash: originalHash,
         restoreTxHash: restoreHash,
         archivedKeysDetected: archivedKeys.length,
+        sequenceRetries,
       }
     }
 
@@ -370,7 +423,9 @@ export async function sendTransaction(
       }
     }
 
-    const signedXdr = await wallet.signTransaction(asXdrBase64(transaction.toXDR()), { networkPassphrase })
+    const signedXdr = await wallet.signTransaction(asXdrBase64(transaction.toXDR()), {
+      networkPassphrase,
+    })
 
     const signedTx = TransactionBuilder.fromXDR(signedXdr, networkPassphrase)
     if (!(signedTx instanceof Transaction)) {

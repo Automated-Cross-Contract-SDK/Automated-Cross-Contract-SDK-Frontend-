@@ -26,6 +26,7 @@ export type {
   ResurrectResult,
   DryRunResult,
   SubmitWithRestoreOptions,
+  RestoreKeysOptions,
   RestoreState,
   RestoreStateInfo,
   SorobanResurrectEvents,
@@ -38,7 +39,7 @@ export type {
 // ---------------------------------------------------------------------------
 // TTL / ledger entry helpers (returned by SorobanResurrect.queryLedgerTTL etc.)
 // ---------------------------------------------------------------------------
-export type { LedgerEntryTTLInfo, TTLQueryResult } from './TTLHelpers.js'
+export type { LedgerEntryTTLInfo, TTLQueryResult, LedgerKeyEntryType } from './TTLHelpers.js'
 
 // ---------------------------------------------------------------------------
 // Fee calculation (returned by SorobanResurrect.estimateRestoreCost)
@@ -111,6 +112,7 @@ export {
   queryLedgerEntryTTL,
   getExpiringSoonEntries,
   getArchivedEntries,
+  getLedgerKeyEntryType,
 } from './TTLHelpers.js'
 export type { TransactionHistoryEntry, TransactionAttemptStatus } from './TransactionHistory.js'
 export { TransactionHistory } from './TransactionHistory.js'

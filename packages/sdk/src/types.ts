@@ -125,6 +125,20 @@ export interface SorobanResurrectConfig {
    * ```
    */
   rpcClient?: ISorobanRpcClient
+  /**
+   * Maximum acceptable fee (in stroops) for a restore transaction. When set,
+   * `buildRestoreTransaction` throws a {@link RestoreFeeCapExceededError} if
+   * `minResourceFee * restoreFeeMultiplier` would exceed this cap, instead of
+   * silently signing an unexpectedly expensive transaction.
+   */
+  maxRestoreFeeStroops?: FeeStroops | string
+  /**
+   * Maximum number of times the restore workflow will rebuild the original
+   * transaction (with a fresh sequence number) and resubmit it after a
+   * `tx_bad_seq` submission error. Defaults to 3. Only `tx_bad_seq` triggers
+   * a retry — all other submission errors are surfaced immediately.
+   */
+  maxSequenceRetries?: number
 }
 
 /**
@@ -237,6 +251,24 @@ export interface ResurrectResult {
    * the workflow without rebuilding the original transaction.
    */
   historyId?: string
+  /**
+   * Number of `tx_bad_seq` rebuild-and-resubmit retries performed for the
+   * original transaction. Only present when a restore occurred; `0` means
+   * the original transaction was accepted on the first attempt.
+   */
+  sequenceRetries?: number
+}
+
+/** Options for {@link SorobanResurrect.restoreKeys}. */
+export interface RestoreKeysOptions {
+  /** Called when the wallet is prompted to sign the restore transaction. */
+  onSigningRestore?: () => void
+  /** Called right before the restore transaction is submitted. */
+  onSubmittingRestore?: () => void
+  /** Called after the restore transaction is submitted. */
+  onRestoreSubmitted?: (txHash: TxHash) => void
+  /** Called after the restore transaction is confirmed on-chain. */
+  onRestoreConfirmed?: (txHash: TxHash) => void
 }
 
 /**

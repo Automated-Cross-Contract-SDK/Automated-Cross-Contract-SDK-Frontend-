@@ -422,7 +422,7 @@ export function buildContractDataKey(
  * ```
  */
 export async function checkArchivedContractData(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   contractId: ContractIdHex | string,
   key: xdr.ScVal,
   keyType: 'persistent' | 'temporary' = 'persistent',
@@ -458,12 +458,84 @@ export async function checkArchivedContractData(
  * ```
  */
 export async function getContractDataEntry(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   contractId: ContractIdHex | string,
   key: xdr.ScVal,
   keyType: 'persistent' | 'temporary' = 'persistent',
 ): Promise<rpc.Api.LedgerEntryResult | null> {
   const ledgerKey = buildContractDataKey(contractId, key, keyType)
+
+  try {
+    const result = await server.getLedgerEntries(ledgerKey)
+    if (result.entries && result.entries.length > 0) {
+      return result.entries[0]
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Builds a ContractCode ledger key for a given wasm hash. ContractCode
+ * entries store the wasm bytecode for a deployed contract and, like
+ * ContractData entries, expire and can be restored via `restoreFootprint`.
+ *
+ * @param wasmHash - The wasm hash as a 64-char hex string (as returned by
+ *   `Operation.uploadContractWasm`/`installContractWasm` responses), or a
+ *   raw `Buffer`/`Uint8Array`.
+ * @returns An xdr.LedgerKey for the ContractCode entry.
+ *
+ * @example
+ * ```ts
+ * const key = buildContractCodeKey(wasmHashHex)
+ * const archived = await checkArchivedContractCode(server, wasmHashHex)
+ * ```
+ */
+export function buildContractCodeKey(
+  wasmHash: HexString | string | Buffer | Uint8Array,
+): xdr.LedgerKey {
+  const hash =
+    typeof wasmHash === 'string'
+      ? Buffer.from((wasmHash.match(/.{1,2}/g) ?? []).map((b) => parseInt(b, 16)))
+      : Buffer.from(wasmHash)
+
+  const contractCode = new xdr.LedgerKeyContractCode({ hash })
+
+  return xdr.LedgerKey.contractCode(contractCode)
+}
+
+/**
+ * Checks whether a contract's wasm (ContractCode) ledger entry is archived
+ * (expired / not found on the ledger). Useful before a contract upgrade or
+ * deployment that references an existing wasm hash.
+ *
+ * @param server   - Soroban RPC server instance.
+ * @param wasmHash - The wasm hash as a hex string or raw bytes.
+ * @returns `true` if the entry is archived (not found), `false` if it exists.
+ */
+export async function checkArchivedContractCode(
+  server: ISorobanRpcClient,
+  wasmHash: HexString | string | Buffer | Uint8Array,
+): Promise<boolean> {
+  const ledgerKey = buildContractCodeKey(wasmHash)
+  const archived = await detectArchivedEntries(server, [ledgerKey])
+  return archived.length > 0
+}
+
+/**
+ * Retrieves a contract's wasm (ContractCode) ledger entry.
+ * Returns the ledger entry data if it exists, or `null` if archived / not found.
+ *
+ * @param server   - Soroban RPC server instance.
+ * @param wasmHash - The wasm hash as a hex string or raw bytes.
+ * @returns The ledger entry if found, otherwise `null`.
+ */
+export async function getContractCodeEntry(
+  server: ISorobanRpcClient,
+  wasmHash: HexString | string | Buffer | Uint8Array,
+): Promise<rpc.Api.LedgerEntryResult | null> {
+  const ledgerKey = buildContractCodeKey(wasmHash)
 
   try {
     const result = await server.getLedgerEntries(ledgerKey)
