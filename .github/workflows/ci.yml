@@ -7,6 +7,22 @@ on:
     branches: [main]
 
 jobs:
+  npm-audit:
+    name: npm-audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Audit production dependencies (fail on unallowlisted high/critical)
+        run: node scripts/check-audit.mjs
+
   ci:
     runs-on: ubuntu-latest
     strategy:
@@ -53,8 +69,8 @@ jobs:
 
       - uses: codecov/codecov-action@v4
         with:
-          files: packages/adapter-albedo/coverage/lcov.info,packages/adapter-freighter/coverage/lcov.info,packages/adapter-lobstr/coverage/lcov.info,packages/adapter-xbull/coverage/lcov.info,packages/react-hook/coverage/lcov.info,packages/sdk/coverage/lcov.info,packages/svelte-hook/coverage/lcov.info,packages/vue-hook/coverage/lcov.info
-          fail_ci_if_error: false
+          files: packages/sdk/coverage/lcov.info,packages/react-hook/coverage/lcov.info
+          fail_ci_if_error: true
 
       - name: Build (all packages via Turbo)
         run: npm run build

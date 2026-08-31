@@ -223,7 +223,7 @@ The SDK implements the complete [CAP-0066](https://github.com/stellar/stellar-pr
 constructor(config: SorobanResurrectConfig)
 
 // Properties
-server: ISorobanRpcClient        // config.rpcClient when supplied, else an auto-created client
+server: ISorobanRpcClient       // Injectable RPC transport (defaults to a SorobanRpcClient built from rpcUrl)
 config: Required<SorobanResurrectConfig>
 state: RestoreState              // Current state machine state
 stateInfo: RestoreStateInfo      // State + message + archived keys + error
@@ -239,10 +239,24 @@ reset(fromState?: RestoreState): void
 onStateChange(listener: (info: RestoreStateInfo) => void): () => void  // unsubscribe
 ```
 
-> There is no `estimateRestoreCost` method. To project a restore's fee ahead of
-> time, simulate the transaction and compute
-> `Number(response.minResourceFee) * sdk.config.restoreFeeMultiplier` — see
-> [Choosing `restoreFeeMultiplier`](docs/api/types.md#choosing-restorefeemultiplier).
+#### RPC Client Injection
+
+Inject a custom RPC transport — a caching proxy, a logging wrapper, or a
+test double — via `config.rpcClient` instead of letting the SDK build one
+from `rpcUrl`:
+
+```typescript
+import { createRpcClient, SorobanResurrect } from '@soroban-resurrect/sdk'
+
+const client = createRpcClient('https://soroban-testnet.stellar.org')
+const sdk = new SorobanResurrect({ rpcUrl: '...', rpcClient: client })
+```
+
+`createRpcClient`, `SorobanRpcClient`, and the `ISorobanRpcClient` interface
+are all exported from `@soroban-resurrect/sdk`. See
+[RPC Client Injection](docs/API.md#rpc-client-injection) in the API
+reference for the caching/logging wrapper and test-double patterns, and a
+runnable example in [`docs/guide/rpc-client-injection.md`](docs/guide/rpc-client-injection.md).
 
 ### React Hook
 
@@ -275,11 +289,7 @@ interface SorobanResurrectConfig {
   networkPassphrase?: string // default: resolved from rpcUrl, else Testnet
   pollIntervalMs?: number // default: 1000
   pollTimeoutMs?: number // default: 60000
-  restoreFeeMultiplier?: number // default: 3
-  archiveDetectionMethod?: 'simulation' | 'direct' // default: 'simulation'
-  enableSimulationCache?: boolean // default: false
-  useSSE?: boolean // default: false
-  rpcClient?: ISorobanRpcClient // default: auto-created SorobanRpcClient(rpcUrl)
+  rpcClient?: ISorobanRpcClient // default: a SorobanRpcClient built from rpcUrl — inject to customize the RPC transport
 }
 ```
 
