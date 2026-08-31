@@ -119,6 +119,17 @@ export interface ISorobanRpcClient {
    * Used as the starting point for TTL calculations and SSE streaming.
    */
   getLatestLedger(): Promise<rpc.Api.GetLatestLedgerResponse>
+
+  /**
+   * The base URL of the underlying RPC endpoint, if known.
+   *
+   * Used by {@link waitForTransactionSSE} in `Restorer.ts` to open an SSE
+   * stream without reaching into `rpc.Server`'s undocumented internals.
+   * Implementations that don't expose a URL (e.g. some test doubles or
+   * custom transports) may omit it — SSE waiting then falls back to
+   * adaptive polling.
+   */
+  readonly serverURL?: string
 }
 
 // ---------------------------------------------------------------------------
