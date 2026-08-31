@@ -14,6 +14,7 @@ import type {
   SequenceNumber,
   HistoryEntryId,
 } from './branded-types.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
 
 export type {
   TxHash,
@@ -59,10 +60,32 @@ export interface SorobanResurrectConfig {
   restoreFeeMultiplier?: number
   /** Method for detecting archived keys: 'simulation' (default) or 'direct'. */
   archiveDetectionMethod?: 'simulation' | 'direct'
+  /**
+   * Ledger keys per `getLedgerEntries` request during 'direct' archive
+   * detection (default: 50). Lower it if the RPC endpoint rejects large
+   * batches.
+   */
+  archiveDetectionChunkSize?: number
+  /**
+   * Number of `getLedgerEntries` requests kept in flight at once during
+   * 'direct' archive detection (default: 4). Raise it for faster detection on
+   * large footprints, lower it to stay under a rate limit.
+   */
+  archiveDetectionConcurrency?: number
   /** Enable simulation cache to reuse results and reduce RPC calls (default: false). */
   enableSimulationCache?: boolean
   /** Use SSE-based transaction status waiting when available (default: false). */
   useSSE?: boolean
+  /** Per-call timeout in ms for RPC calls made through the resilient transport (default: 10000). */
+  rpcTimeoutMs?: number
+  /** Number of retries (beyond the initial attempt) for transient RPC failures (default: 2). */
+  rpcRetryCount?: number
+  /** Base backoff in ms between RPC retries; doubles each attempt with jitter (default: 250). */
+  rpcRetryBackoffMs?: number
+  /** Consecutive RPC failures before the circuit breaker trips and fails fast (default: 5). */
+  rpcCircuitBreakerThreshold?: number
+  /** Cooldown in ms the circuit breaker stays open before allowing calls through again (default: 30000). */
+  rpcCircuitBreakerCooldownMs?: number
   /**
    * Default polling cadence (ms) for `watchTTL()` when a call doesn't
    * override it via `TTLWatchOptions.intervalMs`. Defaults to 60_000 (1 min).
@@ -162,6 +185,19 @@ export interface FeeBumpConfig {
    * If not provided, defaults to the inner transaction's fee.
    */
   feeBumpFee?: FeeStroops | string
+}
+
+/**
+ * Tuning options for chunked, parallel archive detection.
+ *
+ * @see {@link SorobanResurrectConfig.archiveDetectionChunkSize}
+ * @see {@link SorobanResurrectConfig.archiveDetectionConcurrency}
+ */
+export interface ArchiveDetectionOptions {
+  /** Ledger keys per `getLedgerEntries` request (default 50). */
+  chunkSize?: number
+  /** Requests issued in parallel (default 4). */
+  concurrency?: number
 }
 
 /** Represents a single ledger entry that has been archived (expired TTL). */
@@ -302,10 +338,8 @@ export interface SorobanResurrectEvents {
   restoreComplete: ResurrectResult
   /** Fired when the workflow fails, with the error message. */
   error: string
-  /** Fired by `watchTTL()` when one or more watched entries cross the configured threshold. */
-  ttlLow: LedgerEntryTTLInfo[]
-  /** Fired by `watchTTL()` after an auto-extend restore transaction confirms. */
-  ttlExtended: { restoreTxHash: TxHash; entries: LedgerEntryTTLInfo[] }
+  /** Fired after `switchNetwork()` re-binds the RPC client and network passphrase. */
+  networkChanged: { rpcUrl: string; networkPassphrase: string }
 }
 
 // ---------------------------------------------------------------------------

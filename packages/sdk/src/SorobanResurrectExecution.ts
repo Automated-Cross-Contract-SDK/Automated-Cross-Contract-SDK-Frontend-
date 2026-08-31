@@ -17,8 +17,8 @@ import { isRestoreResponse } from './Archiver.js'
 import { TransactionHistory, TransactionHistoryEntry } from './TransactionHistory.js'
 import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
 import { SorobanResurrectSimulator } from './SorobanResurrectSimulation.js'
-import { DEFAULT_NETWORK_PASSPHRASE, POLL_INTERVAL_MS, POLL_TIMEOUT_MS } from './constants.js'
-import { asXdrBase64, asTxHash, type TxHash } from './branded-types.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
+import { asTxHash, asHistoryEntryId } from './branded-types.js'
 
 /**
  * Handles all transaction execution concerns for a `SorobanResurrect` instance:
@@ -35,20 +35,20 @@ import { asXdrBase64, asTxHash, type TxHash } from './branded-types.js'
  * and `SorobanResurrectSimulator` for simulation / archive detection.
  */
 export class SorobanResurrectExecutor {
-  private readonly _server: rpc.Server
-  private readonly _config: Required<SorobanResurrectConfig>
+  private _server: ISorobanRpcClient
+  private _config: Required<SorobanResurrectConfig>
   private readonly _stateMgr: SorobanResurrectStateManager
   private readonly _simulator: SorobanResurrectSimulator
   private readonly _history = new TransactionHistory()
 
   /**
-   * @param server    - Soroban RPC server instance.
+   * @param server    - Soroban RPC client instance.
    * @param config    - Fully resolved SDK configuration.
    * @param stateMgr  - Shared state manager for state transitions and events.
    * @param simulator - Simulation/detection helper for the same instance.
    */
   constructor(
-    server: rpc.Server,
+    server: ISorobanRpcClient,
     config: Required<SorobanResurrectConfig>,
     stateMgr: SorobanResurrectStateManager,
     simulator: SorobanResurrectSimulator,
@@ -57,6 +57,15 @@ export class SorobanResurrectExecutor {
     this._config = config
     this._stateMgr = stateMgr
     this._simulator = simulator
+  }
+
+  /**
+   * Re-binds this executor to a new RPC client / config in place, keeping
+   * history and the state manager intact. Used by `SorobanResurrect.switchNetwork`.
+   */
+  rebind(server: ISorobanRpcClient, config: Required<SorobanResurrectConfig>): void {
+    this._server = server
+    this._config = config
   }
 
   // ---------------------------------------------------------------------------
@@ -186,17 +195,14 @@ export class SorobanResurrectExecutor {
 
       onRestoreSubmitted: (txHash: string) => {
         stateMgr.setState('confirming_restore', 'Waiting for restore confirmation...')
-        emitter.emit('restoreSubmitted', txHash)
-        onRestoreSubmitted?.(txHash)
+        emitter.emit('restoreSubmitted', asTxHash(txHash))
+        onRestoreSubmitted?.(asTxHash(txHash))
       },
 
       onRestoreConfirmed: (txHash: string) => {
-        stateMgr.setState(
-          'submitting_original',
-          'Restore confirmed. Preparing original transaction...',
-        )
-        emitter.emit('restoreConfirmed', txHash)
-        onRestoreConfirmed?.(txHash)
+        stateMgr.setState('submitting_original', 'Restore confirmed. Preparing original transaction...')
+        emitter.emit('restoreConfirmed', asTxHash(txHash))
+        onRestoreConfirmed?.(asTxHash(txHash))
       },
 
       onSigningOriginal: () => {
@@ -206,8 +212,8 @@ export class SorobanResurrectExecutor {
 
       onOriginalSubmitted: (txHash: string) => {
         stateMgr.setState('success', 'Original transaction submitted successfully')
-        emitter.emit('originalSubmitted', txHash)
-        onOriginalSubmitted?.(txHash)
+        emitter.emit('originalSubmitted', asTxHash(txHash))
+        onOriginalSubmitted?.(asTxHash(txHash))
       },
 
       onRestoreFailed: (error: string) => {
@@ -245,12 +251,13 @@ export class SorobanResurrectExecutor {
    * @throws {Error} If no history entry exists for `entryId`.
    */
   async retry(entryId: string, wallet: WalletAdapter): Promise<ResurrectResult> {
-    const entry = this._history.get(entryId)
+    const id = asHistoryEntryId(entryId)
+    const entry = this._history.get(id)
     if (!entry) {
       throw new Error(`No history entry found for id: ${entryId}`)
     }
 
-    this._history.incrementAttempt(entryId)
+    this._history.incrementAttempt(id)
 
     const stateMgr = this._stateMgr
 
@@ -287,7 +294,7 @@ export class SorobanResurrectExecutor {
       },
     })
 
-    this._history.update(entryId, result)
+    this._history.update(id, result)
 
     if (!result.success) {
       stateMgr.setError(result.error ?? 'Unknown error')

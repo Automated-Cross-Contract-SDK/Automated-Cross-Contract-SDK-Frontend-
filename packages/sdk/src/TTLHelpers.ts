@@ -2,6 +2,7 @@ import { rpc, xdr } from '@stellar/stellar-sdk'
 import { ArchivedLedgerEntry } from './types.js'
 import type { ISorobanRpcClient } from './RpcClient.js'
 import { asXdrBase64, type XdrBase64 } from './branded-types.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
 
 /**
  * Average ledger close time in seconds. Used for estimating time remaining

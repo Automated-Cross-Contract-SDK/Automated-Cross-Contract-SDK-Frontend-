@@ -10,19 +10,12 @@ import { SorobanResurrectConfig, FeeBumpSponsor, ArchivedLedgerEntry } from './t
 import type { ISorobanRpcClient } from './RpcClient.js'
 import { DEFAULT_NETWORK_PASSPHRASE } from './constants.js'
 import { calculateRestoreFee } from './feeCalculation.js'
-import { isRestoreResponse, extractArchivedKeys } from './Archiver.js'
-import {
-  asXdrBase64,
-  type StellarPublicKey,
-  type SequenceNumber,
-  type TxHash,
-  type XdrBase64,
-} from './branded-types.js'
+import { ISorobanRpcClient } from './RpcClient.js'
 
 /** Parameters for building a restore transaction. */
 export interface BuildRestoreTxParams {
   /** Soroban RPC server instance. */
-  server: rpc.Server
+  server: ISorobanRpcClient
   /** Source account public key (Stellar G-address). */
   sourcePublicKey: StellarPublicKey | string
   /** Soroban transaction data from the simulation response. */
@@ -107,7 +100,7 @@ export async function buildRestoreTransaction(params: BuildRestoreTxParams): Pro
  * the RPC endpoint. Delay starts at 100ms and doubles on each retry, capped at
  * pollIntervalMs, with random jitter of ±50%.
  *
- * @param server - Soroban RPC server instance.
+ * @param server - RPC client used to poll for transaction status.
  * @param hash - Hash of the submitted transaction to poll for.
  * @param pollIntervalMs - Maximum delay between polls, in ms (default `1000`).
  * @param pollTimeoutMs - Total time to keep polling before giving up, in ms
@@ -124,7 +117,7 @@ export async function buildRestoreTransaction(params: BuildRestoreTxParams): Pro
  * ```
  */
 export async function waitForTransaction(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   hash: TxHash | string,
   pollIntervalMs: number = 1000,
   pollTimeoutMs: number = 60_000,
@@ -175,10 +168,17 @@ function isTerminalStatus(status: string): boolean {
  * @private
  */
 async function streamTransactionViaEvents(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   hash: TxHash | string,
   timeoutMs: number,
 ): Promise<rpc.Api.GetTransactionResponse | null> {
+  // SSE relies on browser-standard fetch/AbortController with a readable
+  // stream body. Older Node runtimes (< 18) may lack these — degrade
+  // gracefully to the polling fallback instead of throwing.
+  if (typeof fetch === 'undefined' || typeof AbortController === 'undefined') {
+    return null
+  }
+
   // Determine the latest ledger as a starting point for SSE streaming.
   // We try getLatestLedger first, then fall back to the transaction's latestLedger.
   let startLedger: number
@@ -200,14 +200,10 @@ async function streamTransactionViaEvents(
     }
   }
 
-  // Extract the base URL from the server.
-  // NOTE: serverURL is part of the Stellar SDK's internal API surface.
-  // It may change across major versions; fall back gracefully if unavailable.
-  const serverURL =
-    typeof (server as any).serverURL === 'string'
-      ? (server as any).serverURL
-      : ((server as any).serverURL?.toString?.() ?? '')
-
+  // The base URL is plumbed through ISorobanRpcClient.serverURL rather than
+  // reaching into rpc.Server's undocumented internals. Implementations that
+  // don't expose it degrade gracefully to the polling fallback.
+  const serverURL = server.serverURL
   if (!serverURL) {
     return null
   }
@@ -330,14 +326,16 @@ async function pollTransactionAdaptive(
  * falls back to an adaptive polling strategy for lower latency than the
  * default exponential-backoff poller.
  *
- * @param server - Soroban RPC server instance
+ * @param server - RPC client used for all Soroban network calls. SSE
+ *   requires `server.serverURL` to be set; if it's absent, SSE is skipped
+ *   and polling is used directly.
  * @param hash - Transaction hash to wait for
  * @param pollTimeoutMs - Maximum time to wait in milliseconds (default: 60s)
  * @returns The final transaction response
  * @throws If the transaction does not complete within the timeout
  */
 export async function waitForTransactionSSE(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   hash: TxHash | string,
   pollTimeoutMs: number = 60_000,
 ): Promise<rpc.Api.GetTransactionResponse> {
@@ -579,7 +577,7 @@ export async function buildFeeBumpTransaction(
  * @returns The send transaction response with the hash.
  */
 export async function submitFeeBumpTransaction(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   feeBumpXdr: XdrBase64 | string,
   networkPassphrase: string,
 ): Promise<rpc.Api.SendTransactionResponse> {
