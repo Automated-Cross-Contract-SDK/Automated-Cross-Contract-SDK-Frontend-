@@ -43,10 +43,7 @@ export type { LedgerEntryTTLInfo, TTLQueryResult } from './TTLHelpers.js'
 // ---------------------------------------------------------------------------
 // Transaction history (returned by SorobanResurrect.history / getHistory)
 // ---------------------------------------------------------------------------
-export type {
-  TransactionHistoryEntry,
-  TransactionAttemptStatus,
-} from './TransactionHistory.js'
+export type { TransactionHistoryEntry, TransactionAttemptStatus } from './TransactionHistory.js'
 
 // ---------------------------------------------------------------------------
 // Hardware wallet adapters
@@ -75,6 +72,18 @@ export {
 // Typed event emitter (used by SorobanResurrect.on / once / off)
 // ---------------------------------------------------------------------------
 export { TypedEventEmitter } from './EventEmitter.js'
+export {
+  ok,
+  err,
+  some,
+  none,
+  toResult,
+  toResultAsync,
+  fromNullable,
+  extractArchivedKeysSafe,
+  extractFootprintFromSuccessSafe,
+} from './result.js'
+export type { Result, Option } from './result.js'
 export { resolveConfig } from './SorobanResurrectConfig.js'
 export type { ResolvedConfig } from './SorobanResurrectConfig.js'
 export { SorobanResurrectStateManager } from './SorobanResurrectState.js'
@@ -87,8 +96,5 @@ export {
   getExpiringSoonEntries,
   getArchivedEntries,
 } from './TTLHelpers.js'
-export type {
-  TransactionHistoryEntry,
-  TransactionAttemptStatus,
-} from './TransactionHistory.js'
+export type { TransactionHistoryEntry, TransactionAttemptStatus } from './TransactionHistory.js'
 export { TransactionHistory } from './TransactionHistory.js'
