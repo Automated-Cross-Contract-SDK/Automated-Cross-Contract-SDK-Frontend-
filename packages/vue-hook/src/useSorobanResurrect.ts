@@ -26,8 +26,14 @@ import type { Transaction } from '@stellar/stellar-sdk'
 export interface UseSorobanResurrectReturn {
   /** Current workflow state snapshot. */
   state: ReturnType<typeof ref<RestoreStateInfo>>
-  /** Whether a restore/submit operation is in progress. */
+  /** Whether a restore/submit operation is in progress. Derived from `state`. */
   isProcessing: ComputedRef<boolean>
+  /** Whether the workflow is idle (no operation started or fully reset). */
+  isIdle: ComputedRef<boolean>
+  /** Whether the last operation completed successfully. */
+  isSuccess: ComputedRef<boolean>
+  /** Whether the last operation ended in an error. */
+  isError: ComputedRef<boolean>
   /** Submit a transaction with automatic archive restoration. */
   submitWithRestore: (transaction: Transaction, wallet: WalletAdapter) => Promise<ResurrectResult>
   /** Check if a transaction requires archive restoration. */
@@ -35,9 +41,9 @@ export interface UseSorobanResurrectReturn {
   /** Reset state back to idle. Optionally, only reset if in a specific state. */
   reset: (fromState?: RestoreState) => void
   /**
-   * Subscribes to a typed SDK lifecycle event. Always binds to the current
-   * SDK instance, so it keeps working across a config change that
-   * recreates it. Returns an unsubscribe function.
+   * Subscribes to a typed lifecycle event (`restoreNeeded`, `restoreSubmitted`,
+   * `restoreConfirmed`, `originalSubmitted`, `error`, `restoreComplete`, `stateChange`)
+   * on the current SDK instance. Returns an unsubscribe function.
    */
   on: <K extends keyof SorobanResurrectEvents>(
     event: K,
@@ -94,7 +100,12 @@ export function useSorobanResurrect(
     }
   })
 
+  // Derived helpers so consumers don't re-implement state checks. `isProcessing`
+  // reuses the SDK's shared `isProcessingState` (single source of truth).
   const isProcessing = computed(() => isProcessingState(state.value.state))
+  const isIdle = computed(() => state.value.state === 'idle')
+  const isSuccess = computed(() => state.value.state === 'success')
+  const isError = computed(() => state.value.state === 'error')
 
   const submitWithRestore = async (
     transaction: Transaction,
@@ -118,15 +129,16 @@ export function useSorobanResurrect(
   const on = <K extends keyof SorobanResurrectEvents>(
     event: K,
     listener: (payload: SorobanResurrectEvents[K]) => void,
-  ) => {
-    // Before the SDK instance exists there is nothing to subscribe to; the
-    // no-op unsubscribe matches the shape a real one would have.
-    return resurrect.value ? resurrect.value.on(event, listener) : () => {}
+  ): (() => void) => {
+    return resurrect.value?.on(event, listener) ?? (() => {})
   }
 
   return {
     state,
     isProcessing,
+    isIdle,
+    isSuccess,
+    isError,
     submitWithRestore,
     detectArchivedKeys,
     reset,

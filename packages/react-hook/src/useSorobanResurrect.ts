@@ -31,15 +31,9 @@ export interface UseSorobanResurrectReturn {
   /** Reset state back to idle. Optionally, only reset if in a specific state. */
   reset: (fromState?: RestoreState) => void
   /**
-   * Subscribes to a typed SDK lifecycle event (`restoreSubmitted`,
-   * `restoreConfirmed`, `originalSubmitted`, `error`, `restoreComplete`,
-   * `restoreNeeded`, `stateChange`) without reaching into `resurrect`
-   * directly. Always binds to the current SDK instance, so it keeps working
-   * across a config change that recreates the instance — a listener
-   * attached via `resurrect.on(...)` captured before that point would be
-   * subscribed to the discarded instance instead.
-   *
-   * @returns An unsubscribe function.
+   * Subscribes to a typed lifecycle event (`restoreNeeded`, `restoreSubmitted`,
+   * `restoreConfirmed`, `originalSubmitted`, `error`, `restoreComplete`, `stateChange`)
+   * on the current SDK instance. Returns an unsubscribe function.
    */
   on: <K extends keyof SorobanResurrectEvents>(
     event: K,
@@ -117,13 +111,12 @@ export function useSorobanResurrect(
     resurrectRef.current!.reset(fromState)
   }, [])
 
-  const on = useCallback(
-    <K extends keyof SorobanResurrectEvents>(
-      event: K,
-      listener: (payload: SorobanResurrectEvents[K]) => void,
-    ) => resurrectRef.current!.on(event, listener),
-    [],
-  )
+  const on = useCallback(<K extends keyof SorobanResurrectEvents>(
+    event: K,
+    listener: (payload: SorobanResurrectEvents[K]) => void,
+  ) => {
+    return resurrectRef.current!.on(event, listener)
+  }, [])
 
   const isProcessing = isProcessingState(state.state)
 

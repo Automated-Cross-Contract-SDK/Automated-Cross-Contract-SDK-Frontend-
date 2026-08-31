@@ -4,7 +4,7 @@ import {
   getAddress,
   signTransaction as freighterSignTransaction,
 } from '@stellar/freighter-api'
-import type { WalletAdapter } from '@soroban-resurrect/sdk'
+import type { WalletAdapter, WalletCapabilities } from '@soroban-resurrect/sdk'
 import { asStellarPublicKey, asXdrBase64 } from '@soroban-resurrect/sdk'
 
 /**
@@ -12,6 +12,17 @@ import { asStellarPublicKey, asXdrBase64 } from '@soroban-resurrect/sdk'
  * Wraps `@stellar/freighter-api` to satisfy the SDK's WalletAdapter contract.
  */
 export class FreighterAdapter implements WalletAdapter {
+  /**
+   * Freighter is a software extension wallet. This adapter signs full
+   * transaction envelopes (including fee-bump envelopes) via `signTransaction`;
+   * it does not wire up CAP-0046 per-entry signing.
+   */
+  readonly capabilities: WalletCapabilities = {
+    signAuthEntry: false,
+    feeBump: true,
+    hardware: false,
+  }
+
   async isConnected(): Promise<boolean> {
     const result = await freighterIsConnected()
     if ('error' in result && result.error) {

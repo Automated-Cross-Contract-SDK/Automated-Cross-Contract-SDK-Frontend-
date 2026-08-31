@@ -33,6 +33,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@vitest/coverage-v8": "^2.1.9",
     "eslint": "^10.7.0",
     "eslint-config-prettier": "^10.1.8",
     "husky": "^9.1.7",
@@ -41,5 +42,9 @@
     "turbo": "^2.5.4",
     "typescript": "^5.5.0",
     "typescript-eslint": "^8.63.0"
+  },
+  "overrides": {
+    "undici": "^7.29.0",
+    "nanoid": "^3.3.18"
   }
 }
