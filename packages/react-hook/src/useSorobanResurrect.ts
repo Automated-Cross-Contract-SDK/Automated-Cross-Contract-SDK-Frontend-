@@ -85,10 +85,7 @@ export function useSorobanResurrect(
   })
 
   // Track config changes and reinitialize SDK when config updates
-  if (
-    !prevConfigRef.current ||
-    JSON.stringify(config) !== JSON.stringify(prevConfigRef.current)
-  ) {
+  if (!prevConfigRef.current || JSON.stringify(config) !== JSON.stringify(prevConfigRef.current)) {
     prevConfigRef.current = config
     resurrectRef.current = new SorobanResurrect(config)
   }

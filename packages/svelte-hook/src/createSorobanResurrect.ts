@@ -218,6 +218,13 @@ export function createSorobanResurrect(
     return resurrect.on(event, listener)
   }
 
+  const on = <K extends keyof SorobanResurrectEvents>(
+    event: K,
+    listener: (payload: SorobanResurrectEvents[K]) => void,
+  ) => {
+    return resurrect.on(event, listener)
+  }
+
   const destroy = () => {
     if (unsubscribeState) {
       unsubscribeState()

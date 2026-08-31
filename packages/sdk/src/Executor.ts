@@ -172,7 +172,7 @@ async function waitForTx(
   const pollTimeout = config.pollTimeoutMs ?? POLL_TIMEOUT_MS
 
   if (config.useSSE) {
-    return waitForTransactionSSE(server, hash, pollTimeout)
+    return waitForTransactionSSE(server, hash, pollTimeout, config.rpcUrl)
   }
 
   const pollInterval = config.pollIntervalMs ?? POLL_INTERVAL_MS

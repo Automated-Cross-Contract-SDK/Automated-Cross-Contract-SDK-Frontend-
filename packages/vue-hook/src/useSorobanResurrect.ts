@@ -117,9 +117,7 @@ export function useSorobanResurrect(
     return resurrect.value.submitWithRestore({ transaction, wallet })
   }
 
-  const detectArchivedKeys = async (
-    transaction: Transaction,
-  ): Promise<ArchivedLedgerEntry[]> => {
+  const detectArchivedKeys = async (transaction: Transaction): Promise<ArchivedLedgerEntry[]> => {
     if (!resurrect.value) return []
     return resurrect.value.detectArchivedKeys(transaction)
   }
