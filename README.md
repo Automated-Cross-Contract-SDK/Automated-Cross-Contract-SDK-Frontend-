@@ -322,6 +322,7 @@ useSorobanResurrectContext(): {
   submitWithRestore(tx, wallet): Promise<ResurrectResult>
   detectArchivedKeys(tx): Promise<ArchivedLedgerEntry[]>
   reset(fromState?: RestoreState): void
+  on<K extends keyof SorobanResurrectEvents>(event: K, listener: (payload: SorobanResurrectEvents[K]) => void): () => void
 }
 
 // Standalone Hook

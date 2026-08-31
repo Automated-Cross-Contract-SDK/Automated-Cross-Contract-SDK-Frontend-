@@ -26,6 +26,7 @@ test double / swap the RPC client in tests, see
 - [`@soroban-resurrect/react-hook`](#soroban-resurrectreact-hook)
   - [`SorobanResurrectProvider` / `useSorobanResurrectContext`](#sorobanresurrectprovider--usesorobanresurrectcontext)
   - [`useSorobanResurrect`](#usesorobanresurrect)
+- [Testing with an injected RPC client](#testing-with-an-injected-rpc-client)
 
 ---
 
@@ -343,3 +344,76 @@ function WithdrawButton() {
 > Both `SorobanResurrectProvider` and `useSorobanResurrect` re-instantiate
 > the underlying `SorobanResurrect` (and reset state to `idle`) whenever
 > the `config` object changes by value.
+
+---
+
+## Testing with an injected RPC client
+
+Source: [`RpcClient.ts`](../packages/sdk/src/RpcClient.ts)
+
+`SorobanResurrect.server` is `public readonly` and every internal caller
+(`SorobanResurrectExecutor`, `SorobanResurrectSimulator`) captures its own
+private reference to it at construction time — so **reassigning `sdk.server`
+after construction does nothing**, both because TypeScript's `readonly`
+rejects the assignment and because the internals wouldn't see it even if it
+compiled. The supported way to drive a deterministic workflow in a test is
+`config.rpcClient`, passed at construction: implement
+{@link ISorobanRpcClient} (six methods: `simulateTransaction`,
+`sendTransaction`, `getTransaction`, `getAccount`, `getLedgerEntries`,
+`getLatestLedger`) and the SDK uses it for every RPC call instead of
+constructing its own `rpc.Server` from `rpcUrl`.
+
+```typescript
+import { SorobanResurrect, type ISorobanRpcClient } from '@soroban-resurrect/sdk'
+
+// A minimal test double. TypeScript enforces every method is present —
+// omitting one is a compile error, not a runtime surprise partway through a test.
+const rpcClient: ISorobanRpcClient = {
+  simulateTransaction: vi.fn(),
+  sendTransaction: vi.fn(),
+  getTransaction: vi.fn(),
+  getAccount: vi.fn(),
+  getLedgerEntries: vi.fn(),
+  getLatestLedger: vi.fn(),
+}
+
+const resurrect = new SorobanResurrect({
+  rpcUrl: 'https://soroban-testnet.stellar.org', // still required; unused when rpcClient is set
+  rpcClient,
+})
+```
+
+### Restore-then-submit happy path
+
+Drive the full `submitWithRestore` workflow deterministically by scripting
+`simulateTransaction` to first report a restore is needed, then succeed on
+the rebuilt original transaction:
+
+```typescript
+const simulateTransaction = vi
+  .fn()
+  // 1st call: original tx simulation reports archived entries
+  .mockResolvedValueOnce(restoreNeededResponse)
+  // 2nd call: re-simulation of the rebuilt original tx succeeds
+  .mockResolvedValueOnce(successResponse)
+
+const rpcClient: ISorobanRpcClient = {
+  simulateTransaction,
+  sendTransaction: vi.fn().mockResolvedValue({ status: 'PENDING', hash: 'abc' }),
+  getTransaction: vi.fn().mockResolvedValue({ status: 'SUCCESS' }),
+  getAccount: vi.fn().mockResolvedValue(new Account(publicKey, '1')),
+  getLedgerEntries: vi.fn(),
+  getLatestLedger: vi.fn(),
+}
+
+const resurrect = new SorobanResurrect({ rpcUrl: 'https://…', rpcClient })
+const result = await resurrect.submitWithRestore({ transaction: tx, wallet })
+
+expect(result.success).toBe(true)
+expect(result.restoreTxHash).toBeDefined()
+expect(simulateTransaction).toHaveBeenCalledTimes(2)
+```
+
+The same `rpcClient` object is reused by `queryLedgerTTL`, `getExpiringSoonEntries`,
+`sendTransaction`, and every other SDK method that talks to the network — one
+injected client is enough to control an entire test.
