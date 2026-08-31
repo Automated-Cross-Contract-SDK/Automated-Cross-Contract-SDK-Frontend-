@@ -1,5 +1,6 @@
-import { rpc } from '@stellar/stellar-sdk'
-import { SorobanResurrectConfig } from './types.js'
+import type { SorobanResurrectConfig } from './types.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
+import { createRpcClient } from './RpcClient.js'
 import {
   DEFAULT_NETWORK_PASSPHRASE,
   POLL_INTERVAL_MS,
@@ -13,13 +14,13 @@ import { SimulationCache } from './SimulationCache.js'
 /**
  * Result of initialising the SDK configuration.
  *
- * Contains the fully resolved `Required<SorobanResurrectConfig>`, the
- * constructed `rpc.Server`, and an optional `SimulationCache` instance
+ * Contains the fully resolved `Required<SorobanResurrectConfig>`, the RPC
+ * client to use for network calls, and an optional `SimulationCache` instance
  * (present only when `enableSimulationCache` is `true`).
  */
 export interface ResolvedConfig {
-  /** Soroban RPC server instance bound to the configured endpoint. */
-  server: rpc.Server
+  /** Soroban RPC client bound to the configured endpoint. */
+  server: ISorobanRpcClient
   /** Resolved configuration with all optional fields filled in. */
   config: Required<SorobanResurrectConfig>
   /**
@@ -54,7 +55,7 @@ export interface ResolvedConfig {
  * ```
  */
 export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
-  const server = new rpc.Server(config.rpcUrl)
+  const server = config.rpcClient ?? createRpcClient(config.rpcUrl)
 
   const networkPassphrase =
     config.networkPassphrase ??
@@ -72,7 +73,9 @@ export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
 
   const simulationCache = config.enableSimulationCache ? new SimulationCache() : undefined
 
-  const resolved: Required<SorobanResurrectConfig> = {
+  const resolved: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & {
+    rpcClient: ISorobanRpcClient
+  } = {
     rpcUrl: config.rpcUrl,
     networkPassphrase,
     pollIntervalMs: config.pollIntervalMs ?? POLL_INTERVAL_MS,
@@ -81,6 +84,7 @@ export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
     archiveDetectionMethod: config.archiveDetectionMethod ?? 'simulation',
     enableSimulationCache: config.enableSimulationCache ?? false,
     useSSE: config.useSSE ?? false,
+    rpcClient: server,
   }
 
   return { server, config: resolved, simulationCache }

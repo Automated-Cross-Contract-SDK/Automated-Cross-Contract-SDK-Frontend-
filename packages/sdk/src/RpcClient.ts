@@ -82,9 +82,7 @@ export interface ISorobanRpcClient {
    * Simulates a transaction on the Soroban RPC endpoint.
    * Returns a success, error, or restore-required response.
    */
-  simulateTransaction(
-    transaction: Transaction,
-  ): Promise<rpc.Api.SimulateTransactionResponse>
+  simulateTransaction(transaction: Transaction): Promise<rpc.Api.SimulateTransactionResponse>
 
   /**
    * Submits a signed transaction (regular or fee-bump) to the network.
@@ -110,9 +108,7 @@ export interface ISorobanRpcClient {
    * Fetches one or more ledger entries by their XDR keys.
    * Used to check whether ledger entries are archived (missing) or live.
    */
-  getLedgerEntries(
-    ...keys: xdr.LedgerKey[]
-  ): Promise<rpc.Api.GetLedgerEntriesResponse>
+  getLedgerEntries(...keys: xdr.LedgerKey[]): Promise<rpc.Api.GetLedgerEntriesResponse>
 
   /**
    * Returns the latest ledger sequence number and its close time.
@@ -144,11 +140,22 @@ export interface ISorobanRpcClient {
  */
 export class SorobanRpcClient implements ISorobanRpcClient {
   /**
-   * The underlying `rpc.Server` instance.
-   * Exposed for advanced use-cases that need direct access to methods
-   * not covered by the {@link ISorobanRpcClient} interface (e.g. `getEvents`).
+   * Lazily-created underlying `rpc.Server` instance.
+   *
+   * Deferring construction until the first RPC call avoids paying the startup
+   * cost for an SDK instance that is created in a React render path but never
+   * used during that render.
    */
-  public readonly _server: rpc.Server
+  private _serverInstance?: rpc.Server
+
+  /**
+   * Backwards-compatible access to the underlying server instance. Accessing
+   * this property triggers the lazy initialization, which keeps the public
+   * surface stable while deferring the expensive constructor call.
+   */
+  public get _server(): rpc.Server {
+    return this.ensureServer()
+  }
 
   /**
    * The RPC endpoint URL this client was constructed with.
@@ -163,38 +170,40 @@ export class SorobanRpcClient implements ISorobanRpcClient {
    *   Example: `"https://soroban-testnet.stellar.org"`
    */
   constructor(rpcUrl: string) {
-    this._server = new rpc.Server(rpcUrl)
     this.serverURL = rpcUrl
   }
 
-  simulateTransaction(
-    transaction: Transaction,
-  ): Promise<rpc.Api.SimulateTransactionResponse> {
-    return this._server.simulateTransaction(transaction)
+  private ensureServer(): rpc.Server {
+    if (!this._serverInstance) {
+      this._serverInstance = new rpc.Server(this.serverURL)
+    }
+    return this._serverInstance
+  }
+
+  simulateTransaction(transaction: Transaction): Promise<rpc.Api.SimulateTransactionResponse> {
+    return this.ensureServer().simulateTransaction(transaction)
   }
 
   sendTransaction(
     transaction: Transaction | import('@stellar/stellar-sdk').FeeBumpTransaction,
   ): Promise<rpc.Api.SendTransactionResponse> {
-    return this._server.sendTransaction(transaction)
+    return this.ensureServer().sendTransaction(transaction)
   }
 
   getTransaction(hash: string): Promise<rpc.Api.GetTransactionResponse> {
-    return this._server.getTransaction(hash)
+    return this.ensureServer().getTransaction(hash)
   }
 
   getAccount(publicKey: string): Promise<Account> {
-    return this._server.getAccount(publicKey)
+    return this.ensureServer().getAccount(publicKey)
   }
 
-  getLedgerEntries(
-    ...keys: xdr.LedgerKey[]
-  ): Promise<rpc.Api.GetLedgerEntriesResponse> {
-    return this._server.getLedgerEntries(...keys)
+  getLedgerEntries(...keys: xdr.LedgerKey[]): Promise<rpc.Api.GetLedgerEntriesResponse> {
+    return this.ensureServer().getLedgerEntries(...keys)
   }
 
   getLatestLedger(): Promise<rpc.Api.GetLatestLedgerResponse> {
-    return this._server.getLatestLedger()
+    return this.ensureServer().getLatestLedger()
   }
 }
 

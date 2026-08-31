@@ -1,4 +1,5 @@
 import { rpc, Transaction, xdr } from '@stellar/stellar-sdk'
+import type { ISorobanRpcClient } from './RpcClient.js'
 import type {
   SorobanResurrectConfig,
   WalletAdapter,
@@ -8,18 +9,14 @@ import type {
   ResurrectResult,
   SubmitWithRestoreOptions,
   SorobanResurrectEvents,
-  WalletAdapter,
 } from './types.js'
 import { resolveConfig } from './SorobanResurrectConfig.js'
 import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
 import { SorobanResurrectSimulator } from './SorobanResurrectSimulation.js'
 import { SorobanResurrectExecutor } from './SorobanResurrectExecution.js'
-import type { TransactionHistoryEntry } from './TransactionHistory.js'
-import {
-  queryLedgerTTL,
-  queryLedgerEntryTTL,
-  getExpiringSoonEntries,
-} from './TTLHelpers.js'
+import { TransactionHistory, type TransactionHistoryEntry } from './TransactionHistory.js'
+import { SimulationCache } from './SimulationCache.js'
+import { queryLedgerTTL, queryLedgerEntryTTL, getExpiringSoonEntries } from './TTLHelpers.js'
 import type { LedgerEntryTTLInfo, TTLQueryResult } from './TTLHelpers.js'
 
 /**
@@ -57,7 +54,9 @@ export class SorobanResurrect {
    */
   public readonly server: ISorobanRpcClient
   /** Resolved configuration with defaults applied. */
-  public readonly config: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & { rpcClient: ISorobanRpcClient }
+  public readonly config: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & {
+    rpcClient: ISorobanRpcClient
+  }
 
   private readonly _stateMgr: SorobanResurrectStateManager
   private readonly _simulator: SorobanResurrectSimulator
@@ -437,60 +436,5 @@ export class SorobanResurrect {
     ledgersThreshold = 100_000,
   ): Promise<LedgerEntryTTLInfo[]> {
     return getExpiringSoonEntries(this.server, keys, ledgersThreshold)
-  }
-
-  // ---------------------------------------------------------------------------
-  // Direct send (no restore)
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Signs and submits a transaction directly, without automatic archive
-   * restoration. Use `submitWithRestore` for the full workflow.
-   */
-  async sendTransaction(
-    transaction: Transaction,
-    wallet: WalletAdapter,
-  ): Promise<ResurrectResult> {
-    return sendTransaction(this.server, transaction, wallet, this.config)
-  }
-
-  // ---------------------------------------------------------------------------
-  // TTL / expiry helpers
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Queries the current TTL information for one or more ledger keys.
-   *
-   * @param keys - Ledger keys to query.
-   * @returns Aggregated TTL result with per-entry info and query metadata.
-   */
-  async queryLedgerTTL(keys: xdr.LedgerKey[]): Promise<TTLQueryResult> {
-    return _queryLedgerTTL(this.server, keys)
-  }
-
-  /**
-   * Queries the current TTL information for a single ledger key.
-   *
-   * @param key - The ledger key to query.
-   * @returns TTL info for the requested entry.
-   */
-  async queryLedgerEntryTTL(key: xdr.LedgerKey): Promise<LedgerEntryTTLInfo> {
-    return _queryLedgerEntryTTL(this.server, key)
-  }
-
-  /**
-   * Returns ledger entries that are expiring within `ledgersThreshold` ledgers,
-   * including entries that are already archived.
-   *
-   * @param keys              - Ledger keys to query.
-   * @param ledgersThreshold  - Maximum ledgers remaining to be considered
-   *   "expiring soon" (defaults to 100,000 ≈ ~5.8 days at 5 s/ledger).
-   * @returns Entries expiring within the threshold (or already archived).
-   */
-  async getExpiringSoonEntries(
-    keys: xdr.LedgerKey[],
-    ledgersThreshold = 100_000,
-  ): Promise<LedgerEntryTTLInfo[]> {
-    return _getExpiringSoonEntries(this.server, keys, ledgersThreshold)
   }
 }
