@@ -67,6 +67,19 @@ jobs:
             echo "::endgroup::"
           done
 
+      - name: Test with coverage (vue-hook)
+        run: npm run test -w packages/vue-hook -- --coverage
+
+      - name: Test with coverage (svelte-hook)
+        run: npm run test -w packages/svelte-hook -- --coverage
+
+      - name: Test with coverage (wallet adapters)
+        run: |
+          npm run test -w packages/adapter-xbull -- --coverage
+          npm run test -w packages/adapter-freighter -- --coverage
+          npm run test -w packages/adapter-albedo -- --coverage
+          npm run test -w packages/adapter-lobstr -- --coverage
+
       - uses: codecov/codecov-action@v4
         with:
           files: packages/sdk/coverage/lcov.info,packages/react-hook/coverage/lcov.info

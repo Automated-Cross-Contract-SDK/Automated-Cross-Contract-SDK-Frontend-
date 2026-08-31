@@ -113,6 +113,15 @@ export { createAdapter, isKnownWallet, SUPPORTED_WALLETS } from './createAdapter
 export type { KnownWallet, AdapterImporter, CreateAdapterOptions } from './createAdapter.js'
 
 // ---------------------------------------------------------------------------
+// Branded-type cast helpers
+//
+// Needed by first-party wallet adapter packages (adapter-freighter, -xbull,
+// -albedo, -lobstr) to brand the plain strings returned by the underlying
+// wallet libraries at the SDK boundary.
+// ---------------------------------------------------------------------------
+export { asStellarPublicKey, asXdrBase64 } from './branded-types.js'
+
+// ---------------------------------------------------------------------------
 // TTL / ledger entry helpers (returned by SorobanResurrect.queryLedgerTTL etc.)
 // ---------------------------------------------------------------------------
 export type { LedgerEntryTTLInfo, TTLQueryResult, LedgerKeyEntryType } from './TTLHelpers.js'
