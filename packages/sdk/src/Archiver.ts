@@ -91,10 +91,12 @@ export function extractArchivedKeys(
         keyBase64,
       })
     }
-  } catch {
+  } catch (err) {
+    debug('extractArchivedKeys: failed to read footprint', err)
     return keys
   }
 
+  debug('extractArchivedKeys: %d archived key(s) in restore footprint', keys.length)
   return keys
 }
 
@@ -231,7 +233,7 @@ export async function detectArchivedEntries(
     return []
   }
 
-  const chunkSize = 50
+  const chunks: xdr.LedgerKey[][] = []
   for (let i = 0; i < ledgerKeys.length; i += chunkSize) {
     const chunk = ledgerKeys.slice(i, i + chunkSize)
     try {
@@ -253,15 +255,24 @@ export async function detectArchivedEntries(
           })
         }
       }
-    } catch {
-      // On network error, conservatively treat all keys in chunk as archived
-      archived.push(
-        ...chunk.map((key) => ({
+    }
+    // Check each key in the chunk; if not in returned entries, it's archived
+    for (const key of chunk) {
+      const keyXdr = key.toXDR('base64')
+      if (!knownKeys.has(keyXdr)) {
+        archived.push({
           key,
           keyBase64: asXdrBase64(key.toXDR('base64')),
         })),
       )
     }
+  } catch (err) {
+    // On network error, conservatively treat all keys in chunk as archived
+    debug('detectArchivedEntries: chunk %d failed, assuming archived', chunkIndex, err)
+    return chunk.map((key) => ({
+      key,
+      keyBase64: key.toXDR('base64'),
+    }))
   }
 
   const workerCount = Math.min(concurrency, chunks.length)

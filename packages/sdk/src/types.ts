@@ -156,6 +156,19 @@ export interface FeeBumpConfig {
   feeBumpFee?: FeeStroops | string
 }
 
+/**
+ * Tuning options for chunked, parallel archive detection.
+ *
+ * @see {@link SorobanResurrectConfig.archiveDetectionChunkSize}
+ * @see {@link SorobanResurrectConfig.archiveDetectionConcurrency}
+ */
+export interface ArchiveDetectionOptions {
+  /** Ledger keys per `getLedgerEntries` request (default 50). */
+  chunkSize?: number
+  /** Requests issued in parallel (default 4). */
+  concurrency?: number
+}
+
 /** Represents a single ledger entry that has been archived (expired TTL). */
 export interface ArchivedLedgerEntry {
   /** The raw ledger key. */

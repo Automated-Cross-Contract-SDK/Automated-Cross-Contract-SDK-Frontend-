@@ -21,6 +21,7 @@ export type {
   FeeBumpSponsor,
   FeeBumpConfig,
   ArchivedLedgerEntry,
+  ArchiveDetectionOptions,
   SimulateResponse,
   ResurrectResult,
   DryRunResult,
