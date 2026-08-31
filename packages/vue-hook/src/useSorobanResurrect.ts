@@ -18,6 +18,7 @@ import {
   type RestoreState,
   type ArchivedLedgerEntry,
   type ResurrectResult,
+  type SorobanResurrectEvents,
 } from '@soroban-resurrect/sdk'
 import type { Transaction } from '@stellar/stellar-sdk'
 
@@ -33,6 +34,15 @@ export interface UseSorobanResurrectReturn {
   detectArchivedKeys: (transaction: Transaction) => Promise<ArchivedLedgerEntry[]>
   /** Reset state back to idle. Optionally, only reset if in a specific state. */
   reset: (fromState?: RestoreState) => void
+  /**
+   * Subscribes to a typed SDK lifecycle event. Always binds to the current
+   * SDK instance, so it keeps working across a config change that
+   * recreates it. Returns an unsubscribe function.
+   */
+  on: <K extends keyof SorobanResurrectEvents>(
+    event: K,
+    listener: (payload: SorobanResurrectEvents[K]) => void,
+  ) => () => void
   /** The underlying SDK instance. */
   resurrect: ShallowRef<SorobanResurrect | null>
 }
@@ -96,9 +106,7 @@ export function useSorobanResurrect(
     return resurrect.value.submitWithRestore({ transaction, wallet })
   }
 
-  const detectArchivedKeys = async (
-    transaction: Transaction,
-  ): Promise<ArchivedLedgerEntry[]> => {
+  const detectArchivedKeys = async (transaction: Transaction): Promise<ArchivedLedgerEntry[]> => {
     if (!resurrect.value) return []
     return resurrect.value.detectArchivedKeys(transaction)
   }
@@ -107,12 +115,22 @@ export function useSorobanResurrect(
     resurrect.value?.reset(fromState)
   }
 
+  const on = <K extends keyof SorobanResurrectEvents>(
+    event: K,
+    listener: (payload: SorobanResurrectEvents[K]) => void,
+  ) => {
+    // Before the SDK instance exists there is nothing to subscribe to; the
+    // no-op unsubscribe matches the shape a real one would have.
+    return resurrect.value ? resurrect.value.on(event, listener) : () => {}
+  }
+
   return {
     state,
     isProcessing,
     submitWithRestore,
     detectArchivedKeys,
     reset,
+    on,
     resurrect,
   }
 }

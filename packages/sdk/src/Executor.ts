@@ -75,8 +75,16 @@ async function signAndMaybeFeeBump(params: {
   onSigningFeeBump?: () => void
   onSubmitting?: () => void
 }): Promise<{ hash: TxHash }> {
-  const { tx, wallet, feeBumpConfig, networkPassphrase, server, onSigning, onSigningFeeBump, onSubmitting } =
-    params
+  const {
+    tx,
+    wallet,
+    feeBumpConfig,
+    networkPassphrase,
+    server,
+    onSigning,
+    onSigningFeeBump,
+    onSubmitting,
+  } = params
 
   onSigning?.()
   const signedXdr = await wallet.signTransaction(asXdrBase64(tx.toXDR()), { networkPassphrase })
@@ -134,14 +142,14 @@ async function simulateWithCache(
  * Helper: waits for a transaction using SSE if configured, otherwise polls.
  */
 async function waitForTx(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   hash: TxHash | string,
   config: SorobanResurrectConfig,
 ): Promise<rpc.Api.GetTransactionResponse> {
   const pollTimeout = config.pollTimeoutMs ?? POLL_TIMEOUT_MS
 
   if (config.useSSE) {
-    return waitForTransactionSSE(server, hash, pollTimeout)
+    return waitForTransactionSSE(server, hash, pollTimeout, config.rpcUrl)
   }
 
   const pollInterval = config.pollIntervalMs ?? POLL_INTERVAL_MS
@@ -193,11 +201,15 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
   const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
 
   // Extract optional fields that may not be destructured from params
-  const onSigningRestore = (params as ExecuteParams & { onSigningRestore?: () => void }).onSigningRestore
-  const onSubmittingRestore = (params as ExecuteParams & { onSubmittingRestore?: () => void }).onSubmittingRestore
-  const onSigningOriginal = (params as ExecuteParams & { onSigningOriginal?: () => void }).onSigningOriginal
+  const onSigningRestore = (params as ExecuteParams & { onSigningRestore?: () => void })
+    .onSigningRestore
+  const onSubmittingRestore = (params as ExecuteParams & { onSubmittingRestore?: () => void })
+    .onSubmittingRestore
+  const onSigningOriginal = (params as ExecuteParams & { onSigningOriginal?: () => void })
+    .onSigningOriginal
   const feeBumpConfig = (params as ExecuteParams & { feeBumpConfig?: FeeBumpConfig }).feeBumpConfig
-  const simulationCache = (params as ExecuteParams & { simulationCache?: SimulationCache }).simulationCache
+  const simulationCache = (params as ExecuteParams & { simulationCache?: SimulationCache })
+    .simulationCache
   const pollInterval = config.pollIntervalMs ?? POLL_INTERVAL_MS
   const pollTimeout = config.pollTimeoutMs ?? POLL_TIMEOUT_MS
 
@@ -256,12 +268,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       const restoreHash = asTxHash(restoreResult.hash)
       onRestoreSubmitted?.(restoreHash)
 
-      const restoreStatus = await waitForTransaction(
-        server,
-        restoreHash,
-        pollInterval,
-        pollTimeout,
-      )
+      const restoreStatus = await waitForTransaction(server, restoreHash, pollInterval, pollTimeout)
 
       if (restoreStatus.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
         const err = 'Restore transaction failed'
@@ -276,10 +283,17 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
 
       onRestoreConfirmed?.(restoreHash)
 
-      const preparedTx = await buildOriginalAfterRestore(server, originalTx, networkPassphrase, originalTx.fee)
+      const preparedTx = await buildOriginalAfterRestore(
+        server,
+        originalTx,
+        networkPassphrase,
+        originalTx.fee,
+      )
 
       onSigningOriginal?.()
-      const signedOriginalXdr = await wallet.signTransaction(asXdrBase64(preparedTx.toXDR()), { networkPassphrase })
+      const signedOriginalXdr = await wallet.signTransaction(asXdrBase64(preparedTx.toXDR()), {
+        networkPassphrase,
+      })
 
       const signedOriginalTx = TransactionBuilder.fromXDR(signedOriginalXdr, networkPassphrase)
       if (!(signedOriginalTx instanceof Transaction)) {
@@ -366,7 +380,9 @@ export async function sendTransaction(
       }
     }
 
-    const signedXdr = await wallet.signTransaction(asXdrBase64(transaction.toXDR()), { networkPassphrase })
+    const signedXdr = await wallet.signTransaction(asXdrBase64(transaction.toXDR()), {
+      networkPassphrase,
+    })
 
     const signedTx = TransactionBuilder.fromXDR(signedXdr, networkPassphrase)
     if (!(signedTx instanceof Transaction)) {

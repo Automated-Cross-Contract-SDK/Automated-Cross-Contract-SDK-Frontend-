@@ -16,6 +16,7 @@ import {
   type ArchivedLedgerEntry,
   type ResurrectResult,
   type RestoreState,
+  type SorobanResurrectEvents,
 } from '@soroban-resurrect/sdk'
 import type { Transaction } from '@stellar/stellar-sdk'
 
@@ -39,6 +40,15 @@ interface SorobanResurrectContextValue {
   detectArchivedKeys: (transaction: Transaction) => Promise<ArchivedLedgerEntry[]>
   /** Reset state back to idle. */
   reset: (fromState?: RestoreState) => void
+  /**
+   * Subscribes to a typed SDK lifecycle event. Always binds to the current
+   * SDK instance, so it keeps working across a config change that recreates
+   * it. Returns an unsubscribe function.
+   */
+  on: <K extends keyof SorobanResurrectEvents>(
+    event: K,
+    listener: (payload: SorobanResurrectEvents[K]) => void,
+  ) => () => void
 }
 
 const SorobanResurrectContext = createContext<SorobanResurrectContextValue | null>(null)
@@ -85,10 +95,7 @@ export function SorobanResurrectProvider({ config, children }: SorobanResurrectP
   })
 
   // Track config changes and reinitialize SDK when config updates
-  if (
-    !prevConfigRef.current ||
-    JSON.stringify(config) !== JSON.stringify(prevConfigRef.current)
-  ) {
+  if (!prevConfigRef.current || JSON.stringify(config) !== JSON.stringify(prevConfigRef.current)) {
     prevConfigRef.current = config
     resurrectRef.current = new SorobanResurrect(config)
   }
@@ -129,6 +136,20 @@ export function SorobanResurrectProvider({ config, children }: SorobanResurrectP
     resurrectRef.current?.reset(fromState)
   }, [])
 
+  const on = useCallback(
+    <K extends keyof SorobanResurrectEvents>(
+      event: K,
+      listener: (payload: SorobanResurrectEvents[K]) => void,
+    ) => {
+      const r = resurrectRef.current
+      // Before the SDK instance exists there is nothing to subscribe to; the
+      // no-op unsubscribe matches the shape a real one would have, so
+      // callers don't need to special-case this moment.
+      return r ? r.on(event, listener) : () => {}
+    },
+    [],
+  )
+
   const isProcessing = isProcessingState(state.state)
 
   const value: SorobanResurrectContextValue = {
@@ -139,6 +160,7 @@ export function SorobanResurrectProvider({ config, children }: SorobanResurrectP
     submitWithRestore,
     detectArchivedKeys,
     reset,
+    on,
   }
 
   return (

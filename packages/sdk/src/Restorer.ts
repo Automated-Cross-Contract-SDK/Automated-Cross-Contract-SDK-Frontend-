@@ -1,8 +1,17 @@
 import { rpc, Account, Keypair } from '@stellar/stellar-sdk'
-import { TransactionBuilder, Operation, Transaction, xdr, FeeBumpTransaction } from '@stellar/stellar-sdk'
+import {
+  TransactionBuilder,
+  Operation,
+  Transaction,
+  xdr,
+  FeeBumpTransaction,
+} from '@stellar/stellar-sdk'
 import { SorobanResurrectConfig, FeeBumpSponsor } from './types.js'
 import { DEFAULT_NETWORK_PASSPHRASE } from './constants.js'
 import { calculateRestoreFee } from './feeCalculation.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
+import type { StellarPublicKey, SequenceNumber, TxHash, XdrBase64 } from './branded-types.js'
+import { asXdrBase64 } from './branded-types.js'
 
 /** Parameters for building a restore transaction. */
 export interface BuildRestoreTxParams {
@@ -52,7 +61,14 @@ export interface BuildRestoreTxParams {
  * ```
  */
 export async function buildRestoreTransaction(params: BuildRestoreTxParams): Promise<Transaction> {
-  const { sourcePublicKey, transactionData, minResourceFee, config, account: preFetched, sequenceNumber } = params
+  const {
+    sourcePublicKey,
+    transactionData,
+    minResourceFee,
+    config,
+    account: preFetched,
+    sequenceNumber,
+  } = params
 
   const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
   let account = preFetched
@@ -142,6 +158,24 @@ function isTerminalStatus(status: string): boolean {
 }
 
 /**
+ * True when the runtime has everything `streamTransactionViaEvents` needs:
+ * `fetch`, `AbortController`, and a `TextDecoder` global. All three are
+ * standard in Node 18+ and every browser this SDK targets, but a restricted
+ * or older JS runtime (an older Node LTS, some edge/worker sandboxes, an
+ * unusual bundler target) may lack one — checking up front means SSE is
+ * skipped deterministically for such a runtime, without depending on the
+ * first `fetch(...)` call reaching that runtime's own `ReferenceError` and
+ * falling through by accident.
+ */
+function isSSEEnvironmentSupported(): boolean {
+  return (
+    typeof fetch === 'function' &&
+    typeof AbortController === 'function' &&
+    typeof TextDecoder === 'function'
+  )
+}
+
+/**
  * Opens an SSE stream to the Soroban RPC `getEvents` endpoint and watches for
  * events matching the given transaction hash.
  *
@@ -150,13 +184,26 @@ function isTerminalStatus(status: string): boolean {
  *
  * Falls back to adaptive polling if SSE is not supported or fails.
  *
+ * @param server - RPC client used for `getLatestLedger`/`getTransaction` calls.
+ * @param hash - Transaction hash to watch for.
+ * @param timeoutMs - Time budget for the whole SSE attempt.
+ * @param rpcUrl - Base RPC URL to open the `getEvents` stream against.
+ *   Passed explicitly by the caller (from `config.rpcUrl`) rather than read
+ *   off `server`, so this has no dependency on `rpc.Server`'s internal
+ *   `serverURL` property — an `ISorobanRpcClient` test double or a future
+ *   `@stellar/stellar-sdk` major version needs no special-casing here.
  * @private
  */
 async function streamTransactionViaEvents(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   hash: TxHash | string,
   timeoutMs: number,
+  rpcUrl: string,
 ): Promise<rpc.Api.GetTransactionResponse | null> {
+  if (!isSSEEnvironmentSupported()) {
+    return null
+  }
+
   // Determine the latest ledger as a starting point for SSE streaming.
   // We try getLatestLedger first, then fall back to the transaction's latestLedger.
   let startLedger: number
@@ -178,15 +225,7 @@ async function streamTransactionViaEvents(
     }
   }
 
-  // Extract the base URL from the server.
-  // NOTE: serverURL is part of the Stellar SDK's internal API surface.
-  // It may change across major versions; fall back gracefully if unavailable.
-  const serverURL =
-    typeof (server as any).serverURL === 'string'
-      ? (server as any).serverURL
-      : (server as any).serverURL?.toString?.() ?? ''
-
-  if (!serverURL) {
+  if (!rpcUrl) {
     return null
   }
 
@@ -194,7 +233,7 @@ async function streamTransactionViaEvents(
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
 
   try {
-    const response = await fetch(serverURL, {
+    const response = await fetch(rpcUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -219,7 +258,12 @@ async function streamTransactionViaEvents(
       signal: controller.signal,
     })
 
-    if (!response.ok || !response.body) {
+    if (!response.ok || !response.body || typeof response.body.getReader !== 'function') {
+      // A `fetch` implementation that resolves but returns a body without a
+      // Web Streams `getReader` (some older/alternate `fetch` polyfills) is
+      // exactly the "streaming unsupported" case this function exists to
+      // degrade out of gracefully — fall through to adaptive polling rather
+      // than throwing on the next line.
       return null
     }
 
@@ -308,16 +352,21 @@ async function pollTransactionAdaptive(
  * falls back to an adaptive polling strategy for lower latency than the
  * default exponential-backoff poller.
  *
- * @param server - Soroban RPC server instance
+ * @param server - RPC client instance (any `ISorobanRpcClient`, not only `rpc.Server`).
  * @param hash - Transaction hash to wait for
  * @param pollTimeoutMs - Maximum time to wait in milliseconds (default: 60s)
+ * @param rpcUrl - Base RPC URL for the `getEvents` SSE stream. Required for
+ *   SSE to be attempted at all; omit it (or run in an environment missing
+ *   `fetch`/`AbortController`/`TextDecoder`) and this falls straight to
+ *   adaptive polling.
  * @returns The final transaction response
  * @throws If the transaction does not complete within the timeout
  */
 export async function waitForTransactionSSE(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   hash: TxHash | string,
   pollTimeoutMs: number = 60_000,
+  rpcUrl = '',
 ): Promise<rpc.Api.GetTransactionResponse> {
   // First, attempt to get the transaction immediately (it might already be done)
   const immediate = await server.getTransaction(hash)
@@ -327,7 +376,7 @@ export async function waitForTransactionSSE(
 
   // Try SSE stream via getEvents (low latency when supported)
   try {
-    const sseResult = await streamTransactionViaEvents(server, hash, pollTimeoutMs)
+    const sseResult = await streamTransactionViaEvents(server, hash, pollTimeoutMs, rpcUrl)
     if (sseResult) {
       return sseResult
     }
@@ -377,7 +426,9 @@ export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
       return innerV1.tx().operations()
     }
 
-    throw new Error(`Unsupported inner transaction envelope type in fee-bump transaction: ${innerType.name}`)
+    throw new Error(
+      `Unsupported inner transaction envelope type in fee-bump transaction: ${innerType.name}`,
+    )
   }
 
   // Handle regular V0 transactions

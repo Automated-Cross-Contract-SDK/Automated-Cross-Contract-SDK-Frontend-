@@ -8,6 +8,7 @@ import {
   type RestoreState,
   type ArchivedLedgerEntry,
   type ResurrectResult,
+  type SorobanResurrectEvents,
 } from '@soroban-resurrect/sdk'
 import type { Transaction } from '@stellar/stellar-sdk'
 
@@ -23,6 +24,17 @@ export interface SorobanResurrectStore {
   detectArchivedKeys: (transaction: Transaction) => Promise<ArchivedLedgerEntry[]>
   /** Reset state back to idle. Optionally, only reset if in a specific state. */
   reset: (fromState?: RestoreState) => void
+  /**
+   * Subscribes to a typed SDK lifecycle event. Always binds to the current
+   * SDK instance, so it keeps working across a config change that
+   * recreates it — unlike destructuring `resurrect` at store-creation time,
+   * which captures a single snapshot instance. Returns an unsubscribe
+   * function.
+   */
+  on: <K extends keyof SorobanResurrectEvents>(
+    event: K,
+    listener: (payload: SorobanResurrectEvents[K]) => void,
+  ) => () => void
   /** The underlying SDK instance. */
   resurrect: SorobanResurrect
   /** Clean up subscriptions. Call inside Svelte's `onDestroy()`. */
@@ -86,14 +98,19 @@ export function createSorobanResurrect(
     return resurrect.submitWithRestore({ transaction, wallet })
   }
 
-  const detectArchivedKeys = async (
-    transaction: Transaction,
-  ): Promise<ArchivedLedgerEntry[]> => {
+  const detectArchivedKeys = async (transaction: Transaction): Promise<ArchivedLedgerEntry[]> => {
     return resurrect.detectArchivedKeys(transaction)
   }
 
   const reset = (fromState?: RestoreState) => {
     resurrect.reset(fromState)
+  }
+
+  const on = <K extends keyof SorobanResurrectEvents>(
+    event: K,
+    listener: (payload: SorobanResurrectEvents[K]) => void,
+  ) => {
+    return resurrect.on(event, listener)
   }
 
   const destroy = () => {
@@ -110,6 +127,7 @@ export function createSorobanResurrect(
     submitWithRestore,
     detectArchivedKeys,
     reset,
+    on,
     resurrect: resurrect!,
     destroy,
   }
