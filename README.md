@@ -51,6 +51,11 @@ Soroban-Resurrect solves the "archived ledger entry" problem for Soroban dApps. 
 npm install @soroban-resurrect/sdk @stellar/stellar-sdk
 ```
 
+> All `@soroban-resurrect/*` packages are published from GitHub Actions with
+> [npm provenance](https://docs.npmjs.com/generating-provenance-statements).
+> Verify a published tarball was built from this repo with
+> `npm audit signatures` after install.
+
 ### 1. Direct SDK Usage
 
 ```typescript
