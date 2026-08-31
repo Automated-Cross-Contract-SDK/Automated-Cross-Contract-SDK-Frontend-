@@ -43,3 +43,41 @@ export function calculateRestoreFee(
   const multiplier = resolveRestoreFeeMultiplier(config)
   return (minResourceFee * multiplier).toString()
 }
+
+/** Structured estimate of the cost (and need) of restoring a transaction's archived entries. */
+export interface RestoreCostEstimate {
+  /** Minimum resource fee from simulation (integer stroops), 0 when no restore is needed. */
+  minResourceFee: number
+  /** Fee multiplier applied to `minResourceFee` (see {@link resolveRestoreFeeMultiplier}). */
+  multiplier: number
+  /** Estimated restore transaction fee, in stroops (`minResourceFee * multiplier`). */
+  estimatedFee: string
+  /** Number of archived ledger entries detected. */
+  archivedKeysDetected: number
+  /** Whether the transaction requires a restore before it can be submitted. */
+  wouldNeedRestore: boolean
+}
+
+/**
+ * Builds a {@link RestoreCostEstimate} from a `minResourceFee` and archived-key
+ * count, applying the same multiplier math as {@link calculateRestoreFee}.
+ *
+ * @param minResourceFee - Minimum resource fee from simulation (0 when no restore is needed).
+ * @param archivedKeysDetected - Number of archived ledger entries detected.
+ * @param config - SDK configuration (used to resolve the multiplier).
+ * @see {@link SorobanResurrect.estimateRestoreCost} — the facade method that
+ *   simulates a transaction and delegates here for the fee math.
+ */
+export function buildRestoreCostEstimate(
+  minResourceFee: number,
+  archivedKeysDetected: number,
+  config: SorobanResurrectConfig,
+): RestoreCostEstimate {
+  return {
+    minResourceFee,
+    multiplier: resolveRestoreFeeMultiplier(config),
+    estimatedFee: calculateRestoreFee(minResourceFee, config),
+    archivedKeysDetected,
+    wouldNeedRestore: archivedKeysDetected > 0,
+  }
+}

@@ -52,6 +52,17 @@ describe('Restorer', () => {
       expect(Array.isArray(ops)).toBe(true)
     })
 
+    it('memoizes parsed XDR operations for the same transaction', () => {
+      const tx = makeSampleTx()
+      const toEnvelopeSpy = vi.spyOn(tx, 'toEnvelope')
+
+      const firstPass = extractXdrOperations(tx)
+      const secondPass = extractXdrOperations(tx)
+
+      expect(firstPass).toBe(secondPass)
+      expect(toEnvelopeSpy).toHaveBeenCalledTimes(1)
+    })
+
     // ── Regression tests for Bug #27 ──────────────────────────────────────
     // Original bug: extractXdrOperations silently defaulted to V1 for
     // unknown envelope types instead of throwing descriptive errors.
@@ -84,7 +95,7 @@ describe('Restorer', () => {
 
       const v0TxBody = new xdr.TransactionV0({
         sourceAccountEd25519: kp.rawPublicKey(),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
         fee: 100 as unknown as any,
         seqNum: BigInt(1) as unknown as xdr.Int64,
         timeBounds: new xdr.TimeBounds({

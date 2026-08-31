@@ -11,6 +11,11 @@ Demonstrates:
 - A local, `Keypair`-based `WalletAdapter` for demo purposes (real apps
   should integrate a proper mobile wallet instead of handling secret keys
   directly — see the warning in `App.tsx`)
+- **Persisted transaction history** (`persistHistoryExample.tsx`): passing
+  `persistHistory: { storage: AsyncStorage }` so the SDK hydrates
+  `TransactionHistory` from durable storage on startup and `retry(historyId)`
+  keeps working after an app kill. `await sdk.ready` before reading persisted
+  history. Requires `@react-native-async-storage/async-storage`.
 
 ## Setup
 
