@@ -47,6 +47,8 @@ import type { LedgerEntryTTLInfo, TTLQueryResult } from './TTLHelpers.js'
  * // result.historyId can be used to retry via resurrect.retry(result.historyId, wallet)
  * ```
  */
+const debug = createDebugger('core')
+
 export class SorobanResurrect {
   /**
    * The RPC client used for all Soroban network calls.

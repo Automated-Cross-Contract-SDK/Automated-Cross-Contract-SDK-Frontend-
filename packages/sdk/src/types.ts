@@ -57,6 +57,18 @@ export interface SorobanResurrectConfig {
   restoreFeeMultiplier?: number
   /** Method for detecting archived keys: 'simulation' (default) or 'direct'. */
   archiveDetectionMethod?: 'simulation' | 'direct'
+  /**
+   * Ledger keys per `getLedgerEntries` request during 'direct' archive
+   * detection (default: 50). Lower it if the RPC endpoint rejects large
+   * batches.
+   */
+  archiveDetectionChunkSize?: number
+  /**
+   * Number of `getLedgerEntries` requests kept in flight at once during
+   * 'direct' archive detection (default: 4). Raise it for faster detection on
+   * large footprints, lower it to stay under a rate limit.
+   */
+  archiveDetectionConcurrency?: number
   /** Enable simulation cache to reuse results and reduce RPC calls (default: false). */
   enableSimulationCache?: boolean
   /** Use SSE-based transaction status waiting when available (default: false). */
