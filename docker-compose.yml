@@ -1,25 +1,36 @@
+# Local Soroban development network.
+#
+# Starts a self-contained Stellar quickstart node running Core, Horizon and the
+# Soroban RPC server against an ephemeral local ledger. See
+# docs/guide/local-development.md for usage.
+
 services:
   soroban-rpc:
-    image: stellar/quickstart:testing
-    container_name: soroban-resurrect-rpc
-    command: ["--local", "--enable-soroban-rpc", "--limits", "testnet"]
+    image: stellar/quickstart:latest
+    container_name: soroban-resurrect-local
+    command: ['--local', '--enable-soroban-rpc', '--limits', 'testnet']
     ports:
-      # Stellar Core / Horizon / Soroban RPC are all fronted on 8000
-      - "8000:8000"
-      # Stellar Core HTTP (ledger info, catchup status)
-      - "11626:11626"
+      # Soroban RPC (JSON-RPC)
+      - '8000:8000'
+      # Stellar Core HTTP
+      - '11626:11626'
     environment:
-      # The SDK validates the passphrase against KNOWN_NETWORK_PASSPHRASES and
-      # maps `localhost` to the Testnet passphrase, so the local node must use it too.
-      NETWORK_PASSPHRASE: "Test SDF Network ; September 2015"
-      ENABLE_LOGS: "true"
+      ENABLE_LOGS: 'true'
+      ENABLE_SOROBAN_DIAGNOSTIC_EVENTS: 'true'
     healthcheck:
       test:
-        - CMD-SHELL
-        - >-
-          curl -fsS -X POST -H 'Content-Type: application/json'
-          -d '{"jsonrpc":"2.0","id":1,"method":"getHealth"}'
-          http://localhost:8000/rpc | grep -q healthy
+        [
+          'CMD',
+          'curl',
+          '-sf',
+          '-X',
+          'POST',
+          '-H',
+          'Content-Type: application/json',
+          '-d',
+          '{"jsonrpc":"2.0","id":1,"method":"getHealth"}',
+          'http://localhost:8000/soroban/rpc',
+        ]
       interval: 10s
       timeout: 5s
       retries: 30

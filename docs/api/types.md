@@ -27,8 +27,8 @@ interface SorobanResurrectConfig {
 | `pollTimeoutMs`             | Timeout in ms when waiting for transaction confirmation.                       |
 | `restoreFeeMultiplier`     | Multiplier applied to `minResourceFee` when building a restore transaction.    |
 | `archiveDetectionMethod`   | Method for detecting archived keys: `'simulation'` (default) or `'direct'`.    |
-| `archiveDetectionChunkSize` | Ledger keys per `getLedgerEntries` request during direct detection (default 50). |
-| `archiveDetectionConcurrency` | `getLedgerEntries` requests issued in parallel during direct detection (default 4). |
+| `archiveDetectionChunkSize` | Ledger keys per `getLedgerEntries` request during `'direct'` detection.       |
+| `archiveDetectionConcurrency` | Chunk requests kept in flight at once during `'direct'` detection.          |
 
 ## `WalletAdapter`
 

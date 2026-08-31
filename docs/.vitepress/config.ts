@@ -22,7 +22,7 @@ export default defineConfig({
             { text: 'Getting Started', link: '/guide/getting-started' },
             { text: 'Tutorial: Common Use Cases', link: '/guide/tutorial' },
             { text: 'Local Development', link: '/guide/local-development' },
-            { text: 'Testing Package Changes Locally', link: '/guide/local-package-development' },
+            { text: 'Local Package Development', link: '/guide/local-package-development' },
           ],
         },
       ],

@@ -1,14 +1,15 @@
 import { rpc, Account, Keypair } from '@stellar/stellar-sdk'
 import { TransactionBuilder, Operation, Transaction, xdr, FeeBumpTransaction } from '@stellar/stellar-sdk'
 import { SorobanResurrectConfig, FeeBumpSponsor } from './types.js'
-import { DEFAULT_NETWORK_PASSPHRASE, RESTORE_FEE_MULTIPLIER } from './constants.js'
+import { DEFAULT_NETWORK_PASSPHRASE } from './constants.js'
+import { calculateRestoreFee } from './feeCalculation.js'
 
 /** Parameters for building a restore transaction. */
 export interface BuildRestoreTxParams {
   /** Soroban RPC server instance. */
   server: rpc.Server
-  /** Source account public key. */
-  sourcePublicKey: string
+  /** Source account public key (Stellar G-address). */
+  sourcePublicKey: StellarPublicKey | string
   /** Soroban transaction data from the simulation response. */
   transactionData: xdr.SorobanTransactionData
   /** Minimum resource fee from the simulation response. */
@@ -21,7 +22,7 @@ export interface BuildRestoreTxParams {
    *  Useful when building multiple transactions concurrently for the same source.
    *  Note: When omitted, fetches the latest account via RPC, which may race with
    *  concurrent calls. Callers should either provide this parameter or serialize calls. */
-  sequenceNumber?: string
+  sequenceNumber?: SequenceNumber | string
 }
 
 /**
@@ -54,8 +55,6 @@ export async function buildRestoreTransaction(params: BuildRestoreTxParams): Pro
   const { sourcePublicKey, transactionData, minResourceFee, config, account: preFetched, sequenceNumber } = params
 
   const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
-  const restoreFeeMultiplier = (config as Required<typeof config>).restoreFeeMultiplier ?? RESTORE_FEE_MULTIPLIER
-
   let account = preFetched
   if (!account) {
     if (sequenceNumber !== undefined) {
@@ -65,7 +64,7 @@ export async function buildRestoreTransaction(params: BuildRestoreTxParams): Pro
     }
   }
 
-  const restoreFee = (minResourceFee * restoreFeeMultiplier).toString()
+  const restoreFee = calculateRestoreFee(minResourceFee, config)
 
   const restoreTx = new TransactionBuilder(account, {
     fee: restoreFee,
@@ -104,7 +103,7 @@ export async function buildRestoreTransaction(params: BuildRestoreTxParams): Pro
  */
 export async function waitForTransaction(
   server: rpc.Server,
-  hash: string,
+  hash: TxHash | string,
   pollIntervalMs: number = 1000,
   pollTimeoutMs: number = 60_000,
 ): Promise<rpc.Api.GetTransactionResponse> {
@@ -155,7 +154,7 @@ function isTerminalStatus(status: string): boolean {
  */
 async function streamTransactionViaEvents(
   server: rpc.Server,
-  hash: string,
+  hash: TxHash | string,
   timeoutMs: number,
 ): Promise<rpc.Api.GetTransactionResponse | null> {
   // Determine the latest ledger as a starting point for SSE streaming.
@@ -276,7 +275,7 @@ async function streamTransactionViaEvents(
  * @private
  */
 async function pollTransactionAdaptive(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   hash: string,
   timeoutMs: number,
 ): Promise<rpc.Api.GetTransactionResponse> {
@@ -317,7 +316,7 @@ async function pollTransactionAdaptive(
  */
 export async function waitForTransactionSSE(
   server: rpc.Server,
-  hash: string,
+  hash: TxHash | string,
   pollTimeoutMs: number = 60_000,
 ): Promise<rpc.Api.GetTransactionResponse> {
   // First, attempt to get the transaction immediately (it might already be done)
@@ -427,7 +426,7 @@ export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
  * ```
  */
 export async function buildOriginalAfterRestore(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   originalTx: Transaction,
   networkPassphrase: string,
   fee: string,
@@ -488,7 +487,7 @@ export async function buildOriginalAfterRestore(
  *   {@link buildRestoreTransaction} in that case).
  */
 export async function prepareTransaction(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   tx: Transaction,
 ): Promise<Transaction> {
   const sim = await server.simulateTransaction(tx)
@@ -517,11 +516,11 @@ export async function prepareTransaction(
  * @returns The fully signed fee-bump transaction XDR string, ready for submission.
  */
 export async function buildFeeBumpTransaction(
-  innerTxXdr: string,
+  innerTxXdr: XdrBase64 | string,
   sponsor: FeeBumpSponsor,
   networkPassphrase: string,
   feeBumpFee?: string,
-): Promise<string> {
+): Promise<XdrBase64> {
   const sponsorPublicKey = await sponsor.getPublicKey()
 
   const innerTx = TransactionBuilder.fromXDR(innerTxXdr, networkPassphrase)
@@ -542,11 +541,11 @@ export async function buildFeeBumpTransaction(
     throw new Error('Failed to build fee-bump transaction')
   }
 
-  const signedFeeBumpXdr = await sponsor.signFeeBump(feeBumpTx.toXDR(), {
+  const signedFeeBumpXdr = await sponsor.signFeeBump(asXdrBase64(feeBumpTx.toXDR()), {
     networkPassphrase,
   })
 
-  return signedFeeBumpXdr
+  return asXdrBase64(signedFeeBumpXdr)
 }
 
 /**
@@ -557,7 +556,7 @@ export async function buildFeeBumpTransaction(
  */
 export async function submitFeeBumpTransaction(
   server: rpc.Server,
-  feeBumpXdr: string,
+  feeBumpXdr: XdrBase64 | string,
   networkPassphrase: string,
 ): Promise<rpc.Api.SendTransactionResponse> {
   const parsed = TransactionBuilder.fromXDR(feeBumpXdr, networkPassphrase)

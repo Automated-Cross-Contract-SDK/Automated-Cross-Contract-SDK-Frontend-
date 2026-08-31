@@ -1,202 +1,144 @@
-# Testing Package Changes Locally
+# Local Package Development (npm link / yalc)
 
-Before publishing a change to `@soroban-resurrect/sdk` or any of the hook and
-adapter packages, you usually want to run it inside a real consumer app. There
-are three ways to do that, in increasing order of fidelity to a real install:
+When you change `@soroban-resurrect/sdk` or one of the framework hook packages,
+you usually want a real consumer app to pick the change up before anything is
+published to npm. There are two ways to do that: `npm link`, which is built in,
+and [yalc](https://github.com/wclr/yalc), which is closer to what an actual
+install looks like.
 
-| Approach | Best for | Trade-off |
-|----------|----------|-----------|
-| Workspace linking | Changes tested by an app inside this repo | Only works for `examples/*` in this monorepo |
-| `npm link` | Quick iteration in an external app | Symlinks, so peer deps can resolve twice |
-| `yalc` | Verifying the published artifact | Requires a re-push on every change |
+## Which one to use
 
-## 0. Build first, always
+| | `npm link` | `yalc` |
+|---|---|---|
+| Setup | Built into npm | `npm i -g yalc` |
+| Mechanism | Symlink into the consumer's `node_modules` | Copies the packed tarball contents |
+| Catches missing `files` entries | No | Yes |
+| Duplicate React / peer-dep instances | Common | Rare |
+| Good for | Quick one-off checks | Anything longer than a few minutes |
 
-Every package publishes compiled output, not `src`. Whatever approach you pick,
-the consumer resolves the built files, so a stale `dist` means you are testing
-stale code.
+Reach for `yalc` by default. Use `npm link` when you want a change to appear in
+the consumer without re-publishing on every edit.
+
+## Before you start
+
+Both approaches consume `dist/`, not `src/`, because that is what the package
+`exports` field points at. Build first:
 
 ```bash
-npm run build:sdk          # only @soroban-resurrect/sdk
-npm run build              # all packages plus the example app
+npm run build:sdk
 ```
 
-Leave a watcher running while iterating:
+Or keep a rebuild running while you work:
 
 ```bash
 npm run build -w packages/sdk -- --watch
 ```
 
-## 1. Workspace linking (inside this repo)
+## Using yalc
 
-`examples/basic` already depends on the workspace packages, so `npm install` at
-the repo root symlinks them for you. No extra tooling is needed:
+### 1. Publish the package to the local store
 
-```bash
-npm install
-npm run build:sdk
-npm run dev:example
-```
-
-Use this whenever the change can be exercised by an app in `examples/`.
-
-## 2. `npm link` (external app)
-
-`npm link` creates a global symlink to your local package, then a second symlink
-from the consumer's `node_modules` to it.
+From the package directory:
 
 ```bash
-# 1. Register the local package globally
 cd packages/sdk
-npm link
-
-# 2. Consume it from your app
-cd ~/projects/my-dapp
-npm link @soroban-resurrect/sdk
-```
-
-Rebuild in the SDK and the app picks the change up immediately, since it is
-reading through a symlink.
-
-Linking several packages at once:
-
-```bash
-cd packages/sdk && npm link
-cd ../react-hook && npm link
-cd ~/projects/my-dapp
-npm link @soroban-resurrect/sdk @soroban-resurrect/react-hook
-```
-
-Unlink when finished, then reinstall so the app goes back to the registry copy:
-
-```bash
-cd ~/projects/my-dapp
-npm unlink --no-save @soroban-resurrect/sdk
-npm install
-
-cd packages/sdk
-npm unlink -g @soroban-resurrect/sdk
-```
-
-### The duplicate peer dependency trap
-
-`@stellar/stellar-sdk` and `react` are peer dependencies. Because a symlinked
-package resolves its own `node_modules` first, your app can end up loading two
-copies of them, which shows up as `Invalid hook call` in React or as XDR
-instances failing `instanceof` checks in Stellar code.
-
-Point both sides at one copy:
-
-```bash
-# From the consumer app, link its copies back into the SDK
-cd packages/sdk
-npm link ~/projects/my-dapp/node_modules/react
-npm link ~/projects/my-dapp/node_modules/@stellar/stellar-sdk
-```
-
-With Vite, the equivalent fix is to dedupe in `vite.config.ts`:
-
-```typescript
-export default defineConfig({
-  resolve: {
-    dedupe: ['react', 'react-dom', '@stellar/stellar-sdk'],
-  },
-  optimizeDeps: {
-    // Linked packages are not pre-bundled by default
-    exclude: ['@soroban-resurrect/sdk', '@soroban-resurrect/react-hook'],
-  },
-})
-```
-
-## 3. `yalc` (closest to a real install)
-
-`yalc` copies the package into a local store and installs it as a file
-dependency instead of a symlink. It respects `files`/`.npmignore`, so it catches
-the class of bug where something works locally but is missing from the published
-tarball.
-
-```bash
-npm install -g yalc
-```
-
-### Publish and consume
-
-```bash
-# 1. Build, then publish to the local yalc store
-cd packages/sdk
-npm run build
 yalc publish
+```
 
-# 2. Add it to the consumer app
-cd ~/projects/my-dapp
+`yalc publish` respects the `files` field in `package.json`, so if a file is
+missing from the published output here, it would be missing from npm too.
+
+### 2. Add it to the consumer
+
+From the consumer app:
+
+```bash
+cd ~/my-dapp
 yalc add @soroban-resurrect/sdk
 npm install
 ```
 
-### Push updates
+This writes a `file:.yalc/@soroban-resurrect/sdk` dependency and a `yalc.lock`.
+Do not commit either.
 
-`yalc push` republishes and updates every consumer that added the package:
+### 3. Push updates after each change
 
 ```bash
 cd packages/sdk
-npm run build && yalc push
+npm run build
+yalc push
 ```
 
-Since `yalc` copies rather than symlinks, nothing propagates until you push.
-Chain the build with the push, or wrap it in a script:
+`yalc push` republishes and updates every consumer that added the package, so
+this is the command you repeat while iterating.
+
+### 4. Clean up
 
 ```bash
-# packages/sdk/package.json
-"scripts": {
-  "dev:yalc": "npm run build && yalc push"
-}
-```
-
-### Remove
-
-```bash
-cd ~/projects/my-dapp
+cd ~/my-dapp
 yalc remove @soroban-resurrect/sdk
 npm install
 ```
 
-`yalc remove --all` clears every yalc-linked package from the app at once.
+Use `yalc remove --all` to detach every yalc-linked package at once.
 
-### Keep yalc out of commits
+## Using npm link
 
-`yalc add` writes a `.yalc/` directory and a `yalc.lock`, and rewrites the
-dependency in `package.json` to a `file:.yalc/...` specifier. Add these to the
-consumer app's `.gitignore`:
-
-```
-.yalc/
-yalc.lock
-```
-
-Always run `yalc remove --all` and `npm install` before committing the consumer
-app, so a `file:` specifier never reaches a lockfile in version control.
-
-## Verifying the tarball itself
-
-To check exactly what a consumer will download, without a registry:
+### 1. Register the package globally
 
 ```bash
 cd packages/sdk
-npm pack                                   # writes soroban-resurrect-sdk-0.1.0.tgz
-tar -tf soroban-resurrect-sdk-0.1.0.tgz    # inspect the file list
-
-cd ~/projects/my-dapp
-npm install /path/to/soroban-resurrect-sdk-0.1.0.tgz
+npm link
 ```
 
-This is the highest-fidelity check available before an actual publish.
+### 2. Link it into the consumer
+
+```bash
+cd ~/my-dapp
+npm link @soroban-resurrect/sdk
+```
+
+The consumer's `node_modules/@soroban-resurrect/sdk` is now a symlink to your
+working copy, so a rebuild is visible immediately with no further commands.
+
+### 3. Unlink
+
+```bash
+cd ~/my-dapp
+npm unlink --no-save @soroban-resurrect/sdk
+npm install
+
+cd packages/sdk
+npm unlink -g
+```
+
+## Linking the hook packages
+
+The hook packages depend on the SDK, so link the SDK first and then the hook,
+otherwise the hook resolves a published SDK instead of your local one:
+
+```bash
+cd packages/sdk && yalc publish
+cd ../react-hook && yalc add @soroban-resurrect/sdk && npm run build && yalc publish
+
+cd ~/my-dapp
+yalc add @soroban-resurrect/sdk @soroban-resurrect/react-hook
+npm install
+```
 
 ## Troubleshooting
 
 | Symptom | Cause and fix |
 |---------|---------------|
-| Changes do not appear in the app | `dist` is stale (`npm run build:sdk`), or with yalc you forgot `yalc push`. |
-| `Invalid hook call` | Two copies of React. Dedupe as shown above. |
-| Types resolve to `any` | The consumer's TypeScript is reading `dist` before it exists. Build first, then restart the TS server. |
-| Vite serves old code | Clear the dep cache: `rm -rf node_modules/.vite` and restart. |
-| `Cannot find module '@soroban-resurrect/sdk'` after unlinking | The symlink is gone but the registry copy was never installed. Run `npm install`. |
+| Changes do not show up | `dist/` is stale. Run `npm run build:sdk`, and with yalc also `yalc push`. |
+| `Cannot find module '@soroban-resurrect/sdk'` | Run `npm install` in the consumer after `yalc add`, or re-run `npm link`. |
+| `Invalid hook call` / two React copies | `npm link` gave the hook package its own `react`. Point the consumer's bundler at a single React, or switch to yalc. |
+| Two `@stellar/stellar-sdk` instances | Same cause as above. `stellar-sdk` is a peer dependency and must resolve to one copy. |
+| Vite does not reload the linked package | Linked packages sit outside the project root. Add `optimizeDeps: { exclude: ['@soroban-resurrect/sdk'] }` to the consumer's Vite config. |
+| A file is missing only under yalc | It is not covered by `files` in the package's `package.json`. It would be missing from the npm release too, so fix it there. |
+
+## Do not commit link artifacts
+
+`.yalc/`, `yalc.lock`, and any `file:` or `link:` dependency belong to your
+machine only. Confirm they are absent with `git status` before opening a pull
+request.

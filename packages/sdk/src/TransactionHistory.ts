@@ -1,5 +1,6 @@
 import { Transaction } from '@stellar/stellar-sdk'
 import { ResurrectResult } from './types.js'
+import { asHistoryEntryId, type HistoryEntryId } from './branded-types.js'
 
 /**
  * Status of a single restore attempt.
@@ -15,7 +16,7 @@ export type TransactionAttemptStatus = 'pending' | 'success' | 'failed'
  */
 export interface TransactionHistoryEntry {
   /** Unique identifier for this history entry (UUID v4). */
-  id: string
+  id: HistoryEntryId
   /** Unix timestamp (ms) when the entry was first created. */
   timestamp: number
   /** The original transaction that was submitted (or attempted). */
@@ -58,7 +59,7 @@ export class TransactionHistory {
    * @param transaction - The transaction to record.
    * @returns The generated entry id.
    */
-  add(transaction: Transaction): string {
+  add(transaction: Transaction): HistoryEntryId {
     const id = this.generateId()
     const now = Date.now()
     const entry: TransactionHistoryEntry = {
@@ -83,7 +84,7 @@ export class TransactionHistory {
    * @param id - The entry id returned by `add()`.
    * @param result - The result from `submitWithRestore`.
    */
-  update(id: string, result: ResurrectResult): void {
+  update(id: HistoryEntryId, result: ResurrectResult): void {
     const entry = this.entries.get(id)
     if (!entry) {
       return
@@ -100,7 +101,7 @@ export class TransactionHistory {
    *
    * @param id - The entry id to increment.
    */
-  incrementAttempt(id: string): void {
+  incrementAttempt(id: HistoryEntryId): void {
     const entry = this.entries.get(id)
     if (!entry) {
       return
@@ -118,7 +119,7 @@ export class TransactionHistory {
    * @param id - The entry id.
    * @returns The entry, or `undefined` if not found.
    */
-  get(id: string): TransactionHistoryEntry | undefined {
+  get(id: HistoryEntryId): TransactionHistoryEntry | undefined {
     return this.entries.get(id)
   }
 
@@ -158,9 +159,9 @@ export class TransactionHistory {
    *
    * @private
    */
-  private generateId(): string {
+  private generateId(): HistoryEntryId {
     const timestamp = Date.now().toString(36)
     const random = Math.random().toString(36).slice(2, 10)
-    return `${timestamp}-${random}`
+    return asHistoryEntryId(`${timestamp}-${random}`)
   }
 }

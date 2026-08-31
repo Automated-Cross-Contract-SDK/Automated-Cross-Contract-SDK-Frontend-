@@ -1,6 +1,7 @@
 import { writable, derived, type Readable, type Writable } from 'svelte/store'
 import {
   SorobanResurrect,
+  isProcessingState,
   type SorobanResurrectConfig,
   type WalletAdapter,
   type RestoreStateInfo,
@@ -76,17 +77,7 @@ export function createSorobanResurrect(
     })
   })
 
-  const isProcessing = derived(stateWritable, ($state) => {
-    const s = $state.state
-    return (
-      s === 'simulating' ||
-      s === 'signing_restore' ||
-      s === 'submitting_restore' ||
-      s === 'confirming_restore' ||
-      s === 'signing_original' ||
-      s === 'submitting_original'
-    )
-  })
+  const isProcessing = derived(stateWritable, ($state) => isProcessingState($state.state))
 
   const submitWithRestore = async (
     transaction: Transaction,

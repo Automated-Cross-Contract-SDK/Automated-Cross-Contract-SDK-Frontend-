@@ -1,0 +1,46 @@
+name: Semantic PR Title
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  check-title:
+    name: Check PR title follows conventional commits
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          echo "PR title: $PR_TITLE"
+
+          # Allowed conventional commit types
+          PATTERN="^(feat|fix|chore|docs|test|ci|refactor|perf|style|build|revert)(\(.+\))?(!)?: .+"
+
+          if echo "$PR_TITLE" | grep -qP "$PATTERN"; then
+            echo "✅ PR title is valid: '$PR_TITLE'"
+          else
+            echo "❌ PR title '$PR_TITLE' does not follow the conventional commits format."
+            echo ""
+            echo "Expected format:  <type>[optional scope]: <description>"
+            echo ""
+            echo "Allowed types:"
+            echo "  feat:     A new feature"
+            echo "  fix:      A bug fix"
+            echo "  chore:    Maintenance / tooling changes"
+            echo "  docs:     Documentation changes"
+            echo "  test:     Adding or updating tests"
+            echo "  ci:       CI/CD changes"
+            echo "  refactor: Code refactoring without feature or fix"
+            echo "  perf:     Performance improvements"
+            echo "  style:    Code style / formatting (no logic change)"
+            echo "  build:    Build system or dependency changes"
+            echo "  revert:   Reverting a previous commit"
+            echo ""
+            echo "Examples:"
+            echo "  feat: add wallet adapter for Freighter"
+            echo "  fix(sdk): handle missing ledger entry gracefully"
+            echo "  chore!: drop support for Node 16"
+            exit 1
+          fi

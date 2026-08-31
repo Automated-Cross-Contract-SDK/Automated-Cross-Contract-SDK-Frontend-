@@ -1,6 +1,10 @@
 /** Map of event name to the payload type emitted for that event. */
 export type EventMap = Record<string, unknown>
 
+// Helper type that adds an index signature to make an interface compatible
+// with EventMap (needed for TypedEventEmitter's generic constraint).
+export type WithIndexSignature<T> = T & Record<string, unknown>
+
 type Listener<T> = (payload: T) => void
 
 /**

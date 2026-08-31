@@ -1,0 +1,20 @@
+# EditorConfig — https://editorconfig.org
+# Ensures consistent indentation, line endings, and encoding across all editors.
+# Source formatting is enforced by Prettier (.prettierrc); this file makes
+# editors behave the same way by default so formatting is consistent before
+# Prettier runs (e.g. in CI and pre-commit hooks).
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Markdown hard line breaks (two trailing spaces) are intentional and must be
+# preserved, so trailing whitespace is not trimmed in Markdown files.
+[*.md]
+trim_trailing_whitespace = false

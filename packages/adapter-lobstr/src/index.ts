@@ -4,6 +4,7 @@ import {
   signTransaction as lobstrSignTransaction,
 } from '@lobstrco/signer-extension-api'
 import type { WalletAdapter } from '@soroban-resurrect/sdk'
+import { asStellarPublicKey, asXdrBase64 } from '@soroban-resurrect/sdk'
 
 /**
  * WalletAdapter implementation for the LOBSTR browser extension wallet.
@@ -14,14 +15,14 @@ export class LobstrAdapter implements WalletAdapter {
     return lobstrIsConnected()
   }
 
-  async getPublicKey(): Promise<string> {
-    return lobstrGetPublicKey()
+  async getPublicKey() {
+    return asStellarPublicKey(await lobstrGetPublicKey())
   }
 
   async signTransaction(
     tx: string,
     opts?: { networkPassphrase?: string; network?: string },
-  ): Promise<string> {
-    return lobstrSignTransaction(tx, opts?.networkPassphrase)
+  ) {
+    return asXdrBase64(await lobstrSignTransaction(tx, opts?.networkPassphrase))
   }
 }

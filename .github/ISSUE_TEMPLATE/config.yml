@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 📖 Documentation
+    url: https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/blob/main/README.md
+    about: Read the README and the docs/ folder for answers to common questions.
+  - name: 🤝 Contributing guide
+    url: https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/blob/main/CONTRIBUTING.md
+    about: Guidelines for reporting bugs, requesting features, and opening pull requests.
