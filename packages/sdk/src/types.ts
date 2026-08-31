@@ -343,6 +343,16 @@ export interface SubmitWithRestoreOptions {
  * See {@link SorobanResurrect.onStateChange} for how to subscribe to
  * transitions between these states, and `ARCHITECTURE.md` in the repo
  * root for the full state diagram.
+ *
+ * The union is **additive** — the original reactive submit-flow states
+ * (`idle` → `simulating` → `restore_needed` → ... → `success` / `error`)
+ * are unchanged. Three extra states model long-running, non-submit
+ * activity that does not fit the submit flow:
+ *
+ * - `estimating` — a fee / resource estimation pass is running.
+ * - `watching_ttl` — a proactive TTL watcher is polling entry lifetimes.
+ * - `extending_ttl` — a `RestoreFootprint`/`ExtendFootprintTTL` bump is
+ *   being signed and submitted proactively (before archival).
  */
 export type RestoreState =
   | 'idle'
@@ -355,6 +365,10 @@ export type RestoreState =
   | 'submitting_original'
   | 'success'
   | 'error'
+  // --- Proactive / estimation states (additive, non-submit) ---
+  | 'estimating'
+  | 'watching_ttl'
+  | 'extending_ttl'
 
 /** Snapshot of the current workflow state, including message and optional error. */
 export interface RestoreStateInfo {

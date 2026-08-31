@@ -41,6 +41,11 @@ export type {
   RestoreState,
   RestoreStateInfo,
   SorobanResurrectEvents,
+  // Observability (#237)
+  Logger,
+  LogLevel,
+  LogContext,
+  RpcTimingEvent,
   // Hardware wallet types
   HardwareWalletAdapter,
   LedgerAdapterConfig,
@@ -55,6 +60,49 @@ export { ResurrectError } from './errors.js'
 // ---------------------------------------------------------------------------
 export type { ISorobanRpcClient } from './RpcClient.js'
 export { SorobanRpcClient, createRpcClient } from './RpcClient.js'
+
+// ---------------------------------------------------------------------------
+// Observability — injectable logger + RPC call timings (#237)
+// ---------------------------------------------------------------------------
+export {
+  NOOP_LOGGER,
+  resolveLogger,
+  isLoggingEnabled,
+  createRequestId,
+  LoggingRpcClient,
+  withRpcLogging,
+} from './Logger.js'
+
+// ---------------------------------------------------------------------------
+// Account / contract-level archived-entry scan (#239)
+// ---------------------------------------------------------------------------
+export {
+  getExpiringEntriesForContract,
+  getExpiringEntriesForAccount,
+  DEFAULT_EXPIRING_SOON_LEDGERS,
+} from './ContractScan.js'
+export type {
+  ContractScanOptions,
+  ContractScanResult,
+  AccountScanOptions,
+  AccountScanResult,
+  ClassicEntryStatus,
+} from './ContractScan.js'
+
+// ---------------------------------------------------------------------------
+// Multisig restore support (#240)
+// ---------------------------------------------------------------------------
+export { MultiSigWalletAdapter } from './MultiSigWalletAdapter.js'
+export type {
+  MultiSigSigner,
+  MultiSigConfig,
+  SignatureCollectionResult,
+} from './MultiSigWalletAdapter.js'
+
+// ---------------------------------------------------------------------------
+// State machine utilities (proactive / estimation states — #238)
+// ---------------------------------------------------------------------------
+export { isProcessingState, PROCESSING_STATES } from './stateUtils.js'
 
 // ---------------------------------------------------------------------------
 // TTL / ledger entry helpers (returned by SorobanResurrect.queryLedgerTTL etc.)

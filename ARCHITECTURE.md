@@ -254,6 +254,17 @@ stateDiagram-v2
     success --> idle: reset()
     error --> idle: reset()
     idle --> idle: reset()
+
+    %% --- Proactive / estimation states (additive, non-submit) ---
+    idle --> estimating: estimate()
+    idle --> watching_ttl: watchTtl()
+    idle --> extending_ttl: extendTtl()
+    watching_ttl --> extending_ttl: entry near expiry
+    estimating --> idle: done
+    estimating --> error: estimation fails
+    watching_ttl --> idle: stop()
+    extending_ttl --> success: bump submitted
+    extending_ttl --> error: bump fails
 ```
 
 `reset()` clears `error`/`archivedKeys` and returns to `idle` from any

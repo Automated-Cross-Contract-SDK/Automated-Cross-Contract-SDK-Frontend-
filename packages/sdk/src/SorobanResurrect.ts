@@ -89,6 +89,15 @@ export class SorobanResurrect {
     this._config = resolved.config
 
     this._stateMgr = new SorobanResurrectStateManager()
+    // Mirror every state transition into the structured log.
+    this._stateMgr.onStateChange((info) => {
+      this.logger.debug(`state → ${info.state}`, {
+        requestId: this._requestId,
+        state: info.state,
+        message: info.message,
+        error: info.error,
+      })
+    })
     this._simulator = new SorobanResurrectSimulator(
       this._server,
       this._config,
@@ -483,7 +492,22 @@ export class SorobanResurrect {
    * ```
    */
   async submitWithRestore(options: SubmitWithRestoreOptions): Promise<ResurrectResult> {
-    return this._executor.submitWithRestore(options)
+    this._requestId = createRequestId()
+    this.logger.info('submitWithRestore: start', { requestId: this._requestId })
+    try {
+      const result = await this._executor.submitWithRestore(options)
+      this.logger[result.success ? 'info' : 'error']('submitWithRestore: finished', {
+        requestId: this._requestId,
+        success: result.success,
+        archivedKeysDetected: result.archivedKeysDetected,
+        restoreTxHash: result.restoreTxHash,
+        originalTxHash: result.originalTxHash,
+        error: result.error,
+      })
+      return result
+    } finally {
+      this._requestId = undefined
+    }
   }
 
   /**
