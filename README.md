@@ -223,7 +223,7 @@ The SDK implements the complete [CAP-0066](https://github.com/stellar/stellar-pr
 constructor(config: SorobanResurrectConfig)
 
 // Properties
-server: rpc.Server              // The underlying Soroban RPC server
+server: ISorobanRpcClient       // Injectable RPC transport (defaults to a SorobanRpcClient built from rpcUrl)
 config: Required<SorobanResurrectConfig>
 state: RestoreState              // Current state machine state
 stateInfo: RestoreStateInfo      // State + message + archived keys + error
@@ -238,6 +238,25 @@ submitWithRestore(options: SubmitWithRestoreOptions): Promise<ResurrectResult>
 reset(fromState?: RestoreState): void
 onStateChange(listener: (info: RestoreStateInfo) => void): () => void  // unsubscribe
 ```
+
+#### RPC Client Injection
+
+Inject a custom RPC transport — a caching proxy, a logging wrapper, or a
+test double — via `config.rpcClient` instead of letting the SDK build one
+from `rpcUrl`:
+
+```typescript
+import { createRpcClient, SorobanResurrect } from '@soroban-resurrect/sdk'
+
+const client = createRpcClient('https://soroban-testnet.stellar.org')
+const sdk = new SorobanResurrect({ rpcUrl: '...', rpcClient: client })
+```
+
+`createRpcClient`, `SorobanRpcClient`, and the `ISorobanRpcClient` interface
+are all exported from `@soroban-resurrect/sdk`. See
+[RPC Client Injection](docs/API.md#rpc-client-injection) in the API
+reference for the caching/logging wrapper and test-double patterns, and a
+runnable example in [`docs/guide/rpc-client-injection.md`](docs/guide/rpc-client-injection.md).
 
 ### React Hook
 
@@ -270,6 +289,7 @@ interface SorobanResurrectConfig {
   networkPassphrase?: string // default: Testnet
   pollIntervalMs?: number // default: 1000
   pollTimeoutMs?: number // default: 60000
+  rpcClient?: ISorobanRpcClient // default: a SorobanRpcClient built from rpcUrl — inject to customize the RPC transport
 }
 
 interface WalletAdapter {

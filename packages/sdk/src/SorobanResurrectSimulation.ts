@@ -1,10 +1,9 @@
 import { Transaction, rpc } from '@stellar/stellar-sdk'
 import { ArchivedLedgerEntry } from './types.js'
 import { SimulationCache } from './SimulationCache.js'
-import { isRestoreResponse, extractArchivedKeys } from './Archiver.js'
+import { isRestoreResponse, isSuccessResponse, isErrorResponse, extractArchivedKeys } from './Archiver.js'
 import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
 import type { ISorobanRpcClient } from './RpcClient.js'
-import type { ResolvedSorobanResurrectConfig } from './SorobanResurrectConfig.js'
 
 /**
  * Handles transaction simulation and archived-entry detection for a single
@@ -24,9 +23,9 @@ import type { ResolvedSorobanResurrectConfig } from './SorobanResurrectConfig.js
  * throws so callers do not need to guard against network failures.
  */
 export class SorobanResurrectSimulator {
-  private readonly _server: ISorobanRpcClient
-  private readonly _config: ResolvedSorobanResurrectConfig
-  private readonly _cache: SimulationCache | undefined
+  private _server: ISorobanRpcClient
+  private _config: Required<SorobanResurrectConfig>
+  private _cache: SimulationCache | undefined
   private readonly _stateMgr: SorobanResurrectStateManager
 
   /**
@@ -37,7 +36,7 @@ export class SorobanResurrectSimulator {
    */
   constructor(
     server: ISorobanRpcClient,
-    config: ResolvedSorobanResurrectConfig,
+    config: Required<SorobanResurrectConfig>,
     cache: SimulationCache | undefined,
     stateMgr: SorobanResurrectStateManager,
   ) {
@@ -45,6 +44,16 @@ export class SorobanResurrectSimulator {
     this._config = config
     this._cache = cache
     this._stateMgr = stateMgr
+  }
+
+  /**
+   * Re-binds this simulator to a new RPC client / config / cache in place,
+   * without losing any other state. Used by `SorobanResurrect.switchNetwork`.
+   */
+  rebind(server: ISorobanRpcClient, config: Required<SorobanResurrectConfig>, cache: SimulationCache | undefined): void {
+    this._server = server
+    this._config = config
+    this._cache = cache
   }
 
   // ---------------------------------------------------------------------------
@@ -123,13 +132,35 @@ export class SorobanResurrectSimulator {
   /**
    * Simulation-based detection: simulates the transaction and reads the
    * `transactionData` footprint from a restore response.
+   *
+   * When the response can't be classified as restore-required, success, or
+   * error (e.g. an older soroban-rpc version that doesn't produce a
+   * `SimulateTransactionRestoreResponse` shape) and
+   * `config.archiveDetectionFallback` is not explicitly disabled, falls back
+   * to the `'direct'` strategy so archived entries aren't silently missed.
    */
   private async _detectViaSimulation(transaction: Transaction): Promise<ArchivedLedgerEntry[]> {
     const response = await this.simulate(transaction)
+
     if (isRestoreResponse(response)) {
       return extractArchivedKeys(response)
     }
-    return []
+
+    if (isSuccessResponse(response) || isErrorResponse(response)) {
+      return []
+    }
+
+    // Unclassifiable response shape.
+    if (this._config.archiveDetectionFallback === false) {
+      return []
+    }
+
+    console.warn(
+      'SorobanResurrect: simulation response could not be classified as success/error/restore-required; ' +
+        "falling back to the 'direct' archive detection strategy. " +
+        'Set archiveDetectionFallback: false to disable this and pin a strategy explicitly.',
+    )
+    return this._detectViaDirect(transaction)
   }
 
   /**

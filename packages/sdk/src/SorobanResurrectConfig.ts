@@ -4,43 +4,64 @@ import {
   POLL_INTERVAL_MS,
   POLL_TIMEOUT_MS,
   RESTORE_FEE_MULTIPLIER,
-  DEFAULT_MAX_SEQUENCE_RETRIES,
+  RPC_TIMEOUT_MS,
+  RPC_RETRY_COUNT,
+  RPC_RETRY_BACKOFF_MS,
+  RPC_CIRCUIT_BREAKER_THRESHOLD,
+  RPC_CIRCUIT_BREAKER_COOLDOWN_MS,
   KNOWN_NETWORK_PASSPHRASES,
   resolveNetworkPassphrase,
+  TTL_WATCH_INTERVAL_MS,
+  TTL_WATCH_THRESHOLD_LEDGERS,
 } from './constants.js'
 import { SimulationCache } from './SimulationCache.js'
 import { SorobanRpcClient, type ISorobanRpcClient } from './RpcClient.js'
 
 /**
- * A `SorobanResurrectConfig` with every field resolved to a concrete value,
- * except `maxRestoreFeeStroops` — which stays optional since "no cap" is a
- * meaningful, intentional default rather than a value to fall back from.
- */
-export type ResolvedSorobanResurrectConfig = Required<
-  Omit<SorobanResurrectConfig, 'rpcClient' | 'maxRestoreFeeStroops'>
-> & {
-  rpcClient: ISorobanRpcClient
-  maxRestoreFeeStroops?: SorobanResurrectConfig['maxRestoreFeeStroops']
-}
-
-/**
  * Result of initialising the SDK configuration.
  *
- * Contains the fully resolved configuration, the resolved RPC client
- * (either the injected `config.rpcClient` or a `SorobanRpcClient` created
- * from `config.rpcUrl`), and an optional `SimulationCache` instance
+ * Contains the fully resolved `Required<SorobanResurrectConfig>`, the
+ * constructed RPC client, and an optional `SimulationCache` instance
  * (present only when `enableSimulationCache` is `true`).
  */
 export interface ResolvedConfig {
-  /** RPC client used for all Soroban network calls. */
+  /**
+   * RPC client bound to the configured endpoint. This is `config.rpcClient`
+   * when supplied, otherwise a {@link SorobanRpcClient} created from
+   * `config.rpcUrl`.
+   */
   server: ISorobanRpcClient
   /** Resolved configuration with all optional fields filled in. */
-  config: ResolvedSorobanResurrectConfig
+  config: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & { rpcClient: ISorobanRpcClient }
   /**
    * Cache for simulation responses. Only present when
    * `config.enableSimulationCache` is `true`; `undefined` otherwise.
    */
   simulationCache: SimulationCache | undefined
+}
+
+const ARCHIVE_DETECTION_METHODS = ['simulation', 'direct'] as const
+
+/**
+ * Validates a numeric config field, throwing a descriptive error if it is
+ * not a finite number or falls outside the allowed range.
+ */
+function validateNumber(field: string, value: unknown, minimum: number, exclusive: boolean): void {
+  const valid = typeof value === 'number' && Number.isFinite(value) && (exclusive ? value > minimum : value >= minimum)
+  if (!valid) {
+    throw new Error(
+      `Invalid ${field}: ${JSON.stringify(value)}. Must be a finite number ${exclusive ? '>' : '>='} ${minimum}.`,
+    )
+  }
+}
+
+/**
+ * Validates a config field expected to be a boolean.
+ */
+function validateBoolean(field: string, value: unknown): void {
+  if (typeof value !== 'boolean') {
+    throw new Error(`Invalid ${field}: ${JSON.stringify(value)}. Must be a boolean.`)
+  }
 }
 
 /**
@@ -51,15 +72,17 @@ export interface ResolvedConfig {
  * - `networkPassphrase` falls back to `resolveNetworkPassphrase(rpcUrl)`,
  *   then to `DEFAULT_NETWORK_PASSPHRASE`.
  * - All numeric / boolean fields fall back to their SDK defaults.
- * - Throws with a descriptive message if the resolved passphrase is not
- *   among the `KNOWN_NETWORK_PASSPHRASES`, since an incorrect passphrase
- *   causes cryptic transaction failures.
+ * - Throws with a descriptive message if any field is missing/malformed,
+ *   or if the resolved passphrase is not among the
+ *   `KNOWN_NETWORK_PASSPHRASES`, since an incorrect passphrase causes
+ *   cryptic transaction failures.
  * - Creates a `SimulationCache` instance when `enableSimulationCache` is
  *   `true`.
  *
  * @param config - Raw SDK configuration supplied by the caller.
  * @returns A `ResolvedConfig` ready to be used by the `SorobanResurrect` facade.
- * @throws {Error} If the resolved `networkPassphrase` is not a known passphrase.
+ * @throws {Error} If any config field is invalid, or the resolved
+ *   `networkPassphrase` is not a known passphrase.
  *
  * @example
  * ```ts
@@ -68,7 +91,41 @@ export interface ResolvedConfig {
  * ```
  */
 export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
-  const server: ISorobanRpcClient = config.rpcClient ?? new SorobanRpcClient(config.rpcUrl)
+  if (typeof config.rpcUrl !== 'string' || config.rpcUrl.length === 0) {
+    throw new Error(`Invalid rpcUrl: ${JSON.stringify(config.rpcUrl)}. Must be a non-empty string.`)
+  }
+
+  if (config.pollIntervalMs !== undefined) {
+    validateNumber('pollIntervalMs', config.pollIntervalMs, 0, true)
+  }
+
+  if (config.pollTimeoutMs !== undefined) {
+    validateNumber('pollTimeoutMs', config.pollTimeoutMs, 0, true)
+  }
+
+  if (config.restoreFeeMultiplier !== undefined) {
+    validateNumber('restoreFeeMultiplier', config.restoreFeeMultiplier, 1, false)
+  }
+
+  if (
+    config.archiveDetectionMethod !== undefined &&
+    !ARCHIVE_DETECTION_METHODS.includes(config.archiveDetectionMethod)
+  ) {
+    throw new Error(
+      `Invalid archiveDetectionMethod: ${JSON.stringify(config.archiveDetectionMethod)}. ` +
+        `Must be one of: ${ARCHIVE_DETECTION_METHODS.map((m) => `"${m}"`).join(', ')}.`,
+    )
+  }
+
+  if (config.useSSE !== undefined) {
+    validateBoolean('useSSE', config.useSSE)
+  }
+
+  if (config.enableSimulationCache !== undefined) {
+    validateBoolean('enableSimulationCache', config.enableSimulationCache)
+  }
+
+  const server = config.rpcClient ?? new SorobanRpcClient(config.rpcUrl)
 
   const networkPassphrase =
     config.networkPassphrase ??
@@ -86,17 +143,16 @@ export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
 
   const simulationCache = config.enableSimulationCache ? new SimulationCache() : undefined
 
-  const resolved = {
+  const resolved: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & { rpcClient: ISorobanRpcClient } = {
     rpcUrl: config.rpcUrl,
     networkPassphrase,
     pollIntervalMs: config.pollIntervalMs ?? POLL_INTERVAL_MS,
     pollTimeoutMs: config.pollTimeoutMs ?? POLL_TIMEOUT_MS,
     restoreFeeMultiplier: config.restoreFeeMultiplier ?? RESTORE_FEE_MULTIPLIER,
     archiveDetectionMethod: config.archiveDetectionMethod ?? 'simulation',
+    archiveDetectionFallback: config.archiveDetectionFallback ?? true,
     enableSimulationCache: config.enableSimulationCache ?? false,
     useSSE: config.useSSE ?? false,
-    maxSequenceRetries: config.maxSequenceRetries ?? DEFAULT_MAX_SEQUENCE_RETRIES,
-    maxRestoreFeeStroops: config.maxRestoreFeeStroops,
     rpcClient: server,
   }
 

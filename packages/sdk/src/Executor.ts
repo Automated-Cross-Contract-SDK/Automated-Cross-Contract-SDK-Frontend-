@@ -14,6 +14,7 @@ import {
   isErrorResponse,
   extractArchivedKeys,
 } from './Archiver.js'
+import { createDebugger } from './Debug.js'
 import {
   buildRestoreTransaction,
   waitForTransaction,
@@ -190,6 +191,8 @@ async function waitForTx(
  * @see {@link SorobanResurrect.submitWithRestore} — the public, stateful
  *   wrapper around this function used by SDK consumers.
  */
+const debug = createDebugger('executor')
+
 export async function executeWithRestore(params: ExecuteParams): Promise<ResurrectResult> {
   const {
     server,
@@ -230,6 +233,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
 
     if (isRestoreResponse(simResponse)) {
       const archivedKeys = extractArchivedKeys(simResponse)
+      debug('executeWithRestore: restore required for %d entries', archivedKeys.length)
 
       const isConnected = await wallet.isConnected()
       if (!isConnected) {

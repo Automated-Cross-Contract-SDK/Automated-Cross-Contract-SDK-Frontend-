@@ -20,11 +20,22 @@ export const POLL_TIMEOUT_MS = 60_000
 export const RESTORE_FEE_MULTIPLIER = 3
 
 /**
- * Default maximum number of times the restore workflow will rebuild and
- * resubmit the original transaction after a `tx_bad_seq` error.
- * Can be overridden via `SorobanResurrectConfig.maxSequenceRetries`.
+ * Number of ledger keys sent in a single `getLedgerEntries` request.
+ *
+ * The RPC server caps how many keys one request may carry, so large footprints
+ * are split into chunks of this size.
  */
-export const DEFAULT_MAX_SEQUENCE_RETRIES = 3
+export const LEDGER_ENTRY_CHUNK_SIZE = 50
+
+/**
+ * Number of `getLedgerEntries` chunk requests kept in flight at once.
+ *
+ * Large footprints are dominated by RPC round-trip latency, so chunks are
+ * issued in parallel. The default is deliberately modest — public RPC
+ * endpoints rate-limit aggressively, and a rate-limited chunk is treated as
+ * archived, which would cause needless restores.
+ */
+export const LEDGER_ENTRY_CONCURRENCY = 4
 
 /** Known Stellar/Soroban network passphrases for validation. */
 export const KNOWN_NETWORK_PASSPHRASES = [

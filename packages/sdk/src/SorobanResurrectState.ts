@@ -1,9 +1,4 @@
-import {
-  ArchivedLedgerEntry,
-  RestoreState,
-  RestoreStateInfo,
-  SorobanResurrectEvents,
-} from './types.js'
+import { ArchivedLedgerEntry, RestoreState, RestoreStateInfo, SorobanResurrectEvents } from './types.js'
 import { TypedEventEmitter, type WithIndexSignature } from './EventEmitter.js'
 
 /**

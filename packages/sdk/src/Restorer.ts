@@ -1,4 +1,4 @@
-import { rpc, Account, Keypair, BASE_FEE, SorobanDataBuilder } from '@stellar/stellar-sdk'
+import { rpc, Account, Keypair, SorobanDataBuilder } from '@stellar/stellar-sdk'
 import {
   TransactionBuilder,
   Operation,
@@ -6,42 +6,11 @@ import {
   xdr,
   FeeBumpTransaction,
 } from '@stellar/stellar-sdk'
-import { SorobanResurrectConfig, FeeBumpSponsor } from './types.js'
+import { SorobanResurrectConfig, FeeBumpSponsor, ArchivedLedgerEntry } from './types.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
 import { DEFAULT_NETWORK_PASSPHRASE } from './constants.js'
 import { calculateRestoreFee } from './feeCalculation.js'
-import type { ISorobanRpcClient } from './RpcClient.js'
-import {
-  asXdrBase64,
-  type StellarPublicKey,
-  type SequenceNumber,
-  type TxHash,
-  type XdrBase64,
-} from './branded-types.js'
-
-/**
- * Thrown by {@link buildRestoreTransaction} when the computed restore fee
- * (`minResourceFee * restoreFeeMultiplier`) exceeds
- * `config.maxRestoreFeeStroops`. Surfacing this as a typed error lets
- * callers (and `submitWithRestore`) distinguish a fee-cap rejection from
- * other build/signing failures.
- */
-export class RestoreFeeCapExceededError extends Error {
-  /** The computed restore fee, in stroops. */
-  readonly computedFeeStroops: string
-  /** The configured cap, in stroops. */
-  readonly capFeeStroops: string
-
-  constructor(computedFeeStroops: string, capFeeStroops: string) {
-    super(
-      `Restore transaction fee (${computedFeeStroops} stroops) exceeds the configured cap ` +
-        `of ${capFeeStroops} stroops (maxRestoreFeeStroops). Raise maxRestoreFeeStroops, lower ` +
-        `restoreFeeMultiplier, or restore fewer keys at once.`,
-    )
-    this.name = 'RestoreFeeCapExceededError'
-    this.computedFeeStroops = computedFeeStroops
-    this.capFeeStroops = capFeeStroops
-  }
-}
+import { ISorobanRpcClient } from './RpcClient.js'
 
 /** Parameters for building a restore transaction. */
 export interface BuildRestoreTxParams {
@@ -223,7 +192,7 @@ export async function buildRestoreTransactionFromKeys(
  * the RPC endpoint. Delay starts at 100ms and doubles on each retry, capped at
  * pollIntervalMs, with random jitter of ±50%.
  *
- * @param server - Soroban RPC server instance.
+ * @param server - RPC client used to poll for transaction status.
  * @param hash - Hash of the submitted transaction to poll for.
  * @param pollIntervalMs - Maximum delay between polls, in ms (default `1000`).
  * @param pollTimeoutMs - Total time to keep polling before giving up, in ms
@@ -295,6 +264,13 @@ async function streamTransactionViaEvents(
   hash: TxHash | string,
   timeoutMs: number,
 ): Promise<rpc.Api.GetTransactionResponse | null> {
+  // SSE relies on browser-standard fetch/AbortController with a readable
+  // stream body. Older Node runtimes (< 18) may lack these — degrade
+  // gracefully to the polling fallback instead of throwing.
+  if (typeof fetch === 'undefined' || typeof AbortController === 'undefined') {
+    return null
+  }
+
   // Determine the latest ledger as a starting point for SSE streaming.
   // We try getLatestLedger first, then fall back to the transaction's latestLedger.
   let startLedger: number
@@ -316,14 +292,10 @@ async function streamTransactionViaEvents(
     }
   }
 
-  // Extract the base URL from the server.
-  // NOTE: serverURL is part of the Stellar SDK's internal API surface.
-  // It may change across major versions; fall back gracefully if unavailable.
-  const serverURL =
-    typeof (server as any).serverURL === 'string'
-      ? (server as any).serverURL
-      : ((server as any).serverURL?.toString?.() ?? '')
-
+  // The base URL is plumbed through ISorobanRpcClient.serverURL rather than
+  // reaching into rpc.Server's undocumented internals. Implementations that
+  // don't expose it degrade gracefully to the polling fallback.
+  const serverURL = server.serverURL
   if (!serverURL) {
     return null
   }
@@ -446,7 +418,9 @@ async function pollTransactionAdaptive(
  * falls back to an adaptive polling strategy for lower latency than the
  * default exponential-backoff poller.
  *
- * @param server - Soroban RPC server instance
+ * @param server - RPC client used for all Soroban network calls. SSE
+ *   requires `server.serverURL` to be set; if it's absent, SSE is skipped
+ *   and polling is used directly.
  * @param hash - Transaction hash to wait for
  * @param pollTimeoutMs - Maximum time to wait in milliseconds (default: 60s)
  * @returns The final transaction response
@@ -706,25 +680,120 @@ export async function submitFeeBumpTransaction(
   return server.sendTransaction(parsed)
 }
 
+/** Parameters for {@link buildBatchRestoreTransaction}. */
+export interface BuildBatchRestoreTxParams {
+  /** Soroban RPC client used to simulate each transaction. */
+  server: ISorobanRpcClient
+  /** Source account public key that will pay for and sign the restore. */
+  sourcePublicKey: StellarPublicKey | string
+  /** The transactions to inspect for archived keys, in submission order. */
+  transactions: Transaction[]
+  /** SDK configuration (used for network passphrase and fee multiplier). */
+  config: SorobanResurrectConfig
+  /** Pre-fetched account (avoids a sequence-number race). */
+  account?: Account
+}
+
+/** Result of {@link buildBatchRestoreTransaction}. */
+export interface BatchRestoreBuildResult {
+  /**
+   * A single unsigned restore transaction covering the union of archived
+   * keys across every input transaction, or `null` if none of them need
+   * restoring.
+   */
+  restoreTx: Transaction | null
+  /**
+   * Archived keys detected per input transaction, in the same order as
+   * `transactions` (empty array for transactions that need no restore).
+   */
+  archivedKeysByTx: ArchivedLedgerEntry[][]
+}
+
 /**
- * Checks whether a `sendTransaction` response was rejected because of a
- * `tx_bad_seq` result — i.e. the account's sequence number moved between
- * when the transaction was built and when it was submitted (e.g. another
- * client submitted a transaction for the same account in the meantime).
+ * Simulates every transaction in `transactions`, unions the archived ledger
+ * keys detected across all of them, and builds a single restore transaction
+ * covering that union — so a multi-contract batch pays one restore fee
+ * instead of one per transaction.
  *
- * @param response - The response from `server.sendTransaction(...)`.
- * @returns `true` if the rejection reason is specifically `tx_bad_seq`.
- * @see {@link executeWithRestore} in `Executor.ts`, which rebuilds the
- *   original transaction with a fresh sequence number and retries when
- *   this returns `true`.
+ * Resource accounting is conservative: the combined transaction's
+ * instructions/read-bytes/write-bytes/resource-fee are the *sum* of each
+ * individual restore simulation's resources. This is always sufficient
+ * (restoring the union footprint costs no more than restoring each part
+ * separately) even though it may be a slight overestimate when transactions
+ * share archived entries.
+ *
+ * @see {@link buildRestoreTransaction} for the single-transaction equivalent.
+ * @see {@link SorobanResurrect.buildBatchRestoreTx} for the public facade method.
  */
-export function isTxBadSeqError(response: rpc.Api.SendTransactionResponse): boolean {
-  if (response.status !== 'ERROR' || !response.errorResult) {
-    return false
+export async function buildBatchRestoreTransaction(
+  params: BuildBatchRestoreTxParams,
+): Promise<BatchRestoreBuildResult> {
+  const { server, sourcePublicKey, transactions, config, account: preFetched } = params
+  const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
+
+  const archivedKeysByTx: ArchivedLedgerEntry[][] = []
+  const restoreResponses: rpc.Api.SimulateTransactionRestoreResponse[] = []
+
+  for (const tx of transactions) {
+    const sim = await server.simulateTransaction(tx)
+    if (isRestoreResponse(sim)) {
+      archivedKeysByTx.push(extractArchivedKeys(sim))
+      restoreResponses.push(sim)
+    } else {
+      archivedKeysByTx.push([])
+    }
   }
-  try {
-    return response.errorResult.result().switch().name === 'txBadSeq'
-  } catch {
-    return false
+
+  if (restoreResponses.length === 0) {
+    return { restoreTx: null, archivedKeysByTx }
   }
+
+  const seenKeys = new Set<string>()
+  const unionReadWrite: xdr.LedgerKey[] = []
+  let totalResourceFee = 0
+  let totalInstructions = 0
+  let totalReadBytes = 0
+  let totalWriteBytes = 0
+
+  for (const response of restoreResponses) {
+    const data = response.transactionData.build()
+    const resources = data.resources()
+
+    for (const key of resources.footprint().readWrite()) {
+      const keyBase64 = key.toXDR('base64')
+      if (!seenKeys.has(keyBase64)) {
+        seenKeys.add(keyBase64)
+        unionReadWrite.push(key)
+      }
+    }
+
+    totalResourceFee += parseInt(response.minResourceFee, 10)
+    totalInstructions += resources.instructions()
+    totalReadBytes += resources.readBytes()
+    totalWriteBytes += resources.writeBytes()
+  }
+
+  const combinedSorobanData = new SorobanDataBuilder()
+    .setReadWrite(unionReadWrite)
+    .setResources(totalInstructions, totalReadBytes, totalWriteBytes)
+    .setResourceFee(totalResourceFee.toString())
+    .build()
+
+  let account = preFetched
+  if (!account) {
+    account = await server.getAccount(sourcePublicKey)
+  }
+
+  const restoreFee = calculateRestoreFee(totalResourceFee, config)
+
+  const restoreTx = new TransactionBuilder(account, {
+    fee: restoreFee,
+    networkPassphrase,
+  })
+    .addOperation(Operation.restoreFootprint({}))
+    .setSorobanData(combinedSorobanData)
+    .setTimeout(30)
+    .build()
+
+  return { restoreTx, archivedKeysByTx }
 }
