@@ -1,13 +1,21 @@
-import { rpc, Account, Keypair } from '@stellar/stellar-sdk'
-import { TransactionBuilder, Operation, Transaction, xdr, FeeBumpTransaction } from '@stellar/stellar-sdk'
-import { SorobanResurrectConfig, FeeBumpSponsor } from './types.js'
+import { rpc, Account, Keypair, SorobanDataBuilder } from '@stellar/stellar-sdk'
+import {
+  TransactionBuilder,
+  Operation,
+  Transaction,
+  xdr,
+  FeeBumpTransaction,
+} from '@stellar/stellar-sdk'
+import { SorobanResurrectConfig, FeeBumpSponsor, ArchivedLedgerEntry } from './types.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
 import { DEFAULT_NETWORK_PASSPHRASE } from './constants.js'
 import { calculateRestoreFee } from './feeCalculation.js'
+import { ISorobanRpcClient } from './RpcClient.js'
 
 /** Parameters for building a restore transaction. */
 export interface BuildRestoreTxParams {
   /** Soroban RPC server instance. */
-  server: rpc.Server
+  server: ISorobanRpcClient
   /** Source account public key (Stellar G-address). */
   sourcePublicKey: StellarPublicKey | string
   /** Soroban transaction data from the simulation response. */
@@ -52,7 +60,14 @@ export interface BuildRestoreTxParams {
  * ```
  */
 export async function buildRestoreTransaction(params: BuildRestoreTxParams): Promise<Transaction> {
-  const { sourcePublicKey, transactionData, minResourceFee, config, account: preFetched, sequenceNumber } = params
+  const {
+    sourcePublicKey,
+    transactionData,
+    minResourceFee,
+    config,
+    account: preFetched,
+    sequenceNumber,
+  } = params
 
   const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
   let account = preFetched
@@ -85,7 +100,7 @@ export async function buildRestoreTransaction(params: BuildRestoreTxParams): Pro
  * the RPC endpoint. Delay starts at 100ms and doubles on each retry, capped at
  * pollIntervalMs, with random jitter of ±50%.
  *
- * @param server - Soroban RPC server instance.
+ * @param server - RPC client used to poll for transaction status.
  * @param hash - Hash of the submitted transaction to poll for.
  * @param pollIntervalMs - Maximum delay between polls, in ms (default `1000`).
  * @param pollTimeoutMs - Total time to keep polling before giving up, in ms
@@ -102,7 +117,7 @@ export async function buildRestoreTransaction(params: BuildRestoreTxParams): Pro
  * ```
  */
 export async function waitForTransaction(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   hash: TxHash | string,
   pollIntervalMs: number = 1000,
   pollTimeoutMs: number = 60_000,
@@ -153,10 +168,17 @@ function isTerminalStatus(status: string): boolean {
  * @private
  */
 async function streamTransactionViaEvents(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   hash: TxHash | string,
   timeoutMs: number,
 ): Promise<rpc.Api.GetTransactionResponse | null> {
+  // SSE relies on browser-standard fetch/AbortController with a readable
+  // stream body. Older Node runtimes (< 18) may lack these — degrade
+  // gracefully to the polling fallback instead of throwing.
+  if (typeof fetch === 'undefined' || typeof AbortController === 'undefined') {
+    return null
+  }
+
   // Determine the latest ledger as a starting point for SSE streaming.
   // We try getLatestLedger first, then fall back to the transaction's latestLedger.
   let startLedger: number
@@ -178,14 +200,10 @@ async function streamTransactionViaEvents(
     }
   }
 
-  // Extract the base URL from the server.
-  // NOTE: serverURL is part of the Stellar SDK's internal API surface.
-  // It may change across major versions; fall back gracefully if unavailable.
-  const serverURL =
-    typeof (server as any).serverURL === 'string'
-      ? (server as any).serverURL
-      : (server as any).serverURL?.toString?.() ?? ''
-
+  // The base URL is plumbed through ISorobanRpcClient.serverURL rather than
+  // reaching into rpc.Server's undocumented internals. Implementations that
+  // don't expose it degrade gracefully to the polling fallback.
+  const serverURL = server.serverURL
   if (!serverURL) {
     return null
   }
@@ -308,14 +326,16 @@ async function pollTransactionAdaptive(
  * falls back to an adaptive polling strategy for lower latency than the
  * default exponential-backoff poller.
  *
- * @param server - Soroban RPC server instance
+ * @param server - RPC client used for all Soroban network calls. SSE
+ *   requires `server.serverURL` to be set; if it's absent, SSE is skipped
+ *   and polling is used directly.
  * @param hash - Transaction hash to wait for
  * @param pollTimeoutMs - Maximum time to wait in milliseconds (default: 60s)
  * @returns The final transaction response
  * @throws If the transaction does not complete within the timeout
  */
 export async function waitForTransactionSSE(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   hash: TxHash | string,
   pollTimeoutMs: number = 60_000,
 ): Promise<rpc.Api.GetTransactionResponse> {
@@ -377,7 +397,9 @@ export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
       return innerV1.tx().operations()
     }
 
-    throw new Error(`Unsupported inner transaction envelope type in fee-bump transaction: ${innerType.name}`)
+    throw new Error(
+      `Unsupported inner transaction envelope type in fee-bump transaction: ${innerType.name}`,
+    )
   }
 
   // Handle regular V0 transactions
@@ -555,7 +577,7 @@ export async function buildFeeBumpTransaction(
  * @returns The send transaction response with the hash.
  */
 export async function submitFeeBumpTransaction(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   feeBumpXdr: XdrBase64 | string,
   networkPassphrase: string,
 ): Promise<rpc.Api.SendTransactionResponse> {
@@ -564,4 +586,122 @@ export async function submitFeeBumpTransaction(
     throw new Error('Failed to parse fee-bump transaction XDR')
   }
   return server.sendTransaction(parsed)
+}
+
+/** Parameters for {@link buildBatchRestoreTransaction}. */
+export interface BuildBatchRestoreTxParams {
+  /** Soroban RPC client used to simulate each transaction. */
+  server: ISorobanRpcClient
+  /** Source account public key that will pay for and sign the restore. */
+  sourcePublicKey: StellarPublicKey | string
+  /** The transactions to inspect for archived keys, in submission order. */
+  transactions: Transaction[]
+  /** SDK configuration (used for network passphrase and fee multiplier). */
+  config: SorobanResurrectConfig
+  /** Pre-fetched account (avoids a sequence-number race). */
+  account?: Account
+}
+
+/** Result of {@link buildBatchRestoreTransaction}. */
+export interface BatchRestoreBuildResult {
+  /**
+   * A single unsigned restore transaction covering the union of archived
+   * keys across every input transaction, or `null` if none of them need
+   * restoring.
+   */
+  restoreTx: Transaction | null
+  /**
+   * Archived keys detected per input transaction, in the same order as
+   * `transactions` (empty array for transactions that need no restore).
+   */
+  archivedKeysByTx: ArchivedLedgerEntry[][]
+}
+
+/**
+ * Simulates every transaction in `transactions`, unions the archived ledger
+ * keys detected across all of them, and builds a single restore transaction
+ * covering that union — so a multi-contract batch pays one restore fee
+ * instead of one per transaction.
+ *
+ * Resource accounting is conservative: the combined transaction's
+ * instructions/read-bytes/write-bytes/resource-fee are the *sum* of each
+ * individual restore simulation's resources. This is always sufficient
+ * (restoring the union footprint costs no more than restoring each part
+ * separately) even though it may be a slight overestimate when transactions
+ * share archived entries.
+ *
+ * @see {@link buildRestoreTransaction} for the single-transaction equivalent.
+ * @see {@link SorobanResurrect.buildBatchRestoreTx} for the public facade method.
+ */
+export async function buildBatchRestoreTransaction(
+  params: BuildBatchRestoreTxParams,
+): Promise<BatchRestoreBuildResult> {
+  const { server, sourcePublicKey, transactions, config, account: preFetched } = params
+  const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
+
+  const archivedKeysByTx: ArchivedLedgerEntry[][] = []
+  const restoreResponses: rpc.Api.SimulateTransactionRestoreResponse[] = []
+
+  for (const tx of transactions) {
+    const sim = await server.simulateTransaction(tx)
+    if (isRestoreResponse(sim)) {
+      archivedKeysByTx.push(extractArchivedKeys(sim))
+      restoreResponses.push(sim)
+    } else {
+      archivedKeysByTx.push([])
+    }
+  }
+
+  if (restoreResponses.length === 0) {
+    return { restoreTx: null, archivedKeysByTx }
+  }
+
+  const seenKeys = new Set<string>()
+  const unionReadWrite: xdr.LedgerKey[] = []
+  let totalResourceFee = 0
+  let totalInstructions = 0
+  let totalReadBytes = 0
+  let totalWriteBytes = 0
+
+  for (const response of restoreResponses) {
+    const data = response.transactionData.build()
+    const resources = data.resources()
+
+    for (const key of resources.footprint().readWrite()) {
+      const keyBase64 = key.toXDR('base64')
+      if (!seenKeys.has(keyBase64)) {
+        seenKeys.add(keyBase64)
+        unionReadWrite.push(key)
+      }
+    }
+
+    totalResourceFee += parseInt(response.minResourceFee, 10)
+    totalInstructions += resources.instructions()
+    totalReadBytes += resources.readBytes()
+    totalWriteBytes += resources.writeBytes()
+  }
+
+  const combinedSorobanData = new SorobanDataBuilder()
+    .setReadWrite(unionReadWrite)
+    .setResources(totalInstructions, totalReadBytes, totalWriteBytes)
+    .setResourceFee(totalResourceFee.toString())
+    .build()
+
+  let account = preFetched
+  if (!account) {
+    account = await server.getAccount(sourcePublicKey)
+  }
+
+  const restoreFee = calculateRestoreFee(totalResourceFee, config)
+
+  const restoreTx = new TransactionBuilder(account, {
+    fee: restoreFee,
+    networkPassphrase,
+  })
+    .addOperation(Operation.restoreFootprint({}))
+    .setSorobanData(combinedSorobanData)
+    .setTimeout(30)
+    .build()
+
+  return { restoreTx, archivedKeysByTx }
 }

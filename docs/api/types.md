@@ -14,7 +14,8 @@ interface SorobanResurrectConfig {
   pollTimeoutMs?: number // default: 60000
   restoreFeeMultiplier?: number // default: 100
   archiveDetectionMethod?: 'simulation' | 'direct' // default: 'simulation'
-  rpcClient?: ISorobanRpcClient // default: an internal SorobanRpcClient built from rpcUrl
+  archiveDetectionChunkSize?: number // default: 50
+  archiveDetectionConcurrency?: number // default: 4
 }
 ```
 
@@ -26,16 +27,8 @@ interface SorobanResurrectConfig {
 | `pollTimeoutMs`             | Timeout in ms when waiting for transaction confirmation.                       |
 | `restoreFeeMultiplier`     | Multiplier applied to `minResourceFee` when building a restore transaction.    |
 | `archiveDetectionMethod`   | Method for detecting archived keys: `'simulation'` (default) or `'direct'`.    |
-| `rpcClient`                | Optional [`ISorobanRpcClient`](#isorobanrpcclient) implementation to inject in place of the default transport — a custom wrapper (caching, logging, rate-limiting) or a test double. When omitted, `SorobanResurrect` builds a `SorobanRpcClient` from `rpcUrl`. See [RPC Client Injection](../API.md#rpc-client-injection). |
-
-## `ISorobanRpcClient`
-
-Minimal interface covering the six `rpc.Server` methods used by the SDK
-(`simulateTransaction`, `sendTransaction`, `getTransaction`, `getAccount`,
-`getLedgerEntries`, `getLatestLedger`). Implement it to inject a custom
-transport or test double via `config.rpcClient`. See
-[RPC Client Injection](../API.md#rpc-client-injection) for the full
-reference and examples.
+| `archiveDetectionChunkSize` | Ledger keys per `getLedgerEntries` request during `'direct'` detection.       |
+| `archiveDetectionConcurrency` | Chunk requests kept in flight at once during `'direct'` detection.          |
 
 ## `WalletAdapter`
 

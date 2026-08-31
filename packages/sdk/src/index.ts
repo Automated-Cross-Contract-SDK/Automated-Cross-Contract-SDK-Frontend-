@@ -21,6 +21,7 @@ export type {
   FeeBumpSponsor,
   FeeBumpConfig,
   ArchivedLedgerEntry,
+  ArchiveDetectionOptions,
   SimulateResponse,
   ResurrectResult,
   DryRunResult,
@@ -40,12 +41,26 @@ export type {
 export type { LedgerEntryTTLInfo, TTLQueryResult } from './TTLHelpers.js'
 
 // ---------------------------------------------------------------------------
+// Fee calculation (returned by SorobanResurrect.estimateRestoreCost)
+// ---------------------------------------------------------------------------
+export type { RestoreCostEstimate } from './feeCalculation.js'
+
+// ---------------------------------------------------------------------------
+// Network presets (used by SorobanResurrect.switchNetwork)
+// ---------------------------------------------------------------------------
+export type { SorobanNetworkName, SorobanNetworkPreset } from './constants.js'
+export { NETWORK_PRESETS } from './constants.js'
+
+// ---------------------------------------------------------------------------
+// RPC client abstraction (dependency injection / resilient transport)
+// ---------------------------------------------------------------------------
+export type { ISorobanRpcClient, RpcResilienceOptions } from './RpcClient.js'
+export { SorobanRpcClient, createRpcClient, RpcTimeoutError, RpcCircuitOpenError } from './RpcClient.js'
+
+// ---------------------------------------------------------------------------
 // Transaction history (returned by SorobanResurrect.history / getHistory)
 // ---------------------------------------------------------------------------
-export type {
-  TransactionHistoryEntry,
-  TransactionAttemptStatus,
-} from './TransactionHistory.js'
+export type { TransactionHistoryEntry, TransactionAttemptStatus } from './TransactionHistory.js'
 
 // ---------------------------------------------------------------------------
 // Hardware wallet adapters
@@ -74,31 +89,30 @@ export {
 // Typed event emitter (used by SorobanResurrect.on / once / off)
 // ---------------------------------------------------------------------------
 export { TypedEventEmitter } from './EventEmitter.js'
+export {
+  ok,
+  err,
+  some,
+  none,
+  toResult,
+  toResultAsync,
+  fromNullable,
+  extractArchivedKeysSafe,
+  extractFootprintFromSuccessSafe,
+} from './result.js'
+export type { Result, Option } from './result.js'
 export { resolveConfig } from './SorobanResurrectConfig.js'
 export type { ResolvedConfig } from './SorobanResurrectConfig.js'
 export { SorobanResurrectStateManager } from './SorobanResurrectState.js'
 export { SorobanResurrectSimulator } from './SorobanResurrectSimulation.js'
 export { SorobanResurrectExecutor } from './SorobanResurrectExecution.js'
-export type { LedgerEntryTTLInfo, TTLQueryResult } from './TTLHelpers.js'
 export {
   queryLedgerTTL,
   queryLedgerEntryTTL,
   getExpiringSoonEntries,
   getArchivedEntries,
 } from './TTLHelpers.js'
-export type {
-  TransactionHistoryEntry,
-  TransactionAttemptStatus,
-} from './TransactionHistory.js'
+export type { TransactionHistoryEntry, TransactionAttemptStatus } from './TransactionHistory.js'
 export { TransactionHistory } from './TransactionHistory.js'
-
-// ---------------------------------------------------------------------------
-// RPC abstraction layer — enables test doubles and custom transports
-// ---------------------------------------------------------------------------
 export type { ISorobanRpcClient } from './RpcClient.js'
-export { SorobanRpcClient, createRpcClient } from './RpcClient.js'
-
-// ---------------------------------------------------------------------------
-// Processing-state helper — single source of truth for hook `isProcessing`
-// ---------------------------------------------------------------------------
-export { isProcessingState, PROCESSING_STATES } from './stateUtils.js'
+export type { TTLWatchOptions, TTLWatchHandle } from './TTLWatch.js'

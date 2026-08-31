@@ -32,6 +32,10 @@ function useSorobanResurrectContext(): {
   submitWithRestore(tx: Transaction, wallet: WalletAdapter): Promise<ResurrectResult>
   detectArchivedKeys(tx: Transaction): Promise<ArchivedLedgerEntry[]>
   reset(): void
+  on<K extends keyof SorobanResurrectEvents>(
+    event: K,
+    listener: (payload: SorobanResurrectEvents[K]) => void,
+  ): () => void
 }
 ```
 
@@ -39,6 +43,7 @@ Hook to access the `SorobanResurrect` API from within a `<SorobanResurrectProvid
 
 - `isProcessing` is `true` while `state.state` is any of: `simulating`, `signing_restore`, `submitting_restore`, `confirming_restore`, `signing_original`, `submitting_original`.
 - `submitWithRestore` and `detectArchivedKeys` are safe to call before the underlying instance mounts — they return an idle-shaped fallback (`{ success: false, error: 'Not initialized' }` / `[]`) rather than throwing.
+- `on` subscribes to a typed lifecycle event on the current SDK instance and returns an unsubscribe function. See [Lifecycle Events](#lifecycle-events) below.
 
 #### `isProcessing` contract
 
@@ -77,7 +82,31 @@ Creates and manages its own `SorobanResurrect` instance — no provider needed. 
 | `submitWithRestore`    | `(transaction: Transaction, wallet: WalletAdapter) => Promise<ResurrectResult>` | Submit with automatic restoration. |
 | `detectArchivedKeys`   | `(transaction: Transaction) => Promise<ArchivedLedgerEntry[]>`     | Check for archived entries.                     |
 | `reset`                | `() => void`                                                        | Reset state back to idle.                       |
+| `on`                    | `<K>(event: K, listener: (payload) => void) => () => void`         | Subscribe to a lifecycle event. See below.      |
 | `resurrect`            | `SorobanResurrect`                                                  | The underlying SDK instance.                    |
+
+## Lifecycle Events
+
+Both `useSorobanResurrectContext()` and `useSorobanResurrect()` expose an `on` helper backed by the underlying SDK instance's `on`/`off` event emitter (`resurrect.on(...)`), so dApp teams can wire up telemetry or progress UIs without reaching into `resurrect` directly. `on` always subscribes to the *current* SDK instance — resubscribe if you call it again after `config` changes.
+
+| Event               | Payload               | Fires when                                                        |
+| -------------------- | ---------------------- | -------------------------------------------------------------------- |
+| `stateChange`        | `RestoreStateInfo`      | On every state transition (mirrors `onStateChange`).                 |
+| `restoreNeeded`       | `ArchivedLedgerEntry[]` | Archived entries are detected and restoration is required.           |
+| `restoreSubmitted`    | `TxHash`                | The restore transaction is submitted.                                |
+| `restoreConfirmed`    | `TxHash`                | The restore transaction is confirmed on-chain.                       |
+| `originalSubmitted`   | `TxHash`                | The original transaction is submitted.                               |
+| `restoreComplete`     | `ResurrectResult`       | The full restore-and-submit workflow finishes.                       |
+| `error`               | `string`                | The workflow fails, with the error message.                          |
+
+```tsx
+useEffect(() => {
+  const unsubscribe = on('restoreSubmitted', (txHash) => {
+    console.log('restore submitted:', txHash)
+  })
+  return unsubscribe
+}, [on])
+```
 
 ## Choosing Between Them
 
