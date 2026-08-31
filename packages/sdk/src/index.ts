@@ -122,6 +122,12 @@ export type { KnownWallet, AdapterImporter, CreateAdapterOptions } from './creat
 export { asStellarPublicKey, asXdrBase64 } from './branded-types.js'
 
 // ---------------------------------------------------------------------------
+// On-chain failure parsing (populates ResurrectResult.onchainError)
+// ---------------------------------------------------------------------------
+export { parseTransactionFailure } from './TransactionFailure.js'
+export type { ParsableTransactionResponse } from './TransactionFailure.js'
+
+// ---------------------------------------------------------------------------
 // TTL / ledger entry helpers (returned by SorobanResurrect.queryLedgerTTL etc.)
 // ---------------------------------------------------------------------------
 export type { LedgerEntryTTLInfo, TTLQueryResult, LedgerKeyEntryType } from './TTLHelpers.js'

@@ -33,6 +33,7 @@ import {
   DEFAULT_MAX_SEQUENCE_RETRIES,
 } from './constants.js'
 import { asTxHash, asXdrBase64, type TxHash, type XdrBase64 } from './branded-types.js'
+import { parseTransactionFailure } from './TransactionFailure.js'
 
 /** Parameters for the full restore-and-submit execution flow. */
 export interface ExecuteParams {
@@ -295,6 +296,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
 
       if (restoreStatus.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
         const err = 'Restore transaction failed'
+        const onchainError = parseTransactionFailure(restoreStatus)
         onRestoreFailed?.(err)
         const diagnostics = parseTransactionDiagnostics(restoreStatus)
         return {

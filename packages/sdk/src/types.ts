@@ -28,6 +28,7 @@ export type {
   SequenceNumber,
   HistoryEntryId,
 }
+export type { OnchainError } from './TransactionFailure.js'
 
 /**
  * Configuration options for creating a SorobanResurrect instance.
