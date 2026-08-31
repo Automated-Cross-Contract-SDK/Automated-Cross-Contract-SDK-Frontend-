@@ -7,6 +7,22 @@ on:
     branches: [main]
 
 jobs:
+  npm-audit:
+    name: npm-audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Audit production dependencies (fail on unallowlisted high/critical)
+        run: node scripts/check-audit.mjs
+
   ci:
     runs-on: ubuntu-latest
     strategy:
@@ -32,19 +48,42 @@ jobs:
       - name: Format check
         run: npm run format
 
-      - name: Test (all packages via Turbo)
-        run: npm test
+      - name: Verify every package defines a test script
+        run: |
+          missing=0
+          for pkg in packages/*/package.json; do
+            if ! node -e "process.exit(require('./${pkg}').scripts?.test ? 0 : 1)"; then
+              echo "::error file=${pkg}::package has no \"test\" script — it will be silently skipped by 'npm test' (Turbo)"
+              missing=1
+            fi
+          done
+          exit $missing
 
-      - name: Test with coverage (sdk)
-        run: npm run test -w packages/sdk -- --coverage
+      - name: Test with coverage (all packages)
+        run: |
+          for pkg in adapter-albedo adapter-freighter adapter-lobstr adapter-xbull react-hook sdk svelte-hook vue-hook; do
+            echo "::group::packages/$pkg"
+            npm run test -w "packages/$pkg" -- --coverage
+            echo "::endgroup::"
+          done
 
-      - name: Test with coverage (react-hook)
-        run: npm run test -w packages/react-hook -- --coverage
+      - name: Test with coverage (vue-hook)
+        run: npm run test -w packages/vue-hook -- --coverage
+
+      - name: Test with coverage (svelte-hook)
+        run: npm run test -w packages/svelte-hook -- --coverage
+
+      - name: Test with coverage (wallet adapters)
+        run: |
+          npm run test -w packages/adapter-xbull -- --coverage
+          npm run test -w packages/adapter-freighter -- --coverage
+          npm run test -w packages/adapter-albedo -- --coverage
+          npm run test -w packages/adapter-lobstr -- --coverage
 
       - uses: codecov/codecov-action@v4
         with:
           files: packages/sdk/coverage/lcov.info,packages/react-hook/coverage/lcov.info
-          fail_ci_if_error: false
+          fail_ci_if_error: true
 
       - name: Build (all packages via Turbo)
         run: npm run build

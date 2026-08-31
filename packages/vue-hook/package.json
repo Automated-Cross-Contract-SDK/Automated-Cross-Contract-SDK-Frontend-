@@ -2,12 +2,26 @@
   "name": "@soroban-resurrect/vue-hook",
   "version": "0.1.0",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-.git",
+    "directory": "packages/vue-hook"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./composable": {
+      "import": "./dist/composable.js",
+      "types": "./dist/composable.d.ts"
     }
   },
   "files": [
@@ -17,7 +31,9 @@
     "build": "tsc",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint 'src/**/*.{ts,tsx}'"
+    "lint": "eslint 'src/**/*.{ts,tsx}'",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@soroban-resurrect/sdk": "^0.1.0"
@@ -27,7 +43,10 @@
     "vue": "^3.0.0"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "^2.1.9",
+    "jsdom": "^29.1.1",
     "typescript": "^5.5.0",
+    "vitest": "^2.1.9",
     "vue": "^3.0.0"
   }
 }

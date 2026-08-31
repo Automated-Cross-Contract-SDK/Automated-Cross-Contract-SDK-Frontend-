@@ -6,14 +6,21 @@ All types below are exported from `@soroban-resurrect/sdk`.
 
 Configuration options for creating a `SorobanResurrect` instance.
 
+This is the canonical reference for `SorobanResurrectConfig` — every field below is
+cross-checked against [`types.ts`](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/blob/main/packages/sdk/src/types.ts).
+Other documents (`README.md`, `docs/API.md`, `ARCHITECTURE.md`) link back here instead
+of maintaining their own copy of the field list.
+
 ```typescript
 interface SorobanResurrectConfig {
   rpcUrl: string
-  networkPassphrase?: string // default: Testnet
+  networkPassphrase?: string // default: resolved from rpcUrl, else Testnet
   pollIntervalMs?: number // default: 1000
   pollTimeoutMs?: number // default: 60000
-  restoreFeeMultiplier?: number // default: 100
+  restoreFeeMultiplier?: number // default: 3 — see "Choosing restoreFeeMultiplier" below
   archiveDetectionMethod?: 'simulation' | 'direct' // default: 'simulation'
+  archiveDetectionChunkSize?: number // default: 50
+  archiveDetectionConcurrency?: number // default: 4
 }
 ```
 
@@ -25,6 +32,8 @@ interface SorobanResurrectConfig {
 | `pollTimeoutMs`             | Timeout in ms when waiting for transaction confirmation.                       |
 | `restoreFeeMultiplier`     | Multiplier applied to `minResourceFee` when building a restore transaction.    |
 | `archiveDetectionMethod`   | Method for detecting archived keys: `'simulation'` (default) or `'direct'`.    |
+| `archiveDetectionChunkSize` | Ledger keys per `getLedgerEntries` request during `'direct'` detection.       |
+| `archiveDetectionConcurrency` | Chunk requests kept in flight at once during `'direct'` detection.          |
 
 ## `WalletAdapter`
 
@@ -93,16 +102,16 @@ interface SubmitWithRestoreOptions {
 }
 ```
 
-| Callback               | Fires when...                                                             |
-| ------------------------ | ------------------------------------------------------------------------------ |
-| `onRestoreNeeded`         | Archived entries are detected and restoration is required.                    |
-| `onSigningRestore`        | Restore transaction is ready to be signed.                                    |
-| `onSubmittingRestore`     | Restore transaction is signed and about to be submitted.                      |
-| `onRestoreSubmitted`      | The restore transaction has been submitted.                                   |
-| `onRestoreConfirmed`      | The restore transaction is confirmed on-chain.                                |
-| `onSigningOriginal`       | The restore step (if any) is done and the original tx is ready to sign.        |
-| `onOriginalSubmitted`     | The original transaction has been submitted.                                  |
-| `onRestoreFailed`         | The restore step of the workflow fails.                                       |
+| Callback              | Fires when...                                                           |
+| --------------------- | ----------------------------------------------------------------------- |
+| `onRestoreNeeded`     | Archived entries are detected and restoration is required.              |
+| `onSigningRestore`    | Restore transaction is ready to be signed.                              |
+| `onSubmittingRestore` | Restore transaction is signed and about to be submitted.                |
+| `onRestoreSubmitted`  | The restore transaction has been submitted.                             |
+| `onRestoreConfirmed`  | The restore transaction is confirmed on-chain.                          |
+| `onSigningOriginal`   | The restore step (if any) is done and the original tx is ready to sign. |
+| `onOriginalSubmitted` | The original transaction has been submitted.                            |
+| `onRestoreFailed`     | The restore step of the workflow fails.                                 |
 
 ## `RestoreState`
 
@@ -120,7 +129,18 @@ type RestoreState =
   | 'submitting_original'
   | 'success'
   | 'error'
+  // Proactive / estimation states (additive, non-submit)
+  | 'estimating'
+  | 'watching_ttl'
+  | 'extending_ttl'
 ```
+
+The last three are **additive** — they model long-running activity outside
+the reactive submit flow (fee estimation and proactive TTL
+watch-and-extend). Existing consumers keep working unchanged.
+`isProcessingState()` returns `true` for `estimating` and `extending_ttl`
+(active work) and `false` for `watching_ttl` (a passive background poll,
+like `idle`); its result for every pre-existing state is unchanged.
 
 ## `RestoreStateInfo`
 
@@ -132,5 +152,36 @@ interface RestoreStateInfo {
   message: string
   archivedKeys?: ArchivedLedgerEntry[]
   error?: string
+}
+```
+
+## `Logger`
+
+Structured logging sink supplied via [`SorobanResurrectConfig.logger`](#sorobanresurrectconfig).
+Silent by default — see the [Observability section](/api/sdk#observability-injectable-logger-rpc-timings).
+
+```typescript
+type LogLevel = 'debug' | 'info' | 'warn' | 'error'
+type LogContext = Record<string, unknown>
+
+interface Logger {
+  debug(message: string, context?: LogContext): void
+  info(message: string, context?: LogContext): void
+  warn(message: string, context?: LogContext): void
+  error(message: string, context?: LogContext): void
+}
+```
+
+## `RpcTimingEvent`
+
+Emitted via `logger.debug` once per RPC round-trip.
+
+```typescript
+interface RpcTimingEvent {
+  method: string // the ISorobanRpcClient method called
+  durationMs: number // wall-clock duration
+  ok: boolean // resolved (true) or rejected (false)
+  requestId?: string // correlation id of the enclosing workflow
+  error?: string // message when ok === false
 }
 ```
