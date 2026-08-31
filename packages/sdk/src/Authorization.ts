@@ -17,6 +17,8 @@
 
 import { xdr, Transaction, hash } from '@stellar/stellar-sdk'
 import { asXdrBase64, type XdrBase64 } from './branded-types.js'
+import type { WalletCapabilities } from './types.js'
+import { assertWalletCapability } from './walletCapabilities.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -79,6 +81,12 @@ export interface AuthorizationWalletAdapter {
       address?: string
     },
   ): Promise<XdrBase64>
+  /**
+   * Optional feature-detection flags (see {@link WalletCapabilities}). When the
+   * wallet sets `capabilities.signAuthEntry === false`, {@link signAuthorizationEntries}
+   * throws a clear error instead of calling {@link signAuthEntry}.
+   */
+  capabilities?: WalletCapabilities
 }
 
 /**
@@ -182,6 +190,15 @@ export async function signAuthorizationEntries(
   options: SignAuthorizationEntriesOptions,
 ): Promise<xdr.SorobanAuthorizationEntry[]> {
   const { entries, wallet, networkPassphrase } = options
+
+  // If any entry actually needs the wallet's signature, make sure the wallet
+  // hasn't opted out of CAP-0046 auth-entry signing before we start prompting.
+  const needsWalletSignature = entries.some(
+    (categorized) => categorized.credentialType === 'address',
+  )
+  if (needsWalletSignature) {
+    assertWalletCapability(wallet, 'signAuthEntry', 'signAuthorizationEntries')
+  }
 
   const signed: xdr.SorobanAuthorizationEntry[] = []
 

@@ -94,6 +94,12 @@ async function signAndMaybeFeeBump(params: {
     onSubmitting,
   } = params
 
+  // Fail fast when a fee-bump is requested but the wallet has opted out of it,
+  // rather than prompting the user only to reject the envelope later.
+  if (feeBumpConfig) {
+    assertWalletCapability(wallet, 'feeBump', 'submitWithRestore (fee-bump)')
+  }
+
   onSigning?.()
   const signedXdr = await wallet.signTransaction(asXdrBase64(tx.toXDR()), { networkPassphrase })
 

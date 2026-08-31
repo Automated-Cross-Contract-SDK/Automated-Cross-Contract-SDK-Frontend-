@@ -27,6 +27,7 @@ export type {
 export type {
   SorobanResurrectConfig,
   WalletAdapter,
+  WalletCapabilities,
   FeeBumpSponsor,
   FeeBumpConfig,
   HistoryStorage,
@@ -159,6 +160,14 @@ export type { SdkDefaults } from './constants.js'
 // ---------------------------------------------------------------------------
 // Typed event emitter (used by SorobanResurrect.on / once / off)
 // ---------------------------------------------------------------------------
+export {
+  walletMaySupport,
+  walletDeclares,
+  assertWalletCapability,
+  walletMaxOperations,
+} from './walletCapabilities.js'
+export type { BooleanWalletCapability } from './walletCapabilities.js'
+
 export { TypedEventEmitter } from './EventEmitter.js'
 export {
   ok,

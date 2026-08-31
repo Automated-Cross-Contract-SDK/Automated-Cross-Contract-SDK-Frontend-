@@ -142,6 +142,39 @@ export interface SorobanResurrectConfig {
 }
 
 /**
+ * Feature-detection flags a {@link WalletAdapter} may advertise so the SDK can
+ * pick the right code path instead of guessing (and relying on try/catch).
+ *
+ * All flags are optional. A missing flag means "unknown" — the SDK falls back to
+ * its previous best-effort behaviour (attempt the operation and handle failure).
+ * An explicit `false` lets the SDK fail fast with a clear error before prompting
+ * the user's wallet.
+ *
+ * @see {@link WalletAdapter.capabilities}
+ */
+export interface WalletCapabilities {
+  /**
+   * The wallet can sign individual Soroban authorization entries
+   * (CAP-0046 fine-grained authorization) via a `signAuthEntry` method.
+   */
+  signAuthEntry?: boolean
+  /**
+   * The wallet can sign fee-bump transaction envelopes (`ENVELOPE_TYPE_TX_FEE_BUMP`).
+   */
+  feeBump?: boolean
+  /**
+   * The wallet is backed by a hardware device (Ledger, Trezor, …). Signing may
+   * be slow and requires physical confirmation; blind-signing limits may apply.
+   */
+  hardware?: boolean
+  /**
+   * Maximum number of operations the wallet will sign in a single transaction,
+   * if the wallet imposes such a limit. Omit when there is no known limit.
+   */
+  maxOperations?: number
+}
+
+/**
  * Wallet interface that wraps browser or extension wallets (e.g. Freighter).
  *
  * @see {@link SubmitWithRestoreOptions.wallet}
@@ -152,6 +185,7 @@ export interface SorobanResurrectConfig {
  *   isConnected: async () => freighter.isConnected(),
  *   getPublicKey: async () => (await freighter.getAddress()).address,
  *   signTransaction: (xdr, opts) => freighter.signTransaction(xdr, opts),
+ *   capabilities: { signAuthEntry: true, feeBump: true, hardware: false },
  * }
  * ```
  */
@@ -165,6 +199,14 @@ export interface WalletAdapter {
     tx: XdrBase64,
     opts?: { networkPassphrase?: NetworkPassphrase | string; network?: string },
   ): Promise<XdrBase64>
+  /**
+   * Optional feature-detection flags. When present, the SDK uses them to choose
+   * between the CAP-0046 auth-entry path, the fee-bump path, and their
+   * fallbacks — instead of attempting the operation and catching failures.
+   *
+   * @see {@link WalletCapabilities}
+   */
+  capabilities?: WalletCapabilities
 }
 
 /**
