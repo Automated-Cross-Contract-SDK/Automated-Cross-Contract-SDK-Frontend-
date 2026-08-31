@@ -241,6 +241,23 @@ export interface ResurrectResult {
   archivedKeysDetected: number
   /** Error message if the workflow failed. */
   error?: string
+  /**
+   * Machine-readable error code for programmatic branching (present when
+   * `success` is `false`). Follows a GraphQL-like `extensions.code` pattern
+   * so consumers can switch on codes instead of parsing strings.
+   *
+   * @example
+   * ```ts
+   * if (!result.success) {
+   *   switch (result.errorCode) {
+   *     case 'WALLET_NOT_CONNECTED': promptConnect(); break
+   *     case 'RESTORE_TX_FAILED':   showRestoreError(); break
+   *     default:                    showGenericError(result.error)
+   *   }
+   * }
+   * ```
+   */
+  errorCode?: ResurrectErrorCode
   /** True when the result came from a dry-run (no transactions submitted). */
   dryRun?: boolean
   /** Detailed dry-run information (present when dryRun is true). */
