@@ -5,6 +5,7 @@ import {
   signTransaction as freighterSignTransaction,
 } from '@stellar/freighter-api'
 import type { WalletAdapter } from '@soroban-resurrect/sdk'
+import { asStellarPublicKey, asXdrBase64 } from '@soroban-resurrect/sdk'
 
 /**
  * WalletAdapter implementation for the Freighter browser extension wallet.
@@ -19,18 +20,18 @@ export class FreighterAdapter implements WalletAdapter {
     return Boolean(result.isConnected)
   }
 
-  async getPublicKey(): Promise<string> {
+  async getPublicKey() {
     const access = await requestAccess()
     if ('error' in access && access.error) {
       throw new Error(`Freighter: ${access.error}`)
     }
-    return access.address
+    return asStellarPublicKey(access.address)
   }
 
   async signTransaction(
     tx: string,
     opts?: { networkPassphrase?: string; network?: string },
-  ): Promise<string> {
+  ) {
     const address = await getAddress()
     if ('error' in address && address.error) {
       throw new Error(`Freighter: ${address.error}`)
@@ -45,6 +46,6 @@ export class FreighterAdapter implements WalletAdapter {
       throw new Error(`Freighter: ${result.error}`)
     }
 
-    return result.signedTxXdr
+    return asXdrBase64(result.signedTxXdr)
   }
 }

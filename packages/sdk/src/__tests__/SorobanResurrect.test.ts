@@ -11,6 +11,7 @@ import {
 } from '@stellar/stellar-sdk'
 import type { SorobanResurrectConfig, WalletAdapter } from '../types.js'
 import { executeWithRestore } from '../Executor.js'
+import { asTxHash } from '../branded-types.js'
 
 vi.mock('../Executor.js', () => ({
   executeWithRestore: vi.fn(),
@@ -97,12 +98,12 @@ describe('SorobanResurrect', () => {
     it('returns result from executeWithRestore on success', async () => {
       const mockResult = {
         success: true,
-        originalTxHash: 'orig-hash',
+        originalTxHash: asTxHash('orig-hash'),
         archivedKeysDetected: 0,
       }
       vi.mocked(executeWithRestore).mockImplementation(async (params) => {
         // Simulate the callback that sets success state
-        params.onOriginalSubmitted?.('orig-hash')
+        params.onOriginalSubmitted?.(asTxHash('orig-hash'))
         return mockResult
       })
 

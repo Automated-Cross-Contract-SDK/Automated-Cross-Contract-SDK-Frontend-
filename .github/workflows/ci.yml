@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [18, 20]
+        node-version: [18, 20, 22]
 
     steps:
       - uses: actions/checkout@v4
@@ -23,20 +23,28 @@ jobs:
 
       - run: npm ci
 
-      - run: npm run typecheck
+      - name: Typecheck (all packages via Turbo)
+        run: npm run typecheck
 
-      - run: npm run lint
+      - name: Lint (all packages via Turbo)
+        run: npm run lint
 
-      - run: npm run format
+      - name: Format check
+        run: npm run format
 
-      - run: npm test
+      - name: Test (all packages via Turbo)
+        run: npm test
 
-      - run: npm run test -w packages/sdk -- --coverage
-      - run: npm run test -w packages/react-hook -- --coverage
+      - name: Test with coverage (sdk)
+        run: npm run test -w packages/sdk -- --coverage
+
+      - name: Test with coverage (react-hook)
+        run: npm run test -w packages/react-hook -- --coverage
 
       - uses: codecov/codecov-action@v4
         with:
           files: packages/sdk/coverage/lcov.info,packages/react-hook/coverage/lcov.info
           fail_ci_if_error: false
 
-      - run: npm run build
+      - name: Build (all packages via Turbo)
+        run: npm run build

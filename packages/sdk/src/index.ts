@@ -1,62 +1,20 @@
+/**
+ * @soroban-resurrect/sdk — Public API barrel
+ *
+ * Only the symbols listed here are considered part of the stable public API.
+ * Internal helpers (Archiver, Restorer, Executor, Authorization, SimulationCache)
+ * are intentionally NOT exported; consumers should use the high-level
+ * `SorobanResurrect` class instead.
+ */
+
+// ---------------------------------------------------------------------------
+// Main class
+// ---------------------------------------------------------------------------
 export { SorobanResurrect } from './SorobanResurrect.js'
-export { executeWithRestore, sendTransaction } from './Executor.js'
-export {
-  categorizeAuthEntries,
-  signAuthorizationEntries,
-  attachAuthorizationEntries,
-  hashAuthorizationEntry,
-  requiresAddressAuthorization,
-  getAddressAuthEntries,
-} from './Authorization.js'
-export type {
-  CategorizedAuthEntry,
-  AuthorizationWalletAdapter,
-  AttachAuthorizationOptions,
-  SignAuthorizationEntriesOptions,
-} from './Authorization.js'
-export {
-  isRestoreResponse,
-  isSuccessResponse,
-  isErrorResponse,
-  extractArchivedKeys,
-  extractFootprintFromSuccess,
-  detectArchivedEntries,
-  detectArchivedKeysViaSimulation,
-  detectArchivedKeysViaDirect,
-  buildContractDataKey,
-  checkArchivedContractData,
-  getContractDataEntry,
-} from './Archiver.js'
-export type { DetectArchivedEntriesOptions } from './Archiver.js'
-export {
-  buildRestoreTransaction,
-  buildOriginalAfterRestore,
-  waitForTransaction,
-  waitForTransactionSSE,
-  prepareTransaction,
-  extractXdrOperations,
-  buildFeeBumpTransaction,
-  submitFeeBumpTransaction,
-} from './Restorer.js'
-export { SimulationCache } from './SimulationCache.js'
-export {
-  createDebugger,
-  isDebugEnabled,
-  refreshDebugFilter,
-  DEBUG_NAMESPACE_PREFIX,
-} from './Debug.js'
-export type { Debugger } from './Debug.js'
-export {
-  DEFAULT_NETWORK_PASSPHRASE,
-  DEFAULT_RPC_URL,
-  POLL_INTERVAL_MS,
-  POLL_TIMEOUT_MS,
-  RESTORE_FEE_MULTIPLIER,
-  KNOWN_NETWORK_PASSPHRASES,
-  LEDGER_ENTRY_CHUNK_SIZE,
-  LEDGER_ENTRY_CONCURRENCY,
-  resolveNetworkPassphrase,
-} from './constants.js'
+
+// ---------------------------------------------------------------------------
+// Public types
+// ---------------------------------------------------------------------------
 export type {
   SorobanResurrectConfig,
   WalletAdapter,
@@ -70,5 +28,66 @@ export type {
   RestoreState,
   RestoreStateInfo,
   SorobanResurrectEvents,
+  // Hardware wallet types
+  HardwareWalletAdapter,
+  LedgerAdapterConfig,
+  TrezorAdapterConfig,
 } from './types.js'
+
+// ---------------------------------------------------------------------------
+// TTL / ledger entry helpers (returned by SorobanResurrect.queryLedgerTTL etc.)
+// ---------------------------------------------------------------------------
+export type { LedgerEntryTTLInfo, TTLQueryResult } from './TTLHelpers.js'
+
+// ---------------------------------------------------------------------------
+// Transaction history (returned by SorobanResurrect.history / getHistory)
+// ---------------------------------------------------------------------------
+export type {
+  TransactionHistoryEntry,
+  TransactionAttemptStatus,
+} from './TransactionHistory.js'
+
+// ---------------------------------------------------------------------------
+// Hardware wallet adapters
+// ---------------------------------------------------------------------------
+export {
+  LedgerWalletAdapter,
+  TrezorWalletAdapter,
+  createLedgerAdapter,
+  createTrezorAdapter,
+} from './HardwareWalletAdapters.js'
+
+// ---------------------------------------------------------------------------
+// Public constants
+// ---------------------------------------------------------------------------
+export {
+  DEFAULT_NETWORK_PASSPHRASE,
+  DEFAULT_RPC_URL,
+  POLL_INTERVAL_MS,
+  POLL_TIMEOUT_MS,
+  RESTORE_FEE_MULTIPLIER,
+  KNOWN_NETWORK_PASSPHRASES,
+  resolveNetworkPassphrase,
+} from './constants.js'
+
+// ---------------------------------------------------------------------------
+// Typed event emitter (used by SorobanResurrect.on / once / off)
+// ---------------------------------------------------------------------------
 export { TypedEventEmitter } from './EventEmitter.js'
+export { resolveConfig } from './SorobanResurrectConfig.js'
+export type { ResolvedConfig } from './SorobanResurrectConfig.js'
+export { SorobanResurrectStateManager } from './SorobanResurrectState.js'
+export { SorobanResurrectSimulator } from './SorobanResurrectSimulation.js'
+export { SorobanResurrectExecutor } from './SorobanResurrectExecution.js'
+export type { LedgerEntryTTLInfo, TTLQueryResult } from './TTLHelpers.js'
+export {
+  queryLedgerTTL,
+  queryLedgerEntryTTL,
+  getExpiringSoonEntries,
+  getArchivedEntries,
+} from './TTLHelpers.js'
+export type {
+  TransactionHistoryEntry,
+  TransactionAttemptStatus,
+} from './TransactionHistory.js'
+export { TransactionHistory } from './TransactionHistory.js'

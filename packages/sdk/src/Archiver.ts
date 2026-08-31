@@ -1,10 +1,7 @@
 import { rpc, Transaction } from '@stellar/stellar-sdk'
 import { xdr } from '@stellar/stellar-sdk'
 import { ArchivedLedgerEntry, SimulateResponse } from './types.js'
-import { createDebugger } from './Debug.js'
-import { LEDGER_ENTRY_CHUNK_SIZE, LEDGER_ENTRY_CONCURRENCY } from './constants.js'
-
-const debug = createDebugger('archiver')
+import { asXdrBase64, asContractIdHex, type ContractIdHex } from './branded-types.js'
 
 /**
  * Type guard — returns true if the simulation response indicates archived
@@ -88,7 +85,7 @@ export function extractArchivedKeys(
     const readWrite = footprint.readWrite()
 
     for (const ledgerKey of readWrite) {
-      const keyBase64 = ledgerKey.toXDR('base64')
+      const keyBase64 = asXdrBase64(ledgerKey.toXDR('base64'))
       keys.push({
         key: ledgerKey,
         keyBase64,
@@ -226,7 +223,7 @@ async function detectArchivedChunk(
  *   simulate → extract-footprint steps.
  */
 export async function detectArchivedEntries(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   ledgerKeys: xdr.LedgerKey[],
   options: DetectArchivedEntriesOptions = {},
 ): Promise<ArchivedLedgerEntry[]> {
@@ -234,33 +231,36 @@ export async function detectArchivedEntries(
     return []
   }
 
-  const chunkSize =
-    options.chunkSize !== undefined && options.chunkSize >= 1
-      ? Math.floor(options.chunkSize)
-      : LEDGER_ENTRY_CHUNK_SIZE
-  const concurrency =
-    options.concurrency !== undefined && options.concurrency >= 1
-      ? Math.floor(options.concurrency)
-      : LEDGER_ENTRY_CONCURRENCY
-
-  const chunks = chunkKeys(ledgerKeys, chunkSize)
-  debug(
-    'detectArchivedEntries: checking %d keys in %d chunks of %d, concurrency %d',
-    ledgerKeys.length,
-    chunks.length,
-    chunkSize,
-    concurrency,
-  )
-
-  // Results are written at the chunk's own index so the output order matches
-  // the input regardless of which request settles first.
-  const results: ArchivedLedgerEntry[][] = new Array(chunks.length)
-  let next = 0
-
-  const worker = async (): Promise<void> => {
-    while (next < chunks.length) {
-      const index = next++
-      results[index] = await detectArchivedChunk(server, chunks[index], index)
+  const chunkSize = 50
+  for (let i = 0; i < ledgerKeys.length; i += chunkSize) {
+    const chunk = ledgerKeys.slice(i, i + chunkSize)
+    try {
+      const result = await server.getLedgerEntries(...chunk)
+      // Build a set of returned entry keys to identify archived ones
+      const knownKeys = new Set<string>()
+      if (result.entries) {
+        for (const entry of result.entries) {
+          knownKeys.add(entry.key.toXDR('base64'))
+        }
+      }
+      // Check each key in the chunk; if not in returned entries, it's archived
+      for (const key of chunk) {
+        const keyXdr = key.toXDR('base64')
+        if (!knownKeys.has(keyXdr)) {
+          archived.push({
+            key,
+            keyBase64: asXdrBase64(keyXdr),
+          })
+        }
+      }
+    } catch {
+      // On network error, conservatively treat all keys in chunk as archived
+      archived.push(
+        ...chunk.map((key) => ({
+          key,
+          keyBase64: asXdrBase64(key.toXDR('base64')),
+        })),
+      )
     }
   }
 
@@ -284,7 +284,7 @@ export async function detectArchivedEntries(
  *   direct-ledger-query strategy.
  */
 export async function detectArchivedKeysViaSimulation(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   transaction: Transaction,
 ): Promise<ArchivedLedgerEntry[]> {
   const response = await server.simulateTransaction(transaction)
@@ -318,7 +318,7 @@ export async function detectArchivedKeysViaSimulation(
  *   simulation-based strategy (`archiveDetectionMethod: 'simulation'`).
  */
 export async function detectArchivedKeysViaDirect(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   transaction: Transaction,
   options: DetectArchivedEntriesOptions = {},
 ): Promise<ArchivedLedgerEntry[]> {
@@ -349,13 +349,14 @@ export async function detectArchivedKeysViaDirect(
  * Builds a ContractData ledger key for a given contract ID and storage key.
  * This is used to query specific contract data entries on the ledger.
  *
- * @param contractId - The Stellar contract ID string (e.g. "CCJZ5...").
+ * @param contractId - The Stellar contract ID as a hex string (e.g. `"deadbeef..."`).
+ *   Use {@link asContractIdHex} to cast from a plain string at the call site.
  * @param key - The storage key as an xdr.ScVal.
  * @param keyType - The durability of the storage entry (persistent or temporary).
  * @returns An xdr.LedgerKey for the ContractData entry.
  */
 export function buildContractDataKey(
-  contractId: string,
+  contractId: ContractIdHex | string,
   key: xdr.ScVal,
   keyType: 'persistent' | 'temporary' = 'persistent',
 ): xdr.LedgerKey {
@@ -390,7 +391,8 @@ export function buildContractDataKey(
  * check specific storage slots without simulating a full transaction.
  *
  * @param server - Soroban RPC server instance.
- * @param contractId - The Stellar contract ID string.
+ * @param contractId - The Stellar contract ID as a hex string.
+ *   Use {@link asContractIdHex} to cast from a plain string at the call site.
  * @param key - The storage key as an xdr.ScVal.
  * @param keyType - The durability of the storage entry (persistent or temporary).
  * @returns `true` if the entry is archived (not found), `false` if it exists.
@@ -398,9 +400,10 @@ export function buildContractDataKey(
  * @example
  * ```ts
  * import { xdr } from '@stellar/stellar-sdk'
+ * import { asContractIdHex } from '@soroban-resurrect/sdk'
  * const isArchived = await checkArchivedContractData(
  *   server,
- *   'CCJZ5DGASBWQXR5G4GXEJM2Q4FI5L3QJ6TQ3QFJTQH7GJ6KJ3J2Q2K2Q',
+ *   asContractIdHex('CCJZ5DGASBWQXR5G4GXEJM2Q4FI5L3QJ6TQ3QFJTQH7GJ6KJ3J2Q2K2Q'),
  *   xdr.ScVal.scvSymbol('Balance'),
  *   'persistent',
  * )
@@ -408,7 +411,7 @@ export function buildContractDataKey(
  */
 export async function checkArchivedContractData(
   server: rpc.Server,
-  contractId: string,
+  contractId: ContractIdHex | string,
   key: xdr.ScVal,
   keyType: 'persistent' | 'temporary' = 'persistent',
 ): Promise<boolean> {
@@ -422,7 +425,8 @@ export async function checkArchivedContractData(
  * Returns the ledger entry data if it exists, or `null` if archived / not found.
  *
  * @param server - Soroban RPC server instance.
- * @param contractId - The Stellar contract ID string.
+ * @param contractId - The Stellar contract ID as a hex string.
+ *   Use {@link asContractIdHex} to cast from a plain string at the call site.
  * @param key - The storage key as an xdr.ScVal.
  * @param keyType - The durability of the storage entry (persistent or temporary).
  * @returns The ledger entry if found, otherwise `null`.
@@ -430,9 +434,10 @@ export async function checkArchivedContractData(
  * @example
  * ```ts
  * import { xdr } from '@stellar/stellar-sdk'
+ * import { asContractIdHex } from '@soroban-resurrect/sdk'
  * const entry = await getContractDataEntry(
  *   server,
- *   'CCJZ5DGASBWQXR5G4GXEJM2Q4FI5L3QJ6TQ3QFJTQH7GJ6KJ3J2Q2K2Q',
+ *   asContractIdHex('CCJZ5DGASBWQXR5G4GXEJM2Q4FI5L3QJ6TQ3QFJTQH7GJ6KJ3J2Q2K2Q'),
  *   xdr.ScVal.scvSymbol('Balance'),
  * )
  * if (entry) {
@@ -442,7 +447,7 @@ export async function checkArchivedContractData(
  */
 export async function getContractDataEntry(
   server: rpc.Server,
-  contractId: string,
+  contractId: ContractIdHex | string,
   key: xdr.ScVal,
   keyType: 'persistent' | 'temporary' = 'persistent',
 ): Promise<rpc.Api.LedgerEntryResult | null> {
