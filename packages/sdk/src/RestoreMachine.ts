@@ -22,6 +22,10 @@ export type RestoreMachineEvent =
   | { type: 'SUCCESS' }
   | { type: 'FAIL'; error: string }
   | { type: 'RESET' }
+  // --- Proactive / estimation events (additive) ---
+  | { type: 'ESTIMATE' }
+  | { type: 'WATCH_TTL' }
+  | { type: 'EXTEND_TTL' }
 
 // ---------------------------------------------------------------------------
 // Context
@@ -53,6 +57,9 @@ export type RestoreTypestate =
   | { value: 'confirming_restore'; context: RestoreMachineContext }
   | { value: 'signing_original'; context: RestoreMachineContext }
   | { value: 'submitting_original'; context: RestoreMachineContext }
+  | { value: 'estimating'; context: RestoreMachineContext }
+  | { value: 'watching_ttl'; context: RestoreMachineContext }
+  | { value: 'extending_ttl'; context: RestoreMachineContext }
   | { value: 'success'; context: RestoreMachineContext }
   | { value: 'error'; context: RestoreMachineContext }
 
@@ -105,6 +112,16 @@ const commonTransitions = {
  * <any intermediate>--SUCCESS----------> success
  * <any>             --RESET------------>  idle
  * ```
+ *
+ * Additive proactive / estimation transitions (not part of the submit flow):
+ * ```
+ * idle              --ESTIMATE--------->  estimating
+ * idle              --WATCH_TTL-------->  watching_ttl
+ * idle              --EXTEND_TTL------->  extending_ttl
+ * watching_ttl      --EXTEND_TTL------->  extending_ttl
+ * estimating|watching_ttl|extending_ttl --SUCCESS--> success
+ * estimating|watching_ttl|extending_ttl --FAIL----->  error
+ * ```
  */
 export const restoreMachine = createMachine<
   RestoreMachineContext,
@@ -125,6 +142,18 @@ export const restoreMachine = createMachine<
           SIMULATE: {
             target: 'simulating',
             actions: 'enterSimulating',
+          },
+          ESTIMATE: {
+            target: 'estimating',
+            actions: 'enterEstimating',
+          },
+          WATCH_TTL: {
+            target: 'watching_ttl',
+            actions: 'enterWatchingTtl',
+          },
+          EXTEND_TTL: {
+            target: 'extending_ttl',
+            actions: 'enterExtendingTtl',
           },
           RESET: {
             target: 'idle',
@@ -195,6 +224,30 @@ export const restoreMachine = createMachine<
           ...commonTransitions,
         },
       },
+      // --- Proactive / estimation states ---------------------------------
+      // These model long-running activity that is not part of the reactive
+      // submit flow. They are only reachable from `idle` and return there
+      // (or to `error`). `watching_ttl` can hand off to `extending_ttl`
+      // when the watcher decides a proactive bump is warranted.
+      estimating: {
+        on: {
+          ...commonTransitions,
+        },
+      },
+      watching_ttl: {
+        on: {
+          EXTEND_TTL: {
+            target: 'extending_ttl',
+            actions: 'enterExtendingTtl',
+          },
+          ...commonTransitions,
+        },
+      },
+      extending_ttl: {
+        on: {
+          ...commonTransitions,
+        },
+      },
       success: {
         on: {
           RESET: {
@@ -255,6 +308,21 @@ export const restoreMachine = createMachine<
 
       enterSubmittingOriginal: assign({
         message: () => 'Submitting original transaction...',
+      }),
+
+      enterEstimating: assign({
+        message: () => 'Estimating restore fee and resources...',
+        error: () => undefined,
+      }),
+
+      enterWatchingTtl: assign({
+        message: () => 'Watching ledger entry TTLs...',
+        error: () => undefined,
+      }),
+
+      enterExtendingTtl: assign({
+        message: () => 'Extending ledger entry TTL...',
+        error: () => undefined,
       }),
 
       enterSuccess: assign({

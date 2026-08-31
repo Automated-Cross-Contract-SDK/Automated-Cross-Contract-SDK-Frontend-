@@ -21,6 +21,8 @@ export default defineConfig({
           items: [
             { text: 'Getting Started', link: '/guide/getting-started' },
             { text: 'Tutorial: Common Use Cases', link: '/guide/tutorial' },
+            { text: 'Local Development', link: '/guide/local-development' },
+            { text: 'Local Package Development', link: '/guide/local-package-development' },
           ],
         },
       ],
@@ -30,6 +32,8 @@ export default defineConfig({
           items: [
             { text: 'SDK (@soroban-resurrect/sdk)', link: '/api/sdk' },
             { text: 'React Hook (@soroban-resurrect/react-hook)', link: '/api/react-hook' },
+            { text: 'Vue Hook (@soroban-resurrect/vue-hook)', link: '/api/vue-hook' },
+            { text: 'Svelte Hook (@soroban-resurrect/svelte-hook)', link: '/api/svelte-hook' },
             { text: 'Types', link: '/api/types' },
           ],
         },
