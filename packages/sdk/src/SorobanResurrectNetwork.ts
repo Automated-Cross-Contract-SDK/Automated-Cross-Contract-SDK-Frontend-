@@ -1,46 +1,10 @@
 import { SorobanResurrect } from './SorobanResurrect.js'
 import type { SorobanResurrectConfig } from './types.js'
+import { NETWORK_PRESETS } from './constants.js'
+import type { SorobanNetworkName, SorobanNetworkPreset } from './constants.js'
 
-/**
- * Well-known Stellar/Soroban network identifiers.
- *
- * Use these with {@link SorobanResurrectNetwork.create} to instantiate the SDK
- * pre-configured for a specific network without having to look up RPC URLs or
- * network passphrases manually.
- */
-export type SorobanNetworkName = 'testnet' | 'mainnet' | 'futurenet'
-
-/** Pre-configured RPC URL and network passphrase for a well-known network. */
-export interface SorobanNetworkPreset {
-  /** Soroban JSON-RPC endpoint URL. */
-  rpcUrl: string
-  /** Network passphrase used when signing and submitting transactions. */
-  networkPassphrase: string
-  /** Human-readable display name. */
-  displayName: string
-}
-
-/**
- * Pre-configured network presets for well-known Stellar/Soroban networks.
- * Each entry contains the canonical RPC URL and network passphrase.
- */
-export const NETWORK_PRESETS: Record<SorobanNetworkName, SorobanNetworkPreset> = {
-  testnet: {
-    rpcUrl: 'https://soroban-testnet.stellar.org',
-    networkPassphrase: 'Test SDF Network ; September 2015',
-    displayName: 'Testnet',
-  },
-  mainnet: {
-    rpcUrl: 'https://mainnet.stellar.validationcloud.io/v1/XCSmR1pP5PR9HBMcUxnHEHaZiVlFpF8A',
-    networkPassphrase: 'Public Global Stellar Network ; September 2015',
-    displayName: 'Mainnet',
-  },
-  futurenet: {
-    rpcUrl: 'https://rpc-futurenet.stellar.org',
-    networkPassphrase: 'Test SDF Future Network ; September 2015',
-    displayName: 'Futurenet',
-  },
-}
+export type { SorobanNetworkName, SorobanNetworkPreset }
+export { NETWORK_PRESETS }
 
 /**
  * Utility class for instantiating and switching the Soroban-Resurrect SDK

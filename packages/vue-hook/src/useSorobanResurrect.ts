@@ -18,6 +18,7 @@ import {
   type RestoreState,
   type ArchivedLedgerEntry,
   type ResurrectResult,
+  type SorobanResurrectEvents,
 } from '@soroban-resurrect/sdk'
 import type { Transaction } from '@stellar/stellar-sdk'
 
@@ -33,6 +34,15 @@ export interface UseSorobanResurrectReturn {
   detectArchivedKeys: (transaction: Transaction) => Promise<ArchivedLedgerEntry[]>
   /** Reset state back to idle. Optionally, only reset if in a specific state. */
   reset: (fromState?: RestoreState) => void
+  /**
+   * Subscribes to a typed lifecycle event (`restoreNeeded`, `restoreSubmitted`,
+   * `restoreConfirmed`, `originalSubmitted`, `error`, `restoreComplete`, `stateChange`)
+   * on the current SDK instance. Returns an unsubscribe function.
+   */
+  on: <K extends keyof SorobanResurrectEvents>(
+    event: K,
+    listener: (payload: SorobanResurrectEvents[K]) => void,
+  ) => () => void
   /** The underlying SDK instance. */
   resurrect: ShallowRef<SorobanResurrect | null>
 }
@@ -107,12 +117,20 @@ export function useSorobanResurrect(
     resurrect.value?.reset(fromState)
   }
 
+  const on = <K extends keyof SorobanResurrectEvents>(
+    event: K,
+    listener: (payload: SorobanResurrectEvents[K]) => void,
+  ): (() => void) => {
+    return resurrect.value?.on(event, listener) ?? (() => {})
+  }
+
   return {
     state,
     isProcessing,
     submitWithRestore,
     detectArchivedKeys,
     reset,
+    on,
     resurrect,
   }
 }
