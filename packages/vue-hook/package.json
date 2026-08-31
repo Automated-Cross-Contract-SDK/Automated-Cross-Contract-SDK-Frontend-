@@ -18,6 +18,10 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./composable": {
+      "import": "./dist/composable.js",
+      "types": "./dist/composable.d.ts"
     }
   },
   "files": [

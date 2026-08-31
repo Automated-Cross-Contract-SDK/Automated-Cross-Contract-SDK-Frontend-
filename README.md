@@ -185,6 +185,48 @@ const { state, isProcessing, submitWithRestore, reset } = useSorobanResurrect(co
 
 All hooks in `@soroban-resurrect/react-hook` use only standard React APIs (`useState`, `useCallback`, `useRef`, `useEffect`) and contain no browser-specific code, making them fully compatible with React Native out of the box. See `examples/react-native/` for a complete example.
 
+### Package entry points (tree-shaking)
+
+Each hook package ships focused subpath exports so consumers only pull in the
+code they use. The root entry (`.`) still re-exports everything for backwards
+compatibility.
+
+- `@soroban-resurrect/react-hook/standalone` — `useSorobanResurrect` only (no provider code)
+- `@soroban-resurrect/react-hook/context` — `SorobanResurrectProvider`, `useSorobanResurrectContext`, `useSorobanResurrectSelector`
+- `@soroban-resurrect/vue-hook/composable` — the `useSorobanResurrect` composable
+- `@soroban-resurrect/svelte-hook/store` — the `createSorobanResurrect` factory
+
+```ts
+// Pull in only the standalone hook — the provider/context code is tree-shaken away.
+import { useSorobanResurrect } from '@soroban-resurrect/react-hook/standalone'
+```
+
+#### Context selectors (avoid re-renders)
+
+`useSorobanResurrectSelector(selectorFn, isEqual?)` subscribes to a single slice
+of the context value via `useSyncExternalStore`. A consumer that reads only
+`isProcessing` will not re-render when unrelated state (e.g. `state.message`)
+changes:
+
+```tsx
+import { useSorobanResurrectSelector } from '@soroban-resurrect/react-hook/context'
+
+function Spinner() {
+  const isProcessing = useSorobanResurrectSelector((s) => s.isProcessing)
+  return isProcessing ? <LoadingDots /> : null
+}
+```
+
+#### Vue derived helpers
+
+The Vue composable returns `isProcessing` plus `isIdle`, `isSuccess`, and
+`isError` as reactive `ComputedRef<boolean>` values driven by `state`, reusing
+the SDK's shared `isProcessingState` util:
+
+```ts
+const { isProcessing, isIdle, isSuccess, isError } = useSorobanResurrect(config)
+```
+
 ---
 
 ## Architecture
