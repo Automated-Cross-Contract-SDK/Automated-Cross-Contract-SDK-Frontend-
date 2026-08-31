@@ -1,4 +1,6 @@
 import { SorobanResurrectConfig } from './types.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
+import { SorobanRpcClient } from './RpcClient.js'
 import {
   DEFAULT_NETWORK_PASSPHRASE,
   POLL_INTERVAL_MS,

@@ -16,13 +16,13 @@ const sr = new SorobanResurrect({ rpcUrl: 'https://soroban-testnet.stellar.org' 
 constructor(config: SorobanResurrectConfig)
 ```
 
-See [`SorobanResurrectConfig`](/api/types#sorobanresurrectconfig) for all options and their defaults.
+See [`SorobanResurrectConfig`](/api/types#sorobanresurrectconfig) for all options and their defaults — including `rpcClient` for injecting a test double (see [Testing](/guide/testing)).
 
 ### Properties
 
 | Property    | Type                              | Description                                          |
 | ----------- | --------------------------------- | ----------------------------------------------------- |
-| `server`    | `rpc.Server`                      | The underlying Soroban RPC server instance.           |
+| `server`    | `ISorobanRpcClient`               | The RPC client instance — `config.rpcClient` when supplied, otherwise an auto-created `SorobanRpcClient`. See [Testing](/guide/testing). |
 | `config`    | `Required<SorobanResurrectConfig>`| Resolved configuration with all defaults applied.     |
 | `state`     | `RestoreState`                    | Current workflow state (getter).                      |
 | `stateInfo` | `RestoreStateInfo`                | State + message + archived keys + error (getter).     |

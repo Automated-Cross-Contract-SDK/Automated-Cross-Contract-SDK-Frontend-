@@ -233,8 +233,8 @@ simulate(transaction: Transaction): Promise<SimulateResponse>
 detectArchivedKeys(transaction: Transaction): Promise<ArchivedLedgerEntry[]>
 needsRestore(transaction: Transaction): Promise<boolean>
 buildRestoreTx(sourcePublicKey: string, transaction: Transaction): Promise<Transaction>
-estimateRestoreCost(transaction: Transaction): Promise<RestoreCostEstimate>
 submitWithRestore(options: SubmitWithRestoreOptions): Promise<ResurrectResult>
+retry(entryId: string, wallet: WalletAdapter): Promise<ResurrectResult>
 reset(fromState?: RestoreState): void
 onStateChange(listener: (info: RestoreStateInfo) => void): () => void  // unsubscribe
 ```
@@ -286,12 +286,18 @@ useSorobanResurrect({ config }): UseSorobanResurrectReturn  // same shape
 ```typescript
 interface SorobanResurrectConfig {
   rpcUrl: string
-  networkPassphrase?: string // default: Testnet
+  networkPassphrase?: string // default: resolved from rpcUrl, else Testnet
   pollIntervalMs?: number // default: 1000
   pollTimeoutMs?: number // default: 60000
   rpcClient?: ISorobanRpcClient // default: a SorobanRpcClient built from rpcUrl — inject to customize the RPC transport
 }
+```
 
+> Full field-by-field defaults and guidance live in
+> [`docs/api/types.md`](docs/api/types.md#sorobanresurrectconfig) — this snippet
+> is kept in sync with [`types.ts`](packages/sdk/src/types.ts).
+
+```typescript
 interface WalletAdapter {
   isConnected(): Promise<boolean>
   getPublicKey(): Promise<string>
@@ -342,6 +348,10 @@ npm run dev:example
 # Run the documentation site locally
 npm run docs:dev
 ```
+
+To inject a test double for the RPC client (instead of hitting a real
+Soroban RPC endpoint) when writing tests against this SDK, see
+[`docs/guide/testing.md`](docs/guide/testing.md).
 
 ### Documentation Site
 

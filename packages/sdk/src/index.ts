@@ -40,6 +40,12 @@ export type {
 export { ResurrectError } from './errors.js'
 
 // ---------------------------------------------------------------------------
+// RPC abstraction layer (dependency injection / testing — see RpcClient.ts)
+// ---------------------------------------------------------------------------
+export type { ISorobanRpcClient } from './RpcClient.js'
+export { SorobanRpcClient, createRpcClient } from './RpcClient.js'
+
+// ---------------------------------------------------------------------------
 // TTL / ledger entry helpers (returned by SorobanResurrect.queryLedgerTTL etc.)
 // ---------------------------------------------------------------------------
 export type { LedgerEntryTTLInfo, TTLQueryResult, LedgerKeyEntryType } from './TTLHelpers.js'

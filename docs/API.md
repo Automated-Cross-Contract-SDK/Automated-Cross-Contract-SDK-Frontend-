@@ -7,7 +7,11 @@ listed here also carries full JSDoc (parameters, return values, `@throws`,
 inline docs, or read the linked source file below.
 
 For a narrative walkthrough of how these pieces fit together, see
-[`ARCHITECTURE.md`](../ARCHITECTURE.md).
+[`ARCHITECTURE.md`](../ARCHITECTURE.md). For the full, canonical
+`SorobanResurrectConfig` field table (kept in sync with `types.ts`), see
+[`docs/api/types.md`](api/types.md#sorobanresurrectconfig). For how to inject a
+test double / swap the RPC client in tests, see
+[`docs/guide/testing.md`](guide/testing.md).
 
 ## Contents
 

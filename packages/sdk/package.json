@@ -26,6 +26,7 @@
     "@xstate/fsm": "2.0.1"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "^2.0.0",
     "tsup": "^8.5.1",
     "typescript": "^5.5.0",
     "vitest": "^2.0.0"

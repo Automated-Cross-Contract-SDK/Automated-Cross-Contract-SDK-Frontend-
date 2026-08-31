@@ -6,6 +6,7 @@ import {
   SubmitWithRestoreOptions,
   WalletAdapter,
 } from './types.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
 import { executeWithRestore, sendTransaction as _sendTransaction } from './Executor.js'
 import {
   buildRestoreTransaction,
