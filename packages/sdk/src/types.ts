@@ -1,4 +1,4 @@
-import { Transaction, xdr } from '@stellar/stellar-sdk'
+import { Transaction, xdr, Memo } from '@stellar/stellar-sdk'
 import { rpc } from '@stellar/stellar-sdk'
 import type { ISorobanRpcClient } from './RpcClient.js'
 import type { LedgerEntryTTLInfo } from './TTLHelpers.js'
@@ -104,6 +104,25 @@ export interface SorobanResurrectConfig {
    * (observe-only — the caller decides what to do with `ttlLow`).
    */
   ttlWatchAutoExtend?: boolean
+  /**
+   * Optional memo attached to restore transactions built by the SDK.
+   *
+   * Restore transactions are otherwise built with no memo, so wallets and
+   * explorers show a bare `restoreFootprint` operation with no indication of
+   * why the signature is being requested. Setting a memo here makes the
+   * prompt self-explanatory (e.g. `Memo.text('Soroban archive restore')`).
+   *
+   * Default: `undefined` (no memo — unchanged behaviour for existing users).
+   *
+   * @see {@link restoreTxMemoText} for a plain-string convenience form.
+   */
+  restoreTxMemo?: Memo
+  /**
+   * Convenience string form of {@link restoreTxMemo}. When set (and
+   * `restoreTxMemo` is not), a `Memo.text(restoreTxMemoText)` is attached to
+   * restore transactions. Ignored when {@link restoreTxMemo} is provided.
+   */
+  restoreTxMemoText?: string
   /**
    * Optional pre-built RPC client to use instead of creating one from `rpcUrl`.
    *
@@ -268,6 +287,43 @@ export interface ArchivedLedgerEntry {
 export type SimulateResponse = rpc.Api.SimulateTransactionResponse
 
 /**
+ * Parsed on-chain diagnostics for a failed transaction.
+ *
+ * Populated on {@link ResurrectResult.diagnostics} when `waitForTransaction`
+ * reports `FAILED` for either the restore transaction or the original
+ * transaction. Absent entirely on success so the success result shape stays
+ * lean.
+ */
+export interface TxDiagnostics {
+  /**
+   * Human-readable summaries of the `DiagnosticEvent`s attached to the failed
+   * transaction, in on-chain order. Empty when the RPC returned no diagnostic
+   * events (e.g. classic pre-flight failures).
+   */
+  events: string[]
+  /**
+   * Zero-based index of the operation that failed, when derivable from the
+   * transaction result XDR.
+   */
+  failedOpIndex?: number
+  /**
+   * Best-effort decoded revert / panic / error message extracted from the
+   * diagnostic events, when one is present and decodable.
+   */
+  revertReason?: string
+  /**
+   * Transaction- and operation-level result codes from the result XDR
+   * (e.g. `txFailed`, `invokeHostFunctionTrapped`).
+   */
+  resultCodes?: string[]
+  /**
+   * Raw base64-encoded `DiagnosticEvent` XDR strings, for callers that want to
+   * decode them with their own tooling.
+   */
+  rawEventsXdr?: string[]
+}
+
+/**
  * Result returned from the restore-and-submit workflow.
  *
  * @see {@link SorobanResurrect.submitWithRestore}
@@ -377,6 +433,16 @@ export interface SubmitWithRestoreOptions {
   onOriginalSubmitted?: (txHash: TxHash) => void
   /** Called when the restore step of the workflow fails. */
   onRestoreFailed?: (error: string) => void
+  /**
+   * Per-call override for {@link SorobanResurrectConfig.restoreTxMemo}.
+   * Takes precedence over the instance config for this workflow only.
+   */
+  restoreTxMemo?: Memo
+  /**
+   * Per-call override for {@link SorobanResurrectConfig.restoreTxMemoText}.
+   * Ignored when {@link restoreTxMemo} is provided.
+   */
+  restoreTxMemoText?: string
 }
 
 /**

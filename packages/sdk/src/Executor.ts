@@ -296,6 +296,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       if (restoreStatus.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
         const err = 'Restore transaction failed'
         onRestoreFailed?.(err)
+        const diagnostics = parseTransactionDiagnostics(restoreStatus)
         return {
           success: false,
           archivedKeysDetected: archivedKeys.length,
@@ -376,8 +377,20 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
     }
 
     if (isSuccessResponse(simResponse)) {
+      // CAP-0046 fine-grained auth: if simulation surfaced address-credential
+      // auth entries, sign + attach them with the wallet's signAuthEntry
+      // before signing the transaction itself. If the wallet can't sign them
+      // and they're required, ensureAddressAuthorization throws a clear error
+      // which the outer catch turns into { success: false, error }.
+      const { transaction: txToSubmit } = await ensureAddressAuthorization({
+        transaction: originalTx,
+        simulation: simResponse,
+        wallet,
+        networkPassphrase,
+      })
+
       const { hash } = await signAndMaybeFeeBump({
-        tx: originalTx,
+        tx: txToSubmit,
         wallet,
         feeBumpConfig,
         networkPassphrase,

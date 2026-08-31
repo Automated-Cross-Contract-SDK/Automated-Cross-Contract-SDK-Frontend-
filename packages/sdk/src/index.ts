@@ -36,6 +36,7 @@ export type {
   ArchiveDetectionOptions,
   SimulateResponse,
   ResurrectResult,
+  TxDiagnostics,
   DryRunResult,
   SubmitWithRestoreOptions,
   RestoreKeysOptions,
@@ -104,6 +105,12 @@ export type {
 // State machine utilities (proactive / estimation states — #238)
 // ---------------------------------------------------------------------------
 export { isProcessingState, PROCESSING_STATES } from './stateUtils.js'
+
+// ---------------------------------------------------------------------------
+// Wallet-adapter factory
+// ---------------------------------------------------------------------------
+export { createAdapter, isKnownWallet, SUPPORTED_WALLETS } from './createAdapter.js'
+export type { KnownWallet, AdapterImporter, CreateAdapterOptions } from './createAdapter.js'
 
 // ---------------------------------------------------------------------------
 // TTL / ledger entry helpers (returned by SorobanResurrect.queryLedgerTTL etc.)
