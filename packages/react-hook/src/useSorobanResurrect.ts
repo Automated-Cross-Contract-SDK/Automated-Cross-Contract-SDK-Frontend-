@@ -8,6 +8,7 @@ import {
   type ArchivedLedgerEntry,
   type ResurrectResult,
   type RestoreState,
+  type SorobanResurrectEvents,
 } from '@soroban-resurrect/sdk'
 import type { Transaction } from '@stellar/stellar-sdk'
 
@@ -29,6 +30,15 @@ export interface UseSorobanResurrectReturn {
   detectArchivedKeys: (transaction: Transaction) => Promise<ArchivedLedgerEntry[]>
   /** Reset state back to idle. Optionally, only reset if in a specific state. */
   reset: (fromState?: RestoreState) => void
+  /**
+   * Subscribes to a typed lifecycle event (`restoreNeeded`, `restoreSubmitted`,
+   * `restoreConfirmed`, `originalSubmitted`, `error`, `restoreComplete`, `stateChange`)
+   * on the current SDK instance. Returns an unsubscribe function.
+   */
+  on: <K extends keyof SorobanResurrectEvents>(
+    event: K,
+    listener: (payload: SorobanResurrectEvents[K]) => void,
+  ) => () => void
   /** The underlying SDK instance. */
   resurrect: SorobanResurrect
 }
@@ -75,10 +85,7 @@ export function useSorobanResurrect(
   })
 
   // Track config changes and reinitialize SDK when config updates
-  if (
-    !prevConfigRef.current ||
-    JSON.stringify(config) !== JSON.stringify(prevConfigRef.current)
-  ) {
+  if (!prevConfigRef.current || JSON.stringify(config) !== JSON.stringify(prevConfigRef.current)) {
     prevConfigRef.current = config
     resurrectRef.current = new SorobanResurrect(config)
   }
@@ -104,6 +111,13 @@ export function useSorobanResurrect(
     resurrectRef.current!.reset(fromState)
   }, [])
 
+  const on = useCallback(<K extends keyof SorobanResurrectEvents>(
+    event: K,
+    listener: (payload: SorobanResurrectEvents[K]) => void,
+  ) => {
+    return resurrectRef.current!.on(event, listener)
+  }, [])
+
   const isProcessing = isProcessingState(state.state)
 
   return {
@@ -112,6 +126,7 @@ export function useSorobanResurrect(
     submitWithRestore,
     detectArchivedKeys,
     reset,
+    on,
     resurrect: resurrectRef.current!,
   }
 }

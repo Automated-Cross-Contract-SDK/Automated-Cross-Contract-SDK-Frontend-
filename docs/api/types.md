@@ -6,64 +6,34 @@ All types below are exported from `@soroban-resurrect/sdk`.
 
 Configuration options for creating a `SorobanResurrect` instance.
 
-This is the single canonical reference for every field. It is kept in sync with the
-`SorobanResurrectConfig` interface in
-[`packages/sdk/src/types.ts`](../../packages/sdk/src/types.ts) — if you add or change a field
-there, update the snippet and table below in the same change. The `README.md` config snippet
-links back to this page rather than repeating the field list, so there is exactly one place for
-this drift to happen instead of three.
+This is the canonical reference for `SorobanResurrectConfig` — every field below is
+cross-checked against [`types.ts`](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/blob/main/packages/sdk/src/types.ts).
+Other documents (`README.md`, `docs/API.md`, `ARCHITECTURE.md`) link back here instead
+of maintaining their own copy of the field list.
 
 ```typescript
 interface SorobanResurrectConfig {
   rpcUrl: string
-  networkPassphrase?: string // default: Testnet
+  networkPassphrase?: string // default: resolved from rpcUrl, else Testnet
   pollIntervalMs?: number // default: 1000
   pollTimeoutMs?: number // default: 60000
-  restoreFeeMultiplier?: number // default: 3
+  restoreFeeMultiplier?: number // default: 3 — see "Choosing restoreFeeMultiplier" below
   archiveDetectionMethod?: 'simulation' | 'direct' // default: 'simulation'
-  enableSimulationCache?: boolean // default: false
-  useSSE?: boolean // default: false
-  rpcClient?: ISorobanRpcClient // default: undefined (creates one from rpcUrl)
+  archiveDetectionChunkSize?: number // default: 50
+  archiveDetectionConcurrency?: number // default: 4
 }
 ```
 
-| Field                    | Description                                                                                                                                               |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `rpcUrl`                 | URL of the Soroban RPC endpoint.                                                                                                                          |
-| `networkPassphrase`      | Network passphrase (defaults to Testnet).                                                                                                                 |
-| `pollIntervalMs`         | Polling interval in ms when waiting for transaction confirmation.                                                                                         |
-| `pollTimeoutMs`          | Timeout in ms when waiting for transaction confirmation.                                                                                                  |
-| `restoreFeeMultiplier`   | Multiplier applied to `minResourceFee` when building a restore transaction. See "Restore fee model" below.                                                |
-| `archiveDetectionMethod` | Method for detecting archived keys: `'simulation'` (default, piggybacks on the transaction's own simulation) or `'direct'` (queries the ledger directly). |
-| `enableSimulationCache`  | Caches simulation responses to reduce RPC calls when the same transaction is simulated repeatedly (e.g. across retries).                                  |
-| `useSSE`                 | Uses SSE-based transaction status waiting when the RPC endpoint and runtime support it, falling back to adaptive polling otherwise.                       |
-| `rpcClient`              | A pre-built `ISorobanRpcClient` to use instead of creating one from `rpcUrl` — for dependency injection and test doubles.                                 |
-
-### Restore fee model
-
-A restore transaction's fee is `minResourceFee × restoreFeeMultiplier`, where `minResourceFee`
-comes from simulating the restore and `restoreFeeMultiplier` defaults to **3** (`RESTORE_FEE_MULTIPLIER`
-in `constants.ts` — the single source of truth for the default; nothing else hardcodes it).
-
-Earlier versions of this SDK defaulted to `100×`, which could significantly overpay on Mainnet
-during normal conditions. `3×` is a reasonable balance for typical usage. Raise it when you need
-more headroom:
-
-- **Raise the multiplier** (e.g. `5`–`10`) when restore transactions are failing to get included
-  during network congestion — a higher fee makes inclusion more likely at the cost of overpaying
-  when the network isn't congested.
-- **Lower it** (down to the minimum of `1`) when you want the cheapest possible restore and can
-  tolerate occasional inclusion delay — acceptable for background/maintenance restores that aren't
-  blocking a user-facing action.
-- The value must be a finite number `>= 1`; `resolveConfig` throws
-  `config.restoreFeeMultiplier must be a finite number greater than or equal to 1` otherwise.
-
-```typescript
-const resurrect = new SorobanResurrect({
-  rpcUrl: 'https://soroban-rpc.mainnet.stellar.org',
-  restoreFeeMultiplier: 5, // more headroom during Mainnet congestion
-})
-```
+| Field                     | Description                                                                 |
+| -------------------------- | ------------------------------------------------------------------------------ |
+| `rpcUrl`                   | URL of the Soroban RPC endpoint.                                               |
+| `networkPassphrase`        | Network passphrase (defaults to Testnet).                                      |
+| `pollIntervalMs`           | Polling interval in ms when waiting for transaction confirmation.              |
+| `pollTimeoutMs`             | Timeout in ms when waiting for transaction confirmation.                       |
+| `restoreFeeMultiplier`     | Multiplier applied to `minResourceFee` when building a restore transaction.    |
+| `archiveDetectionMethod`   | Method for detecting archived keys: `'simulation'` (default) or `'direct'`.    |
+| `archiveDetectionChunkSize` | Ledger keys per `getLedgerEntries` request during `'direct'` detection.       |
+| `archiveDetectionConcurrency` | Chunk requests kept in flight at once during `'direct'` detection.          |
 
 ## `WalletAdapter`
 
@@ -159,7 +129,18 @@ type RestoreState =
   | 'submitting_original'
   | 'success'
   | 'error'
+  // Proactive / estimation states (additive, non-submit)
+  | 'estimating'
+  | 'watching_ttl'
+  | 'extending_ttl'
 ```
+
+The last three are **additive** — they model long-running activity outside
+the reactive submit flow (fee estimation and proactive TTL
+watch-and-extend). Existing consumers keep working unchanged.
+`isProcessingState()` returns `true` for `estimating` and `extending_ttl`
+(active work) and `false` for `watching_ttl` (a passive background poll,
+like `idle`); its result for every pre-existing state is unchanged.
 
 ## `RestoreStateInfo`
 
@@ -171,5 +152,36 @@ interface RestoreStateInfo {
   message: string
   archivedKeys?: ArchivedLedgerEntry[]
   error?: string
+}
+```
+
+## `Logger`
+
+Structured logging sink supplied via [`SorobanResurrectConfig.logger`](#sorobanresurrectconfig).
+Silent by default — see the [Observability section](/api/sdk#observability-injectable-logger-rpc-timings).
+
+```typescript
+type LogLevel = 'debug' | 'info' | 'warn' | 'error'
+type LogContext = Record<string, unknown>
+
+interface Logger {
+  debug(message: string, context?: LogContext): void
+  info(message: string, context?: LogContext): void
+  warn(message: string, context?: LogContext): void
+  error(message: string, context?: LogContext): void
+}
+```
+
+## `RpcTimingEvent`
+
+Emitted via `logger.debug` once per RPC round-trip.
+
+```typescript
+interface RpcTimingEvent {
+  method: string // the ISorobanRpcClient method called
+  durationMs: number // wall-clock duration
+  ok: boolean // resolved (true) or rejected (false)
+  requestId?: string // correlation id of the enclosing workflow
+  error?: string // message when ok === false
 }
 ```
