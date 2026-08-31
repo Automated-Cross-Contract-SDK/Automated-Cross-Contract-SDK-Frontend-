@@ -6,14 +6,21 @@ All types below are exported from `@soroban-resurrect/sdk`.
 
 Configuration options for creating a `SorobanResurrect` instance.
 
+This is the canonical reference for `SorobanResurrectConfig` — every field below is
+cross-checked against [`types.ts`](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/blob/main/packages/sdk/src/types.ts).
+Other documents (`README.md`, `docs/API.md`, `ARCHITECTURE.md`) link back here instead
+of maintaining their own copy of the field list.
+
 ```typescript
 interface SorobanResurrectConfig {
   rpcUrl: string
-  networkPassphrase?: string // default: Testnet
+  networkPassphrase?: string // default: resolved from rpcUrl, else Testnet
   pollIntervalMs?: number // default: 1000
   pollTimeoutMs?: number // default: 60000
-  restoreFeeMultiplier?: number // default: 100
+  restoreFeeMultiplier?: number // default: 3 — see "Choosing restoreFeeMultiplier" below
   archiveDetectionMethod?: 'simulation' | 'direct' // default: 'simulation'
+  archiveDetectionChunkSize?: number // default: 50
+  archiveDetectionConcurrency?: number // default: 4
 }
 ```
 
@@ -25,6 +32,8 @@ interface SorobanResurrectConfig {
 | `pollTimeoutMs`             | Timeout in ms when waiting for transaction confirmation.                       |
 | `restoreFeeMultiplier`     | Multiplier applied to `minResourceFee` when building a restore transaction.    |
 | `archiveDetectionMethod`   | Method for detecting archived keys: `'simulation'` (default) or `'direct'`.    |
+| `archiveDetectionChunkSize` | Ledger keys per `getLedgerEntries` request during `'direct'` detection.       |
+| `archiveDetectionConcurrency` | Chunk requests kept in flight at once during `'direct'` detection.          |
 
 ## `WalletAdapter`
 

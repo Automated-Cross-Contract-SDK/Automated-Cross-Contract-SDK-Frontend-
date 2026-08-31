@@ -1,0 +1,18 @@
+{
+  "defaultNetworkPassphrase": "Test SDF Network ; September 2015",
+  "defaultRpcUrl": "https://soroban-testnet.stellar.org",
+  "pollIntervalMs": 1000,
+  "pollTimeoutMs": 60000,
+  "restoreFeeMultiplier": 3,
+  "knownNetworkPassphrases": [
+    "Test SDF Network ; September 2015",
+    "Public Global Stellar Network ; September 2015",
+    "Test SDF Future Network ; October 2022"
+  ],
+  "urlToPassphrase": {
+    "soroban-testnet.stellar.org": "Test SDF Network ; September 2015",
+    "soroban-mainnet.stellar.org": "Public Global Stellar Network ; September 2015",
+    "futurenet.stellar.org": "Test SDF Future Network ; September 2015",
+    "localhost": "Test SDF Network ; September 2015"
+  }
+}
