@@ -1,5 +1,7 @@
 import { Transaction, xdr } from '@stellar/stellar-sdk'
 import { rpc } from '@stellar/stellar-sdk'
+import type { ISorobanRpcClient } from './RpcClient.js'
+import type { LedgerEntryTTLInfo } from './TTLHelpers.js'
 import type {
   TxHash,
   XdrBase64,
@@ -84,6 +86,24 @@ export interface SorobanResurrectConfig {
   rpcCircuitBreakerThreshold?: number
   /** Cooldown in ms the circuit breaker stays open before allowing calls through again (default: 30000). */
   rpcCircuitBreakerCooldownMs?: number
+  /**
+   * Default polling cadence (ms) for `watchTTL()` when a call doesn't
+   * override it via `TTLWatchOptions.intervalMs`. Defaults to 60_000 (1 min).
+   */
+  ttlWatchIntervalMs?: number
+  /**
+   * Default "expiring soon" threshold (in remaining ledgers) for
+   * `watchTTL()` when a call doesn't override it via
+   * `TTLWatchOptions.thresholdLedgers`. Defaults to 17_280 (~24h at 5s/ledger).
+   */
+  ttlWatchThreshold?: number
+  /**
+   * Default for whether `watchTTL()` automatically submits a restore
+   * transaction when an entry crosses the threshold, when a call doesn't
+   * override it via `TTLWatchOptions.autoExtend`. Defaults to `false`
+   * (observe-only — the caller decides what to do with `ttlLow`).
+   */
+  ttlWatchAutoExtend?: boolean
   /**
    * Optional pre-built RPC client to use instead of creating one from `rpcUrl`.
    *

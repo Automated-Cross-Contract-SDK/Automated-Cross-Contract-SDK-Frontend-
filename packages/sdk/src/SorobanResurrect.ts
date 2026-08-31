@@ -9,6 +9,8 @@ import type {
   SubmitWithRestoreOptions,
   SorobanResurrectEvents,
 } from './types.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
+import type { StellarPublicKey } from './branded-types.js'
 import { resolveConfig } from './SorobanResurrectConfig.js'
 import type { ISorobanRpcClient } from './RpcClient.js'
 import type { StellarPublicKey } from './branded-types.js'
@@ -18,11 +20,7 @@ import { SorobanResurrectExecutor } from './SorobanResurrectExecution.js'
 import { isRestoreResponse, extractArchivedKeys } from './Archiver.js'
 import { buildRestoreCostEstimate, type RestoreCostEstimate } from './feeCalculation.js'
 import type { TransactionHistoryEntry } from './TransactionHistory.js'
-import {
-  queryLedgerTTL,
-  queryLedgerEntryTTL,
-  getExpiringSoonEntries,
-} from './TTLHelpers.js'
+import { queryLedgerTTL, queryLedgerEntryTTL, getExpiringSoonEntries } from './TTLHelpers.js'
 import type { LedgerEntryTTLInfo, TTLQueryResult } from './TTLHelpers.js'
 import { NETWORK_PRESETS } from './constants.js'
 import type { SorobanNetworkName } from './constants.js'
@@ -41,6 +39,7 @@ import type { SorobanNetworkName } from './constants.js'
  * - **Simulation & detection** → `SorobanResurrectSimulator` (`SorobanResurrectSimulation.ts`)
  * - **Execution & history** → `SorobanResurrectExecutor` (`SorobanResurrectExecution.ts`)
  * - **TTL helpers** → functions in `TTLHelpers.ts`
+ * - **Proactive TTL watching** → {@link watchTTL} (`TTLWatch.ts`)
  *
  * @see {@link SorobanResurrectConfig} for constructor options.
  * @see {@link onStateChange} to subscribe to workflow state transitions.
@@ -418,6 +417,33 @@ export class SorobanResurrect {
   }
 
   /**
+   * Builds a single unsigned restore transaction covering the union of
+   * archived keys detected across every transaction in `transactions` —
+   * so a multi-contract batch (e.g. a portfolio sweep) pays one restore
+   * fee instead of one per transaction.
+   *
+   * @param sourcePublicKey - The source account public key that will pay.
+   * @param transactions    - The transactions to inspect for archived keys.
+   * @returns An unsigned restore `Transaction`, or `null` if none of the
+   *   given transactions need restoring.
+   * @see {@link submitBatchWithRestore} for the full sign-and-submit workflow.
+   *
+   * @example
+   * ```ts
+   * const restoreTx = await resurrect.buildBatchRestoreTx(publicKey, [tx1, tx2, tx3])
+   * if (restoreTx) {
+   *   const signedXdr = await wallet.signTransaction(restoreTx.toXDR())
+   * }
+   * ```
+   */
+  async buildBatchRestoreTx(
+    sourcePublicKey: StellarPublicKey | string,
+    transactions: Transaction[],
+  ): Promise<Transaction | null> {
+    return this._executor.buildBatchRestoreTx(sourcePublicKey, transactions)
+  }
+
+  /**
    * Signs and submits a transaction directly, without automatic archive
    * restoration. Use `submitWithRestore` when restoration may be needed.
    *
@@ -471,8 +497,15 @@ export class SorobanResurrect {
   }
 
   /**
-   * Submits multiple transactions with automatic archive restoration,
-   * sequentially to avoid sequence-number races.
+   * Submits multiple transactions with automatic archive restoration.
+   *
+   * When two or more of the given transactions need restoring, a single
+   * batch restore transaction covers the union of their archived keys
+   * (see {@link buildBatchRestoreTx}) instead of one restore per
+   * transaction. Once that shared restore confirms, the original
+   * transactions are submitted sequentially (sequence-aware, so no
+   * sequence-number races) and every returned result carries the same
+   * `restoreTxHash`.
    *
    * @param items - Array of `SubmitWithRestoreOptions`, one per transaction.
    * @returns Array of results in the same order as the input.

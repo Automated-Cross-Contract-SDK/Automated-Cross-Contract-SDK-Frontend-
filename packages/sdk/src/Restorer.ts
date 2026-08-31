@@ -1,6 +1,13 @@
-import { rpc, Account, Keypair } from '@stellar/stellar-sdk'
-import { TransactionBuilder, Operation, Transaction, xdr, FeeBumpTransaction } from '@stellar/stellar-sdk'
-import { SorobanResurrectConfig, FeeBumpSponsor } from './types.js'
+import { rpc, Account, Keypair, SorobanDataBuilder } from '@stellar/stellar-sdk'
+import {
+  TransactionBuilder,
+  Operation,
+  Transaction,
+  xdr,
+  FeeBumpTransaction,
+} from '@stellar/stellar-sdk'
+import { SorobanResurrectConfig, FeeBumpSponsor, ArchivedLedgerEntry } from './types.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
 import { DEFAULT_NETWORK_PASSPHRASE } from './constants.js'
 import { calculateRestoreFee } from './feeCalculation.js'
 import { ISorobanRpcClient } from './RpcClient.js'
@@ -53,7 +60,14 @@ export interface BuildRestoreTxParams {
  * ```
  */
 export async function buildRestoreTransaction(params: BuildRestoreTxParams): Promise<Transaction> {
-  const { sourcePublicKey, transactionData, minResourceFee, config, account: preFetched, sequenceNumber } = params
+  const {
+    sourcePublicKey,
+    transactionData,
+    minResourceFee,
+    config,
+    account: preFetched,
+    sequenceNumber,
+  } = params
 
   const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
   let account = preFetched
@@ -383,7 +397,9 @@ export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
       return innerV1.tx().operations()
     }
 
-    throw new Error(`Unsupported inner transaction envelope type in fee-bump transaction: ${innerType.name}`)
+    throw new Error(
+      `Unsupported inner transaction envelope type in fee-bump transaction: ${innerType.name}`,
+    )
   }
 
   // Handle regular V0 transactions
@@ -570,4 +586,122 @@ export async function submitFeeBumpTransaction(
     throw new Error('Failed to parse fee-bump transaction XDR')
   }
   return server.sendTransaction(parsed)
+}
+
+/** Parameters for {@link buildBatchRestoreTransaction}. */
+export interface BuildBatchRestoreTxParams {
+  /** Soroban RPC client used to simulate each transaction. */
+  server: ISorobanRpcClient
+  /** Source account public key that will pay for and sign the restore. */
+  sourcePublicKey: StellarPublicKey | string
+  /** The transactions to inspect for archived keys, in submission order. */
+  transactions: Transaction[]
+  /** SDK configuration (used for network passphrase and fee multiplier). */
+  config: SorobanResurrectConfig
+  /** Pre-fetched account (avoids a sequence-number race). */
+  account?: Account
+}
+
+/** Result of {@link buildBatchRestoreTransaction}. */
+export interface BatchRestoreBuildResult {
+  /**
+   * A single unsigned restore transaction covering the union of archived
+   * keys across every input transaction, or `null` if none of them need
+   * restoring.
+   */
+  restoreTx: Transaction | null
+  /**
+   * Archived keys detected per input transaction, in the same order as
+   * `transactions` (empty array for transactions that need no restore).
+   */
+  archivedKeysByTx: ArchivedLedgerEntry[][]
+}
+
+/**
+ * Simulates every transaction in `transactions`, unions the archived ledger
+ * keys detected across all of them, and builds a single restore transaction
+ * covering that union — so a multi-contract batch pays one restore fee
+ * instead of one per transaction.
+ *
+ * Resource accounting is conservative: the combined transaction's
+ * instructions/read-bytes/write-bytes/resource-fee are the *sum* of each
+ * individual restore simulation's resources. This is always sufficient
+ * (restoring the union footprint costs no more than restoring each part
+ * separately) even though it may be a slight overestimate when transactions
+ * share archived entries.
+ *
+ * @see {@link buildRestoreTransaction} for the single-transaction equivalent.
+ * @see {@link SorobanResurrect.buildBatchRestoreTx} for the public facade method.
+ */
+export async function buildBatchRestoreTransaction(
+  params: BuildBatchRestoreTxParams,
+): Promise<BatchRestoreBuildResult> {
+  const { server, sourcePublicKey, transactions, config, account: preFetched } = params
+  const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
+
+  const archivedKeysByTx: ArchivedLedgerEntry[][] = []
+  const restoreResponses: rpc.Api.SimulateTransactionRestoreResponse[] = []
+
+  for (const tx of transactions) {
+    const sim = await server.simulateTransaction(tx)
+    if (isRestoreResponse(sim)) {
+      archivedKeysByTx.push(extractArchivedKeys(sim))
+      restoreResponses.push(sim)
+    } else {
+      archivedKeysByTx.push([])
+    }
+  }
+
+  if (restoreResponses.length === 0) {
+    return { restoreTx: null, archivedKeysByTx }
+  }
+
+  const seenKeys = new Set<string>()
+  const unionReadWrite: xdr.LedgerKey[] = []
+  let totalResourceFee = 0
+  let totalInstructions = 0
+  let totalReadBytes = 0
+  let totalWriteBytes = 0
+
+  for (const response of restoreResponses) {
+    const data = response.transactionData.build()
+    const resources = data.resources()
+
+    for (const key of resources.footprint().readWrite()) {
+      const keyBase64 = key.toXDR('base64')
+      if (!seenKeys.has(keyBase64)) {
+        seenKeys.add(keyBase64)
+        unionReadWrite.push(key)
+      }
+    }
+
+    totalResourceFee += parseInt(response.minResourceFee, 10)
+    totalInstructions += resources.instructions()
+    totalReadBytes += resources.readBytes()
+    totalWriteBytes += resources.writeBytes()
+  }
+
+  const combinedSorobanData = new SorobanDataBuilder()
+    .setReadWrite(unionReadWrite)
+    .setResources(totalInstructions, totalReadBytes, totalWriteBytes)
+    .setResourceFee(totalResourceFee.toString())
+    .build()
+
+  let account = preFetched
+  if (!account) {
+    account = await server.getAccount(sourcePublicKey)
+  }
+
+  const restoreFee = calculateRestoreFee(totalResourceFee, config)
+
+  const restoreTx = new TransactionBuilder(account, {
+    fee: restoreFee,
+    networkPassphrase,
+  })
+    .addOperation(Operation.restoreFootprint({}))
+    .setSorobanData(combinedSorobanData)
+    .setTimeout(30)
+    .build()
+
+  return { restoreTx, archivedKeysByTx }
 }

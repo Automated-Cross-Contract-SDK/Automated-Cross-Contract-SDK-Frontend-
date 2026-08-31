@@ -114,3 +114,5 @@ export {
 } from './TTLHelpers.js'
 export type { TransactionHistoryEntry, TransactionAttemptStatus } from './TransactionHistory.js'
 export { TransactionHistory } from './TransactionHistory.js'
+export type { ISorobanRpcClient } from './RpcClient.js'
+export type { TTLWatchOptions, TTLWatchHandle } from './TTLWatch.js'

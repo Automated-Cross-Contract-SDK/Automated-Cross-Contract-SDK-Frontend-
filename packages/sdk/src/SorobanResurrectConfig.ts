@@ -11,6 +11,8 @@ import {
   RPC_CIRCUIT_BREAKER_COOLDOWN_MS,
   KNOWN_NETWORK_PASSPHRASES,
   resolveNetworkPassphrase,
+  TTL_WATCH_INTERVAL_MS,
+  TTL_WATCH_THRESHOLD_LEDGERS,
 } from './constants.js'
 import { SimulationCache } from './SimulationCache.js'
 import { SorobanRpcClient, type ISorobanRpcClient } from './RpcClient.js'

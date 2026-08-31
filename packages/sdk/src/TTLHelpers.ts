@@ -1,5 +1,6 @@
 import { rpc, xdr } from '@stellar/stellar-sdk'
 import { ArchivedLedgerEntry } from './types.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
 import { asXdrBase64, type XdrBase64 } from './branded-types.js'
 import type { ISorobanRpcClient } from './RpcClient.js'
 
@@ -131,7 +132,7 @@ export async function queryLedgerTTL(
   // Preserve original key order
   const entries: LedgerEntryTTLInfo[] = keys.map((key) => {
     const keyBase64 = asXdrBase64(key.toXDR('base64'))
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+
     return infoMap.get(keyBase64)!
   })
 
@@ -168,9 +169,7 @@ export async function getExpiringSoonEntries(
   ledgersThreshold: number,
 ): Promise<LedgerEntryTTLInfo[]> {
   const result = await queryLedgerTTL(server, keys)
-  return result.entries.filter(
-    (entry) => entry.isArchived || entry.ttlLedgers <= ledgersThreshold,
-  )
+  return result.entries.filter((entry) => entry.isArchived || entry.ttlLedgers <= ledgersThreshold)
 }
 
 /**
