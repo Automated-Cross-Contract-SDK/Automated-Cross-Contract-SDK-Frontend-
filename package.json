@@ -7,6 +7,7 @@
   "engines": {
     "node": ">=18"
   },
+  "packageManager": "npm@10.9.8",
   "type": "module",
   "workspaces": [
     "packages/*",
@@ -14,21 +15,21 @@
     "docs"
   ],
   "scripts": {
-    "build": "turbo run build --filter='./packages/*'",
+    "build": "turbo run build --filter=\"./packages/*\"",
     "build:sdk": "turbo run build --filter=@soroban-resurrect/sdk",
     "build:hook": "turbo run build --filter=@soroban-resurrect/react-hook --filter=@soroban-resurrect/vue-hook --filter=@soroban-resurrect/svelte-hook",
     "dev:example": "npm run dev -w examples/basic",
     "docs:dev": "npm run dev -w docs",
     "docs:build": "npm run build -w docs",
     "docs:preview": "npm run preview -w docs",
-    "typecheck": "turbo run typecheck --filter='./packages/*'",
-    "lint": "turbo run lint --filter='./packages/*'",
-    "lint:fix": "eslint --fix 'packages/*/src/**/*.{ts,tsx}' 'examples/*/src/**/*.{ts,tsx}'",
-    "format": "prettier --check '**/*.{ts,tsx,json,md}' --ignore-path .gitignore",
-    "format:fix": "prettier --write '**/*.{ts,tsx,json,md}' --ignore-path .gitignore",
-    "test": "turbo run test --filter='./packages/*'",
+    "typecheck": "turbo run typecheck --filter=\"./packages/*\"",
+    "lint": "turbo run lint --filter=\"./packages/*\"",
+    "lint:fix": "eslint --fix \"packages/*/src/**/*.{ts,tsx}\" \"examples/*/src/**/*.{ts,tsx}\"",
+    "format": "prettier --check \"**/*.{ts,tsx,json,md}\" --ignore-path .gitignore",
+    "format:fix": "prettier --write \"**/*.{ts,tsx,json,md}\" --ignore-path .gitignore",
+    "test": "turbo run test --filter=\"./packages/*\"",
     "test:watch": "npm run test:watch -w packages/sdk",
-    "clean": "turbo run clean --filter='./packages/*'",
+    "clean": "turbo run clean --filter=\"./packages/*\"",
     "prepare": "husky"
   },
   "devDependencies": {

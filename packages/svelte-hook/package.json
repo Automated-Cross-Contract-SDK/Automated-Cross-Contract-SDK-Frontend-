@@ -17,7 +17,9 @@
     "build": "tsc",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint 'src/**/*.{ts,tsx}'"
+    "lint": "eslint 'src/**/*.{ts,tsx}'",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@soroban-resurrect/sdk": "^0.1.0"
@@ -28,6 +30,8 @@
   },
   "devDependencies": {
     "svelte": "^4.0.0",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "vitest": "^2.1.9",
+    "jsdom": "^29.1.1"
   }
 }

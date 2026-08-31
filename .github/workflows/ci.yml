@@ -33,6 +33,13 @@ jobs:
         run: npm run format
 
       - name: Test (all packages via Turbo)
+        # Turbo runs the `test` script in every package that defines one and
+        # skips the rest — every package under packages/* now defines one
+        # (see e.g. packages/vue-hook/package.json), so a co-located
+        # `__tests__` directory added to any package is picked up here with
+        # no further CI change, and a regression in a package that used to
+        # go unchecked (vue-hook, svelte-hook, the wallet adapters) now fails
+        # the build instead of merging silently.
         run: npm test
 
       - name: Test with coverage (sdk)
@@ -41,9 +48,29 @@ jobs:
       - name: Test with coverage (react-hook)
         run: npm run test -w packages/react-hook -- --coverage
 
+      - name: Test with coverage (vue-hook)
+        run: npm run test -w packages/vue-hook -- --coverage
+
+      - name: Test with coverage (svelte-hook)
+        run: npm run test -w packages/svelte-hook -- --coverage
+
+      - name: Test with coverage (wallet adapters)
+        run: |
+          for pkg in adapter-albedo adapter-freighter adapter-lobstr adapter-xbull; do
+            npm run test -w packages/$pkg -- --coverage
+          done
+
       - uses: codecov/codecov-action@v4
         with:
-          files: packages/sdk/coverage/lcov.info,packages/react-hook/coverage/lcov.info
+          files: >-
+            packages/sdk/coverage/lcov.info,
+            packages/react-hook/coverage/lcov.info,
+            packages/vue-hook/coverage/lcov.info,
+            packages/svelte-hook/coverage/lcov.info,
+            packages/adapter-albedo/coverage/lcov.info,
+            packages/adapter-freighter/coverage/lcov.info,
+            packages/adapter-lobstr/coverage/lcov.info,
+            packages/adapter-xbull/coverage/lcov.info
           fail_ci_if_error: false
 
       - name: Build (all packages via Turbo)

@@ -256,6 +256,7 @@ useSorobanResurrectContext(): {
   submitWithRestore(tx, wallet): Promise<ResurrectResult>
   detectArchivedKeys(tx): Promise<ArchivedLedgerEntry[]>
   reset(fromState?: RestoreState): void
+  on<K extends keyof SorobanResurrectEvents>(event: K, listener: (payload: SorobanResurrectEvents[K]) => void): () => void
 }
 
 // Standalone Hook
@@ -264,14 +265,13 @@ useSorobanResurrect({ config }): UseSorobanResurrectReturn  // same shape
 
 ### Types
 
-```typescript
-interface SorobanResurrectConfig {
-  rpcUrl: string
-  networkPassphrase?: string // default: Testnet
-  pollIntervalMs?: number // default: 1000
-  pollTimeoutMs?: number // default: 60000
-}
+`SorobanResurrectConfig`'s full field list — including `restoreFeeMultiplier`,
+`archiveDetectionMethod`, `enableSimulationCache`, `useSSE`, and `rpcClient` — lives in one place:
+**[`docs/api/types.md`](docs/api/types.md#sorobanresurrectconfig)**. It's kept in sync with
+`packages/sdk/src/types.ts` directly; this README doesn't repeat the field list to avoid drifting
+out of sync with it again.
 
+```typescript
 interface WalletAdapter {
   isConnected(): Promise<boolean>
   getPublicKey(): Promise<string>
@@ -322,6 +322,11 @@ npm run dev:example
 # Run the documentation site locally
 npm run docs:dev
 ```
+
+Writing a test against the SDK? Pass a mock `ISorobanRpcClient` via `config.rpcClient` at
+construction — see [Testing with an injected RPC client](docs/API.md#testing-with-an-injected-rpc-client)
+for the pattern and a full restore-then-submit example. (`sdk.server` is `readonly` and cannot be
+swapped after construction.)
 
 ### Documentation Site
 
