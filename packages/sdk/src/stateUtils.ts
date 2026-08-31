@@ -12,6 +12,12 @@ export const PROCESSING_STATES = new Set<RestoreState>([
   'confirming_restore',
   'signing_original',
   'submitting_original',
+  // Proactive / estimation states that represent an active, in-flight
+  // operation the UI should show a spinner for. `watching_ttl` is
+  // deliberately excluded: it is a passive background poll (like `idle`)
+  // that must not block user interaction.
+  'estimating',
+  'extending_ttl',
 ])
 
 /**
@@ -22,8 +28,9 @@ export const PROCESSING_STATES = new Set<RestoreState>([
  *
  * @param state - The current `RestoreState` value.
  * @returns `true` for `simulating`, `signing_restore`, `submitting_restore`,
- *   `confirming_restore`, `signing_original`, and `submitting_original`;
- *   `false` for `idle`, `restore_needed`, `success`, and `error`.
+ *   `confirming_restore`, `signing_original`, `submitting_original`,
+ *   `estimating`, and `extending_ttl`; `false` for `idle`, `restore_needed`,
+ *   `watching_ttl`, `success`, and `error`.
  *
  * @example
  * ```ts

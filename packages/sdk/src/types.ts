@@ -1,5 +1,7 @@
-import { Transaction, xdr } from '@stellar/stellar-sdk'
+import { Transaction, xdr, Memo } from '@stellar/stellar-sdk'
 import { rpc } from '@stellar/stellar-sdk'
+import type { ISorobanRpcClient } from './RpcClient.js'
+import type { LedgerEntryTTLInfo } from './TTLHelpers.js'
 import type {
   TxHash,
   XdrBase64,
@@ -12,6 +14,7 @@ import type {
   SequenceNumber,
   HistoryEntryId,
 } from './branded-types.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
 
 export type {
   TxHash,
@@ -58,27 +61,68 @@ export interface SorobanResurrectConfig {
   /** Method for detecting archived keys: 'simulation' (default) or 'direct'. */
   archiveDetectionMethod?: 'simulation' | 'direct'
   /**
-   * Max serialized restore-transaction size (bytes) to compare against when
-   * running the footprint-size guard. Defaults to the Soroban limit
-   * ({@link SOROBAN_MAX_TX_XDR_BYTES}, 128 KiB).
+   * Ledger keys per `getLedgerEntries` request during 'direct' archive
+   * detection (default: 50). Lower it if the RPC endpoint rejects large
+   * batches.
    */
-  maxRestoreTxSizeBytes?: number
+  archiveDetectionChunkSize?: number
   /**
-   * Fraction of `maxRestoreTxSizeBytes` at which `buildRestoreTransaction`
-   * emits a "restore footprint approaching ledger limits" warning. Range
-   * `0..1`, default `0.8` ({@link RESTORE_TX_SIZE_WARN_RATIO}).
+   * Number of `getLedgerEntries` requests kept in flight at once during
+   * 'direct' archive detection (default: 4). Raise it for faster detection on
+   * large footprints, lower it to stay under a rate limit.
    */
-  restoreSizeWarnRatio?: number
-  /**
-   * When `true`, `buildRestoreTransaction` throws instead of only warning once
-   * the built transaction exceeds `maxRestoreTxSizeBytes`. Default `false`
-   * (warn only), so callers opt in to the stricter behaviour.
-   */
-  throwOnRestoreSizeLimit?: boolean
+  archiveDetectionConcurrency?: number
   /** Enable simulation cache to reuse results and reduce RPC calls (default: false). */
   enableSimulationCache?: boolean
   /** Use SSE-based transaction status waiting when available (default: false). */
   useSSE?: boolean
+  /** Per-call timeout in ms for RPC calls made through the resilient transport (default: 10000). */
+  rpcTimeoutMs?: number
+  /** Number of retries (beyond the initial attempt) for transient RPC failures (default: 2). */
+  rpcRetryCount?: number
+  /** Base backoff in ms between RPC retries; doubles each attempt with jitter (default: 250). */
+  rpcRetryBackoffMs?: number
+  /** Consecutive RPC failures before the circuit breaker trips and fails fast (default: 5). */
+  rpcCircuitBreakerThreshold?: number
+  /** Cooldown in ms the circuit breaker stays open before allowing calls through again (default: 30000). */
+  rpcCircuitBreakerCooldownMs?: number
+  /**
+   * Default polling cadence (ms) for `watchTTL()` when a call doesn't
+   * override it via `TTLWatchOptions.intervalMs`. Defaults to 60_000 (1 min).
+   */
+  ttlWatchIntervalMs?: number
+  /**
+   * Default "expiring soon" threshold (in remaining ledgers) for
+   * `watchTTL()` when a call doesn't override it via
+   * `TTLWatchOptions.thresholdLedgers`. Defaults to 17_280 (~24h at 5s/ledger).
+   */
+  ttlWatchThreshold?: number
+  /**
+   * Default for whether `watchTTL()` automatically submits a restore
+   * transaction when an entry crosses the threshold, when a call doesn't
+   * override it via `TTLWatchOptions.autoExtend`. Defaults to `false`
+   * (observe-only — the caller decides what to do with `ttlLow`).
+   */
+  ttlWatchAutoExtend?: boolean
+  /**
+   * Optional memo attached to restore transactions built by the SDK.
+   *
+   * Restore transactions are otherwise built with no memo, so wallets and
+   * explorers show a bare `restoreFootprint` operation with no indication of
+   * why the signature is being requested. Setting a memo here makes the
+   * prompt self-explanatory (e.g. `Memo.text('Soroban archive restore')`).
+   *
+   * Default: `undefined` (no memo — unchanged behaviour for existing users).
+   *
+   * @see {@link restoreTxMemoText} for a plain-string convenience form.
+   */
+  restoreTxMemo?: Memo
+  /**
+   * Convenience string form of {@link restoreTxMemo}. When set (and
+   * `restoreTxMemo` is not), a `Memo.text(restoreTxMemoText)` is attached to
+   * restore transactions. Ignored when {@link restoreTxMemo} is provided.
+   */
+  restoreTxMemoText?: string
   /**
    * Optional pre-built RPC client to use instead of creating one from `rpcUrl`.
    *
@@ -100,6 +144,53 @@ export interface SorobanResurrectConfig {
    * ```
    */
   rpcClient?: ISorobanRpcClient
+  /**
+   * Maximum acceptable fee (in stroops) for a restore transaction. When set,
+   * `buildRestoreTransaction` throws a {@link RestoreFeeCapExceededError} if
+   * `minResourceFee * restoreFeeMultiplier` would exceed this cap, instead of
+   * silently signing an unexpectedly expensive transaction.
+   */
+  maxRestoreFeeStroops?: FeeStroops | string
+  /**
+   * Maximum number of times the restore workflow will rebuild the original
+   * transaction (with a fresh sequence number) and resubmit it after a
+   * `tx_bad_seq` submission error. Defaults to 3. Only `tx_bad_seq` triggers
+   * a retry — all other submission errors are surfaced immediately.
+   */
+  maxSequenceRetries?: number
+}
+
+/**
+ * Feature-detection flags a {@link WalletAdapter} may advertise so the SDK can
+ * pick the right code path instead of guessing (and relying on try/catch).
+ *
+ * All flags are optional. A missing flag means "unknown" — the SDK falls back to
+ * its previous best-effort behaviour (attempt the operation and handle failure).
+ * An explicit `false` lets the SDK fail fast with a clear error before prompting
+ * the user's wallet.
+ *
+ * @see {@link WalletAdapter.capabilities}
+ */
+export interface WalletCapabilities {
+  /**
+   * The wallet can sign individual Soroban authorization entries
+   * (CAP-0046 fine-grained authorization) via a `signAuthEntry` method.
+   */
+  signAuthEntry?: boolean
+  /**
+   * The wallet can sign fee-bump transaction envelopes (`ENVELOPE_TYPE_TX_FEE_BUMP`).
+   */
+  feeBump?: boolean
+  /**
+   * The wallet is backed by a hardware device (Ledger, Trezor, …). Signing may
+   * be slow and requires physical confirmation; blind-signing limits may apply.
+   */
+  hardware?: boolean
+  /**
+   * Maximum number of operations the wallet will sign in a single transaction,
+   * if the wallet imposes such a limit. Omit when there is no known limit.
+   */
+  maxOperations?: number
 }
 
 /**
@@ -113,6 +204,7 @@ export interface SorobanResurrectConfig {
  *   isConnected: async () => freighter.isConnected(),
  *   getPublicKey: async () => (await freighter.getAddress()).address,
  *   signTransaction: (xdr, opts) => freighter.signTransaction(xdr, opts),
+ *   capabilities: { signAuthEntry: true, feeBump: true, hardware: false },
  * }
  * ```
  */
@@ -126,6 +218,14 @@ export interface WalletAdapter {
     tx: XdrBase64,
     opts?: { networkPassphrase?: NetworkPassphrase | string; network?: string },
   ): Promise<XdrBase64>
+  /**
+   * Optional feature-detection flags. When present, the SDK uses them to choose
+   * between the CAP-0046 auth-entry path, the fee-bump path, and their
+   * fallbacks — instead of attempting the operation and catching failures.
+   *
+   * @see {@link WalletCapabilities}
+   */
+  capabilities?: WalletCapabilities
 }
 
 /**
@@ -162,6 +262,19 @@ export interface FeeBumpConfig {
   feeBumpFee?: FeeStroops | string
 }
 
+/**
+ * Tuning options for chunked, parallel archive detection.
+ *
+ * @see {@link SorobanResurrectConfig.archiveDetectionChunkSize}
+ * @see {@link SorobanResurrectConfig.archiveDetectionConcurrency}
+ */
+export interface ArchiveDetectionOptions {
+  /** Ledger keys per `getLedgerEntries` request (default 50). */
+  chunkSize?: number
+  /** Requests issued in parallel (default 4). */
+  concurrency?: number
+}
+
 /** Represents a single ledger entry that has been archived (expired TTL). */
 export interface ArchivedLedgerEntry {
   /** The raw ledger key. */
@@ -172,6 +285,43 @@ export interface ArchivedLedgerEntry {
 
 /** Convenience alias for the Soroban RPC simulate response type. */
 export type SimulateResponse = rpc.Api.SimulateTransactionResponse
+
+/**
+ * Parsed on-chain diagnostics for a failed transaction.
+ *
+ * Populated on {@link ResurrectResult.diagnostics} when `waitForTransaction`
+ * reports `FAILED` for either the restore transaction or the original
+ * transaction. Absent entirely on success so the success result shape stays
+ * lean.
+ */
+export interface TxDiagnostics {
+  /**
+   * Human-readable summaries of the `DiagnosticEvent`s attached to the failed
+   * transaction, in on-chain order. Empty when the RPC returned no diagnostic
+   * events (e.g. classic pre-flight failures).
+   */
+  events: string[]
+  /**
+   * Zero-based index of the operation that failed, when derivable from the
+   * transaction result XDR.
+   */
+  failedOpIndex?: number
+  /**
+   * Best-effort decoded revert / panic / error message extracted from the
+   * diagnostic events, when one is present and decodable.
+   */
+  revertReason?: string
+  /**
+   * Transaction- and operation-level result codes from the result XDR
+   * (e.g. `txFailed`, `invokeHostFunctionTrapped`).
+   */
+  resultCodes?: string[]
+  /**
+   * Raw base64-encoded `DiagnosticEvent` XDR strings, for callers that want to
+   * decode them with their own tooling.
+   */
+  rawEventsXdr?: string[]
+}
 
 /**
  * Result returned from the restore-and-submit workflow.
@@ -189,6 +339,23 @@ export interface ResurrectResult {
   archivedKeysDetected: number
   /** Error message if the workflow failed. */
   error?: string
+  /**
+   * Machine-readable error code for programmatic branching (present when
+   * `success` is `false`). Follows a GraphQL-like `extensions.code` pattern
+   * so consumers can switch on codes instead of parsing strings.
+   *
+   * @example
+   * ```ts
+   * if (!result.success) {
+   *   switch (result.errorCode) {
+   *     case 'WALLET_NOT_CONNECTED': promptConnect(); break
+   *     case 'RESTORE_TX_FAILED':   showRestoreError(); break
+   *     default:                    showGenericError(result.error)
+   *   }
+   * }
+   * ```
+   */
+  errorCode?: ResurrectErrorCode
   /** True when the result came from a dry-run (no transactions submitted). */
   dryRun?: boolean
   /** Detailed dry-run information (present when dryRun is true). */
@@ -199,6 +366,24 @@ export interface ResurrectResult {
    * the workflow without rebuilding the original transaction.
    */
   historyId?: string
+  /**
+   * Number of `tx_bad_seq` rebuild-and-resubmit retries performed for the
+   * original transaction. Only present when a restore occurred; `0` means
+   * the original transaction was accepted on the first attempt.
+   */
+  sequenceRetries?: number
+}
+
+/** Options for {@link SorobanResurrect.restoreKeys}. */
+export interface RestoreKeysOptions {
+  /** Called when the wallet is prompted to sign the restore transaction. */
+  onSigningRestore?: () => void
+  /** Called right before the restore transaction is submitted. */
+  onSubmittingRestore?: () => void
+  /** Called after the restore transaction is submitted. */
+  onRestoreSubmitted?: (txHash: TxHash) => void
+  /** Called after the restore transaction is confirmed on-chain. */
+  onRestoreConfirmed?: (txHash: TxHash) => void
 }
 
 /**
@@ -248,6 +433,16 @@ export interface SubmitWithRestoreOptions {
   onOriginalSubmitted?: (txHash: TxHash) => void
   /** Called when the restore step of the workflow fails. */
   onRestoreFailed?: (error: string) => void
+  /**
+   * Per-call override for {@link SorobanResurrectConfig.restoreTxMemo}.
+   * Takes precedence over the instance config for this workflow only.
+   */
+  restoreTxMemo?: Memo
+  /**
+   * Per-call override for {@link SorobanResurrectConfig.restoreTxMemoText}.
+   * Ignored when {@link restoreTxMemo} is provided.
+   */
+  restoreTxMemoText?: string
 }
 
 /**
@@ -256,6 +451,16 @@ export interface SubmitWithRestoreOptions {
  * See {@link SorobanResurrect.onStateChange} for how to subscribe to
  * transitions between these states, and `ARCHITECTURE.md` in the repo
  * root for the full state diagram.
+ *
+ * The union is **additive** — the original reactive submit-flow states
+ * (`idle` → `simulating` → `restore_needed` → ... → `success` / `error`)
+ * are unchanged. Three extra states model long-running, non-submit
+ * activity that does not fit the submit flow:
+ *
+ * - `estimating` — a fee / resource estimation pass is running.
+ * - `watching_ttl` — a proactive TTL watcher is polling entry lifetimes.
+ * - `extending_ttl` — a `RestoreFootprint`/`ExtendFootprintTTL` bump is
+ *   being signed and submitted proactively (before archival).
  */
 export type RestoreState =
   | 'idle'
@@ -268,6 +473,10 @@ export type RestoreState =
   | 'submitting_original'
   | 'success'
   | 'error'
+  // --- Proactive / estimation states (additive, non-submit) ---
+  | 'estimating'
+  | 'watching_ttl'
+  | 'extending_ttl'
 
 /** Snapshot of the current workflow state, including message and optional error. */
 export interface RestoreStateInfo {
@@ -279,60 +488,6 @@ export interface RestoreStateInfo {
   archivedKeys?: ArchivedLedgerEntry[]
   /** Error message (only set in error state). */
   error?: string
-}
-
-// ---------------------------------------------------------------------------
-// Hardware wallet types
-// ---------------------------------------------------------------------------
-
-/**
- * Extended wallet adapter interface for hardware wallet devices (Ledger, Trezor).
- * Adds `connect`/`disconnect` lifecycle methods to the base `WalletAdapter`.
- */
-export interface HardwareWalletAdapter extends WalletAdapter {
-  /** Device type identifier. */
-  readonly type: 'ledger' | 'trezor'
-  /** Connects to the hardware device and prepares it for signing. */
-  connect(): Promise<void>
-  /** Disconnects from the hardware device and releases the transport. */
-  disconnect(): Promise<void>
-}
-
-/**
- * Configuration for `LedgerWalletAdapter`.
- *
- * @see {@link LedgerWalletAdapter}
- */
-export interface LedgerAdapterConfig {
-  /**
-   * A pre-opened Ledger transport instance (e.g. from `@ledgerhq/hw-transport-webusb`).
-   * When omitted, the adapter cannot sign — you must call `connect()` manually after
-   * supplying a transport via `setTransport()`.
-   */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  transport?: any
-  /** BIP44 account index for key derivation (default: 0). */
-  accountIndex?: number
-}
-
-/**
- * Configuration for `TrezorWalletAdapter`.
- *
- * @see {@link TrezorWalletAdapter}
- */
-export interface TrezorAdapterConfig {
-  /**
-   * Your application's manifest — required by Trezor Connect.
-   * See https://connect.trezor.io/9/methods/manifest/
-   */
-  manifest: {
-    /** Email address for the application maintainer. */
-    email: string
-    /** URL of the application's public repository. */
-    appUrl: string
-  }
-  /** BIP44 account index for key derivation (default: 0). */
-  accountIndex?: number
 }
 
 /**
@@ -354,6 +509,8 @@ export interface SorobanResurrectEvents {
   restoreComplete: ResurrectResult
   /** Fired when the workflow fails, with the error message. */
   error: string
+  /** Fired after `switchNetwork()` re-binds the RPC client and network passphrase. */
+  networkChanged: { rpcUrl: string; networkPassphrase: string }
 }
 
 // ---------------------------------------------------------------------------
