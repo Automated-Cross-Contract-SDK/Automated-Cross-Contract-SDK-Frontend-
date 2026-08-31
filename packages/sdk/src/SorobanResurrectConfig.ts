@@ -5,6 +5,7 @@ import {
   POLL_INTERVAL_MS,
   POLL_TIMEOUT_MS,
   RESTORE_FEE_MULTIPLIER,
+  MAX_SEQUENCE_RETRIES,
   KNOWN_NETWORK_PASSPHRASES,
   resolveNetworkPassphrase,
 } from './constants.js'
@@ -81,6 +82,7 @@ export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
     archiveDetectionMethod: config.archiveDetectionMethod ?? 'simulation',
     enableSimulationCache: config.enableSimulationCache ?? false,
     useSSE: config.useSSE ?? false,
+    maxSequenceRetries: config.maxSequenceRetries ?? MAX_SEQUENCE_RETRIES,
   }
 
   return { server, config: resolved, simulationCache }

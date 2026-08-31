@@ -87,8 +87,13 @@ function makeLiveInfo(
  * Fetches ledger entries in chunks of 50 to stay within RPC limits.
  * Keys not found on-chain are treated as archived.
  *
+ * Works identically for `LedgerKeyContractData` and `LedgerKeyContractCode`
+ * (wasm) keys: `getLedgerEntries` and `liveUntilLedgerSeq` are reported the
+ * same way for both key types, and nothing here branches on key kind — a
+ * mixed array of storage and wasm keys is queried and reported together.
+ *
  * @param server - Soroban RPC server instance.
- * @param keys   - Ledger keys to query.
+ * @param keys   - Ledger keys to query (contract data and/or contract code).
  * @returns Aggregated TTL result including per-entry info and query metadata.
  */
 export async function queryLedgerTTL(
@@ -130,7 +135,7 @@ export async function queryLedgerTTL(
   // Preserve original key order
   const entries: LedgerEntryTTLInfo[] = keys.map((key) => {
     const keyBase64 = asXdrBase64(key.toXDR('base64'))
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+
     return infoMap.get(keyBase64)!
   })
 
@@ -167,9 +172,7 @@ export async function getExpiringSoonEntries(
   ledgersThreshold: number,
 ): Promise<LedgerEntryTTLInfo[]> {
   const result = await queryLedgerTTL(server, keys)
-  return result.entries.filter(
-    (entry) => entry.isArchived || entry.ttlLedgers <= ledgersThreshold,
-  )
+  return result.entries.filter((entry) => entry.isArchived || entry.ttlLedgers <= ledgersThreshold)
 }
 
 /**

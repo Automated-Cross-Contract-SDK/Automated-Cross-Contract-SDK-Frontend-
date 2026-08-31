@@ -10,9 +10,7 @@ import { RESTORE_FEE_MULTIPLIER } from './constants.js'
  * @param config - SDK configuration, optionally carrying a custom multiplier.
  * @returns The effective fee multiplier (always >= 1).
  */
-export function resolveRestoreFeeMultiplier(
-  config: SorobanResurrectConfig,
-): number {
+export function resolveRestoreFeeMultiplier(config: SorobanResurrectConfig): number {
   return (config as Required<SorobanResurrectConfig>).restoreFeeMultiplier ?? RESTORE_FEE_MULTIPLIER
 }
 
@@ -42,4 +40,45 @@ export function calculateRestoreFee(
 ): string {
   const multiplier = resolveRestoreFeeMultiplier(config)
   return (minResourceFee * multiplier).toString()
+}
+
+/**
+ * Thrown by {@link buildRestoreTransaction} (see `Restorer.ts`) when the
+ * computed restore fee exceeds `config.maxRestoreFeeStroops`. Carries both
+ * numbers so a caller (or the CLI/UI surfacing `ResurrectResult.error`) can
+ * show a specific "X exceeds your Y cap" message instead of a generic string.
+ */
+export class RestoreFeeExceededError extends Error {
+  constructor(
+    /** The fee the restore transaction would have used, in stroops. */
+    public readonly computedFeeStroops: string,
+    /** The configured `maxRestoreFeeStroops` cap that was exceeded. */
+    public readonly capFeeStroops: string,
+  ) {
+    super(
+      `Restore fee ${computedFeeStroops} stroops exceeds the configured cap of ${capFeeStroops} stroops ` +
+        `(maxRestoreFeeStroops). Raise the cap, lower restoreFeeMultiplier, or omit maxRestoreFeeStroops ` +
+        `to accept the computed fee.`,
+    )
+    this.name = 'RestoreFeeExceededError'
+  }
+}
+
+/**
+ * Throws {@link RestoreFeeExceededError} if `feeStroops` exceeds
+ * `config.maxRestoreFeeStroops`. A no-op when the cap is unset (the default),
+ * so most callers pay whatever the simulation-derived fee computes to, as
+ * before this option existed.
+ */
+export function assertRestoreFeeWithinCap(
+  feeStroops: string,
+  config: SorobanResurrectConfig,
+): void {
+  const cap = config.maxRestoreFeeStroops
+  if (cap === undefined) {
+    return
+  }
+  if (BigInt(feeStroops) > BigInt(cap)) {
+    throw new RestoreFeeExceededError(feeStroops, cap)
+  }
 }

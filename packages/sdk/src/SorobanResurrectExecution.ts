@@ -1,4 +1,4 @@
-import { rpc, Transaction } from '@stellar/stellar-sdk'
+import { rpc, Transaction, xdr } from '@stellar/stellar-sdk'
 import {
   ArchivedLedgerEntry,
   ResurrectResult,
@@ -6,7 +6,11 @@ import {
   SubmitWithRestoreOptions,
   WalletAdapter,
 } from './types.js'
-import { executeWithRestore, sendTransaction as _sendTransaction } from './Executor.js'
+import {
+  executeWithRestore,
+  sendTransaction as _sendTransaction,
+  restoreKeys as _restoreKeys,
+} from './Executor.js'
 import { buildRestoreTransaction } from './Restorer.js'
 import { isRestoreResponse } from './Archiver.js'
 import { TransactionHistory, TransactionHistoryEntry } from './TransactionHistory.js'
@@ -123,6 +127,20 @@ export class SorobanResurrectExecutor {
   }
 
   /**
+   * Restores an arbitrary list of ledger keys, with no source transaction
+   * required. See {@link restoreKeys} in `Executor.ts` for the full
+   * behavior — this is a thin pass-through binding this instance's server
+   * and config.
+   *
+   * @param keys   - Ledger keys to restore.
+   * @param wallet - Wallet adapter used for signing.
+   * @returns {@link ResurrectResult}; never throws.
+   */
+  async restoreKeys(keys: xdr.LedgerKey[], wallet: WalletAdapter): Promise<ResurrectResult> {
+    return _restoreKeys({ server: this._server, keys, wallet, config: this._config })
+  }
+
+  /**
    * Submits a transaction with automatic archive restoration.
    *
    * Records the attempt in history and returns a `historyId` in the result
@@ -184,7 +202,10 @@ export class SorobanResurrectExecutor {
       },
 
       onRestoreConfirmed: (txHash: string) => {
-        stateMgr.setState('submitting_original', 'Restore confirmed. Preparing original transaction...')
+        stateMgr.setState(
+          'submitting_original',
+          'Restore confirmed. Preparing original transaction...',
+        )
         emitter.emit('restoreConfirmed', txHash)
         onRestoreConfirmed?.(txHash)
       },
@@ -264,7 +285,10 @@ export class SorobanResurrectExecutor {
         stateMgr.setState('confirming_restore', 'Waiting for restore confirmation...')
       },
       onRestoreConfirmed: (_txHash: string) => {
-        stateMgr.setState('submitting_original', 'Restore confirmed. Preparing original transaction...')
+        stateMgr.setState(
+          'submitting_original',
+          'Restore confirmed. Preparing original transaction...',
+        )
       },
       onSigningOriginal: () => {
         stateMgr.setState('signing_original', 'Signing original transaction...')

@@ -1,8 +1,14 @@
 import { rpc, Account, Keypair } from '@stellar/stellar-sdk'
-import { TransactionBuilder, Operation, Transaction, xdr, FeeBumpTransaction } from '@stellar/stellar-sdk'
+import {
+  TransactionBuilder,
+  Operation,
+  Transaction,
+  xdr,
+  FeeBumpTransaction,
+} from '@stellar/stellar-sdk'
 import { SorobanResurrectConfig, FeeBumpSponsor } from './types.js'
 import { DEFAULT_NETWORK_PASSPHRASE } from './constants.js'
-import { calculateRestoreFee } from './feeCalculation.js'
+import { calculateRestoreFee, assertRestoreFeeWithinCap } from './feeCalculation.js'
 
 /** Parameters for building a restore transaction. */
 export interface BuildRestoreTxParams {
@@ -37,6 +43,8 @@ export interface BuildRestoreTxParams {
  * @param params - See {@link BuildRestoreTxParams}.
  * @returns An unsigned `Transaction` with a single `restoreFootprint`
  *   operation and the simulation-derived `SorobanTransactionData` attached.
+ * @throws {RestoreFeeExceededError} If `config.maxRestoreFeeStroops` is set
+ *   and the computed fee (`minResourceFee * restoreFeeMultiplier`) exceeds it.
  * @see {@link SorobanResurrect.buildRestoreTx} for the higher-level facade
  *   method that also runs the simulation for you.
  *
@@ -52,7 +60,14 @@ export interface BuildRestoreTxParams {
  * ```
  */
 export async function buildRestoreTransaction(params: BuildRestoreTxParams): Promise<Transaction> {
-  const { sourcePublicKey, transactionData, minResourceFee, config, account: preFetched, sequenceNumber } = params
+  const {
+    sourcePublicKey,
+    transactionData,
+    minResourceFee,
+    config,
+    account: preFetched,
+    sequenceNumber,
+  } = params
 
   const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
   let account = preFetched
@@ -65,6 +80,7 @@ export async function buildRestoreTransaction(params: BuildRestoreTxParams): Pro
   }
 
   const restoreFee = calculateRestoreFee(minResourceFee, config)
+  assertRestoreFeeWithinCap(restoreFee, config)
 
   const restoreTx = new TransactionBuilder(account, {
     fee: restoreFee,
@@ -184,7 +200,7 @@ async function streamTransactionViaEvents(
   const serverURL =
     typeof (server as any).serverURL === 'string'
       ? (server as any).serverURL
-      : (server as any).serverURL?.toString?.() ?? ''
+      : ((server as any).serverURL?.toString?.() ?? '')
 
   if (!serverURL) {
     return null
@@ -377,7 +393,9 @@ export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
       return innerV1.tx().operations()
     }
 
-    throw new Error(`Unsupported inner transaction envelope type in fee-bump transaction: ${innerType.name}`)
+    throw new Error(
+      `Unsupported inner transaction envelope type in fee-bump transaction: ${innerType.name}`,
+    )
   }
 
   // Handle regular V0 transactions

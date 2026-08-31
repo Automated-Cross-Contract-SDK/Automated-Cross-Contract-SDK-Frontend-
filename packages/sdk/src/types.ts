@@ -55,12 +55,30 @@ export interface SorobanResurrectConfig {
    * Must be >= 1.
    */
   restoreFeeMultiplier?: number
+  /**
+   * Hard cap (in stroops, as a string) on the fee a restore transaction may
+   * use. `minResourceFee * restoreFeeMultiplier` is taken from the
+   * simulation response unchecked; a malformed/malicious RPC response or a
+   * footprint that balloons in size could otherwise produce a restore fee
+   * far higher than expected. When set, `buildRestoreTransaction` throws
+   * `RestoreFeeExceededError` instead of building a transaction over the
+   * cap. Unset (the default) accepts whatever fee is computed, unchanged
+   * from prior behavior.
+   */
+  maxRestoreFeeStroops?: string
   /** Method for detecting archived keys: 'simulation' (default) or 'direct'. */
   archiveDetectionMethod?: 'simulation' | 'direct'
   /** Enable simulation cache to reuse results and reduce RPC calls (default: false). */
   enableSimulationCache?: boolean
   /** Use SSE-based transaction status waiting when available (default: false). */
   useSSE?: boolean
+  /**
+   * Maximum number of times to rebuild and resubmit the original transaction
+   * after a `tx_bad_seq` rejection, each attempt fetching a fresh sequence
+   * number. Defaults to 3. Only `tx_bad_seq` triggers a retry; every other
+   * submission error is surfaced immediately, unchanged.
+   */
+  maxSequenceRetries?: number
   /**
    * Optional pre-built RPC client to use instead of creating one from `rpcUrl`.
    *
@@ -181,6 +199,12 @@ export interface ResurrectResult {
    * the workflow without rebuilding the original transaction.
    */
   historyId?: string
+  /**
+   * Number of times the original transaction was rebuilt and resubmitted
+   * after a `tx_bad_seq` rejection. Omitted (not zero) when no retry was
+   * needed. See `SorobanResurrectConfig.maxSequenceRetries`.
+   */
+  sequenceRetries?: number
 }
 
 /**
@@ -291,7 +315,7 @@ export interface LedgerAdapterConfig {
    * When omitted, the adapter cannot sign — you must call `connect()` manually after
    * supplying a transport via `setTransport()`.
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   transport?: any
   /** BIP44 account index for key derivation (default: 0). */
   accountIndex?: number
