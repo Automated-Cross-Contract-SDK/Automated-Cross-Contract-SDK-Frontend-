@@ -41,6 +41,23 @@ export type {
 export type { LedgerEntryTTLInfo, TTLQueryResult } from './TTLHelpers.js'
 
 // ---------------------------------------------------------------------------
+// Fee calculation (returned by SorobanResurrect.estimateRestoreCost)
+// ---------------------------------------------------------------------------
+export type { RestoreCostEstimate } from './feeCalculation.js'
+
+// ---------------------------------------------------------------------------
+// Network presets (used by SorobanResurrect.switchNetwork)
+// ---------------------------------------------------------------------------
+export type { SorobanNetworkName, SorobanNetworkPreset } from './constants.js'
+export { NETWORK_PRESETS } from './constants.js'
+
+// ---------------------------------------------------------------------------
+// RPC client abstraction (dependency injection / resilient transport)
+// ---------------------------------------------------------------------------
+export type { ISorobanRpcClient, RpcResilienceOptions } from './RpcClient.js'
+export { SorobanRpcClient, createRpcClient, RpcTimeoutError, RpcCircuitOpenError } from './RpcClient.js'
+
+// ---------------------------------------------------------------------------
 // Transaction history (returned by SorobanResurrect.history / getHistory)
 // ---------------------------------------------------------------------------
 export type { TransactionHistoryEntry, TransactionAttemptStatus } from './TransactionHistory.js'
@@ -89,7 +106,6 @@ export type { ResolvedConfig } from './SorobanResurrectConfig.js'
 export { SorobanResurrectStateManager } from './SorobanResurrectState.js'
 export { SorobanResurrectSimulator } from './SorobanResurrectSimulation.js'
 export { SorobanResurrectExecutor } from './SorobanResurrectExecution.js'
-export type { LedgerEntryTTLInfo, TTLQueryResult } from './TTLHelpers.js'
 export {
   queryLedgerTTL,
   queryLedgerEntryTTL,

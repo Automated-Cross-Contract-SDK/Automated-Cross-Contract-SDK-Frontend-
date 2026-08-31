@@ -8,7 +8,7 @@ import { ISorobanRpcClient } from './RpcClient.js'
 /** Parameters for building a restore transaction. */
 export interface BuildRestoreTxParams {
   /** Soroban RPC server instance. */
-  server: rpc.Server
+  server: ISorobanRpcClient
   /** Source account public key (Stellar G-address). */
   sourcePublicKey: StellarPublicKey | string
   /** Soroban transaction data from the simulation response. */
@@ -561,7 +561,7 @@ export async function buildFeeBumpTransaction(
  * @returns The send transaction response with the hash.
  */
 export async function submitFeeBumpTransaction(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   feeBumpXdr: XdrBase64 | string,
   networkPassphrase: string,
 ): Promise<rpc.Api.SendTransactionResponse> {

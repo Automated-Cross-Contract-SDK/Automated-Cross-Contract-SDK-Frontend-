@@ -404,7 +404,7 @@ export async function sendTransaction(
  * helper from Restorer.ts but adds callback support.
  */
 async function waitForTransactionWithCallbacks(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   hash: TxHash | string,
   pollIntervalMs: number,
   pollTimeoutMs: number,
