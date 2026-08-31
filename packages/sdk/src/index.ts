@@ -13,6 +13,15 @@
 export { SorobanResurrect } from './SorobanResurrect.js'
 
 // ---------------------------------------------------------------------------
+// Network presets / switching helper
+// ---------------------------------------------------------------------------
+export { SorobanResurrectNetwork, NETWORK_PRESETS } from './SorobanResurrectNetwork.js'
+export type {
+  SorobanNetworkName,
+  SorobanNetworkPreset,
+} from './SorobanResurrectNetwork.js'
+
+// ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 export type {

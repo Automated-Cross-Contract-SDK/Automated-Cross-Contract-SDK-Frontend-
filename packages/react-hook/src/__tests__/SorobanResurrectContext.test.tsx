@@ -263,7 +263,7 @@ describe('SorobanResurrectProvider', () => {
       initialProps: testConfig,
     })
 
-    rerender(testConfig)
+    rerender()
     expect(vi.mocked(SorobanResurrect)).toHaveBeenCalledTimes(1)
   })
 
