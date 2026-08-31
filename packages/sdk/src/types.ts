@@ -59,12 +59,17 @@ export interface SorobanResurrectConfig {
   /** Method for detecting archived keys: 'simulation' (default) or 'direct'. */
   archiveDetectionMethod?: 'simulation' | 'direct'
   /**
-   * When the configured `archiveDetectionMethod` is `'simulation'` and the RPC
-   * response can't be classified as success/error/restore-required (e.g. an
-   * older soroban-rpc version), automatically fall back to the `'direct'`
-   * strategy instead of silently missing archived entries. Defaults to `true`.
+   * Ledger keys per `getLedgerEntries` request during 'direct' archive
+   * detection (default: 50). Lower it if the RPC endpoint rejects large
+   * batches.
    */
-  archiveDetectionFallback?: boolean
+  archiveDetectionChunkSize?: number
+  /**
+   * Number of `getLedgerEntries` requests kept in flight at once during
+   * 'direct' archive detection (default: 4). Raise it for faster detection on
+   * large footprints, lower it to stay under a rate limit.
+   */
+  archiveDetectionConcurrency?: number
   /** Enable simulation cache to reuse results and reduce RPC calls (default: false). */
   enableSimulationCache?: boolean
   /** Use SSE-based transaction status waiting when available (default: false). */
@@ -160,6 +165,19 @@ export interface FeeBumpConfig {
    * If not provided, defaults to the inner transaction's fee.
    */
   feeBumpFee?: FeeStroops | string
+}
+
+/**
+ * Tuning options for chunked, parallel archive detection.
+ *
+ * @see {@link SorobanResurrectConfig.archiveDetectionChunkSize}
+ * @see {@link SorobanResurrectConfig.archiveDetectionConcurrency}
+ */
+export interface ArchiveDetectionOptions {
+  /** Ledger keys per `getLedgerEntries` request (default 50). */
+  chunkSize?: number
+  /** Requests issued in parallel (default 4). */
+  concurrency?: number
 }
 
 /** Represents a single ledger entry that has been archived (expired TTL). */

@@ -19,55 +19,23 @@ export const POLL_TIMEOUT_MS = 60_000
  */
 export const RESTORE_FEE_MULTIPLIER = 3
 
-/** Default per-call timeout (ms) for RPC calls made through the resilient transport. */
-export const RPC_TIMEOUT_MS = 10_000
-
-/** Default number of retries (in addition to the initial attempt) for transient RPC failures. */
-export const RPC_RETRY_COUNT = 2
-
-/** Default base backoff (ms) between RPC retries (doubles each attempt, plus jitter). */
-export const RPC_RETRY_BACKOFF_MS = 250
-
-/** Default number of consecutive RPC failures before the circuit breaker trips. */
-export const RPC_CIRCUIT_BREAKER_THRESHOLD = 5
-
-/** Default cooldown (ms) the circuit breaker stays open before allowing calls through again. */
-export const RPC_CIRCUIT_BREAKER_COOLDOWN_MS = 30_000
-
-/** Well-known Stellar/Soroban network identifiers. */
-export type SorobanNetworkName = 'testnet' | 'mainnet' | 'futurenet'
-
-/** Pre-configured RPC URL and network passphrase for a well-known network. */
-export interface SorobanNetworkPreset {
-  /** Soroban JSON-RPC endpoint URL. */
-  rpcUrl: string
-  /** Network passphrase used when signing and submitting transactions. */
-  networkPassphrase: string
-  /** Human-readable display name. */
-  displayName: string
-}
+/**
+ * Number of ledger keys sent in a single `getLedgerEntries` request.
+ *
+ * The RPC server caps how many keys one request may carry, so large footprints
+ * are split into chunks of this size.
+ */
+export const LEDGER_ENTRY_CHUNK_SIZE = 50
 
 /**
- * Pre-configured network presets for well-known Stellar/Soroban networks.
- * Each entry contains the canonical RPC URL and network passphrase.
+ * Number of `getLedgerEntries` chunk requests kept in flight at once.
+ *
+ * Large footprints are dominated by RPC round-trip latency, so chunks are
+ * issued in parallel. The default is deliberately modest — public RPC
+ * endpoints rate-limit aggressively, and a rate-limited chunk is treated as
+ * archived, which would cause needless restores.
  */
-export const NETWORK_PRESETS: Record<SorobanNetworkName, SorobanNetworkPreset> = {
-  testnet: {
-    rpcUrl: 'https://soroban-testnet.stellar.org',
-    networkPassphrase: 'Test SDF Network ; September 2015',
-    displayName: 'Testnet',
-  },
-  mainnet: {
-    rpcUrl: 'https://mainnet.stellar.validationcloud.io/v1/XCSmR1pP5PR9HBMcUxnHEHaZiVlFpF8A',
-    networkPassphrase: 'Public Global Stellar Network ; September 2015',
-    displayName: 'Mainnet',
-  },
-  futurenet: {
-    rpcUrl: 'https://rpc-futurenet.stellar.org',
-    networkPassphrase: 'Test SDF Future Network ; September 2015',
-    displayName: 'Futurenet',
-  },
-}
+export const LEDGER_ENTRY_CONCURRENCY = 4
 
 /** Known Stellar/Soroban network passphrases for validation. */
 export const KNOWN_NETWORK_PASSPHRASES = [

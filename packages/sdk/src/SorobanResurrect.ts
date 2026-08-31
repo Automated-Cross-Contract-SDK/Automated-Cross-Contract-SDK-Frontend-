@@ -52,6 +52,8 @@ import type { SorobanNetworkName } from './constants.js'
  * // result.historyId can be used to retry via resurrect.retry(result.historyId, wallet)
  * ```
  */
+const debug = createDebugger('core')
+
 export class SorobanResurrect {
   private _server: ISorobanRpcClient
   private _config: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & { rpcClient: ISorobanRpcClient }
