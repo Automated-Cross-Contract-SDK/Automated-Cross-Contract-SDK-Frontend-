@@ -105,10 +105,19 @@ describe('SorobanRpcClient', () => {
     expect(client.serverURL).toBe('https://soroban-testnet.stellar.org')
   })
 
-  it('exposes the underlying _server instance', () => {
-    const client = new SorobanRpcClient('https://soroban-testnet.stellar.org')
-    expect(client._server).toBeDefined()
-    expect(typeof client._server.simulateTransaction).toBe('function')
+  it('creates the underlying rpc.Server lazily on first method use', async () => {
+    const client = new SorobanRpcClient('https://soroban-testnet.stellar.org') as any
+
+    expect(client._serverInstance).toBeUndefined()
+
+    const fakeResponse = { id: 'latest', sequence: 500, protocolVersion: 22 } as never
+    vi.spyOn(rpc.Server.prototype, 'getLatestLedger').mockResolvedValue(fakeResponse)
+
+    const result = await client.getLatestLedger()
+
+    expect(result).toBe(fakeResponse)
+    expect(client._serverInstance).toBeDefined()
+    expect(typeof client._serverInstance.getLatestLedger).toBe('function')
   })
 
   it('satisfies ISorobanRpcClient', () => {
@@ -349,14 +358,20 @@ describe('free functions accept ISorobanRpcClient', () => {
           minResourceFee: '100',
           cost: { cpuInsns: '100', memBytes: '100' },
           result: { auth: [], retval: { switch: () => 0 } },
-          restorePreamble: { minResourceFee: '100', transactionData: { build: () => mockSorobanData } },
+          restorePreamble: {
+            minResourceFee: '100',
+            transactionData: { build: () => mockSorobanData },
+          },
         } as never)
         .mockResolvedValueOnce({
           id: '2',
           latestLedger: 101,
           events: [],
           _parsed: true,
-          transactionData: { build: () => mockSorobanData, getFootprint: () => ({ readOnly: () => [], readWrite: () => [] }) },
+          transactionData: {
+            build: () => mockSorobanData,
+            getFootprint: () => ({ readOnly: () => [], readWrite: () => [] }),
+          },
           minResourceFee: '100',
           cost: { cpuInsns: '100', memBytes: '100' },
           result: { auth: [], retval: { switch: () => 0 } },
@@ -449,14 +464,20 @@ describe('backward compatibility', () => {
         minResourceFee: '100',
         cost: { cpuInsns: '100', memBytes: '100' },
         result: { auth: [], retval: { switch: () => 0 } },
-        restorePreamble: { minResourceFee: '100', transactionData: { build: () => mockSorobanData } },
+        restorePreamble: {
+          minResourceFee: '100',
+          transactionData: { build: () => mockSorobanData },
+        },
       } as never)
       .mockResolvedValueOnce({
         id: '2',
         latestLedger: 101,
         events: [],
         _parsed: true,
-        transactionData: { build: () => mockSorobanData, getFootprint: () => ({ readOnly: () => [], readWrite: () => [] }) },
+        transactionData: {
+          build: () => mockSorobanData,
+          getFootprint: () => ({ readOnly: () => [], readWrite: () => [] }),
+        },
         minResourceFee: '100',
         cost: { cpuInsns: '100', memBytes: '100' },
         result: { auth: [], retval: { switch: () => 0 } },

@@ -1,4 +1,5 @@
 import { rpc, Transaction, xdr } from '@stellar/stellar-sdk'
+import type { ISorobanRpcClient } from './RpcClient.js'
 import type {
   SorobanResurrectConfig,
   WalletAdapter,
