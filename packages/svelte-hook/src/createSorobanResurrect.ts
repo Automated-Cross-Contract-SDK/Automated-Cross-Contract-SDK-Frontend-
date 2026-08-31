@@ -9,7 +9,7 @@ import {
   type RestoreState,
   type ArchivedLedgerEntry,
   type ResurrectResult,
-  type SubmitWithRestoreOptions,
+  type SorobanResurrectEvents,
 } from '@soroban-resurrect/sdk'
 import type { Transaction } from '@stellar/stellar-sdk'
 
@@ -69,6 +69,15 @@ export interface SorobanResurrectStore {
   estimate: (transaction: Transaction) => Promise<FeeEstimate>
   /** Reset state back to idle. Optionally, only reset if in a specific state. */
   reset: (fromState?: RestoreState) => void
+  /**
+   * Subscribes to a typed lifecycle event (`restoreNeeded`, `restoreSubmitted`,
+   * `restoreConfirmed`, `originalSubmitted`, `error`, `restoreComplete`, `stateChange`)
+   * on the current SDK instance. Returns an unsubscribe function.
+   */
+  on: <K extends keyof SorobanResurrectEvents>(
+    event: K,
+    listener: (payload: SorobanResurrectEvents[K]) => void,
+  ) => () => void
   /** The underlying SDK instance. */
   resurrect: SorobanResurrect
   /** Clean up subscriptions. Call inside Svelte's `onDestroy()`. */
@@ -202,6 +211,13 @@ export function createSorobanResurrect(
     }
   }
 
+  const on = <K extends keyof SorobanResurrectEvents>(
+    event: K,
+    listener: (payload: SorobanResurrectEvents[K]) => void,
+  ): (() => void) => {
+    return resurrect.on(event, listener)
+  }
+
   const destroy = () => {
     if (unsubscribeState) {
       unsubscribeState()
@@ -221,6 +237,7 @@ export function createSorobanResurrect(
     detectArchivedKeys,
     estimate,
     reset,
+    on,
     resurrect: resurrect!,
     destroy,
   }
