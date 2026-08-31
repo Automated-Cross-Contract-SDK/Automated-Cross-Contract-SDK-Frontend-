@@ -17,6 +17,7 @@ import {
   type ArchivedLedgerEntry,
   type ResurrectResult,
   type RestoreState,
+  type SorobanResurrectEvents,
 } from '@soroban-resurrect/sdk'
 import type { Transaction } from '@stellar/stellar-sdk'
 
@@ -40,9 +41,34 @@ interface SorobanResurrectContextValue {
   detectArchivedKeys: (transaction: Transaction) => Promise<ArchivedLedgerEntry[]>
   /** Reset state back to idle. */
   reset: (fromState?: RestoreState) => void
+  /**
+   * Subscribes to a typed lifecycle event (`restoreNeeded`, `restoreSubmitted`,
+   * `restoreConfirmed`, `originalSubmitted`, `error`, `restoreComplete`, `stateChange`)
+   * on the current SDK instance. Returns an unsubscribe function.
+   */
+  on: <K extends keyof SorobanResurrectEvents>(
+    event: K,
+    listener: (payload: SorobanResurrectEvents[K]) => void,
+  ) => () => void
 }
 
-const SorobanResurrectContext = createContext<SorobanResurrectContextValue | null>(null)
+/**
+ * Underlying React context. Exported so sibling hooks
+ * (`useSorobanResurrectSubmit`, `useRestoreWatcher`,
+ * `useSorobanResurrectNetwork`) can opt into the provider's SDK instance
+ * when one is present, and fall back to a standalone instance otherwise.
+ * Prefer `useSorobanResurrectContext()` in application code.
+ */
+export const SorobanResurrectContext = createContext<SorobanResurrectContextValue | null>(null)
+
+/**
+ * Non-throwing variant of {@link useSorobanResurrectContext}. Returns the
+ * context value when called inside a `<SorobanResurrectProvider>`, or
+ * `null` when used standalone.
+ */
+export function useOptionalSorobanResurrectContext(): SorobanResurrectContextValue | null {
+  return useContext(SorobanResurrectContext)
+}
 
 /**
  * Minimal external-store interface used by {@link useSorobanResurrectSelector}.
@@ -145,6 +171,14 @@ export function SorobanResurrectProvider({ config, children }: SorobanResurrectP
     resurrectRef.current?.reset(fromState)
   }, [])
 
+  const on = useCallback(<K extends keyof SorobanResurrectEvents>(
+    event: K,
+    listener: (payload: SorobanResurrectEvents[K]) => void,
+  ) => {
+    const r = resurrectRef.current
+    return r ? r.on(event, listener) : () => {}
+  }, [])
+
   const isProcessing = isProcessingState(state.state)
 
   const value: SorobanResurrectContextValue = {
@@ -155,6 +189,7 @@ export function SorobanResurrectProvider({ config, children }: SorobanResurrectP
     submitWithRestore,
     detectArchivedKeys,
     reset,
+    on,
   }
 
   // External store plumbing for `useSorobanResurrectSelector`. `valueRef` always

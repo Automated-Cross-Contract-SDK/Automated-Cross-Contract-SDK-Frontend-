@@ -2,6 +2,16 @@
   "name": "@soroban-resurrect/svelte-hook",
   "version": "0.1.0",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-.git",
+    "directory": "packages/svelte-hook"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -33,6 +43,8 @@
     "svelte": "^4.0.0 || ^5.0.0"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "^2.1.9",
+    "jsdom": "^29.1.1",
     "svelte": "^4.0.0",
     "typescript": "^5.5.0",
     "vitest": "^2.1.9"

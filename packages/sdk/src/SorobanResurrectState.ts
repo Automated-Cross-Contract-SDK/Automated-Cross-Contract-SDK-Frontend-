@@ -1,5 +1,5 @@
 import { ArchivedLedgerEntry, RestoreState, RestoreStateInfo, SorobanResurrectEvents } from './types.js'
-import { TypedEventEmitter } from './EventEmitter.js'
+import { TypedEventEmitter, type WithIndexSignature } from './EventEmitter.js'
 
 /**
  * Manages the observable workflow state for a `SorobanResurrect` instance.
@@ -29,7 +29,7 @@ export class SorobanResurrectStateManager {
   private _listeners: Array<(info: RestoreStateInfo) => void> = []
 
   /** Typed event emitter used alongside the legacy observer pattern. */
-  readonly emitter = new TypedEventEmitter<SorobanResurrectEvents>()
+  readonly emitter = new TypedEventEmitter<WithIndexSignature<SorobanResurrectEvents>>()
 
   // ---------------------------------------------------------------------------
   // Read-only accessors
