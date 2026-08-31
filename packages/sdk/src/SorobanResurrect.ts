@@ -100,7 +100,9 @@ export class SorobanResurrect {
       this._config,
       this._stateMgr,
       this._simulator,
+      config.persistHistory,
     )
+    this.ready = this._executor.historyHydrated
   }
 
   // ---------------------------------------------------------------------------

@@ -16,6 +16,8 @@ import {
 } from './Restorer.js'
 import { isRestoreResponse } from './Archiver.js'
 import { TransactionHistory, TransactionHistoryEntry } from './TransactionHistory.js'
+import { attachHistoryPersistence, type HistoryPersistenceHandle } from './HistoryPersistence.js'
+import type { HistoryPersistenceOptions } from './types.js'
 import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
 import { SorobanResurrectSimulator } from './SorobanResurrectSimulation.js'
 import type { ISorobanRpcClient } from './RpcClient.js'
@@ -40,7 +42,8 @@ export class SorobanResurrectExecutor {
   private _config: Required<SorobanResurrectConfig>
   private readonly _stateMgr: SorobanResurrectStateManager
   private readonly _simulator: SorobanResurrectSimulator
-  private readonly _history = new TransactionHistory()
+  private readonly _history: TransactionHistory
+  private readonly _historyPersistence: HistoryPersistenceHandle | null
 
   /**
    * @param server    - Soroban RPC client instance.
@@ -53,11 +56,24 @@ export class SorobanResurrectExecutor {
     config: Required<SorobanResurrectConfig>,
     stateMgr: SorobanResurrectStateManager,
     simulator: SorobanResurrectSimulator,
+    persistHistory?: HistoryPersistenceOptions,
   ) {
     this._server = server
     this._config = config
     this._stateMgr = stateMgr
     this._simulator = simulator
+    this._history = new TransactionHistory(config.networkPassphrase)
+    this._historyPersistence = persistHistory
+      ? attachHistoryPersistence(this._history, persistHistory.storage, persistHistory.key)
+      : null
+  }
+
+  /**
+   * Resolves once transaction history has been hydrated from durable storage.
+   * When persistence is disabled this resolves immediately.
+   */
+  get historyHydrated(): Promise<void> {
+    return this._historyPersistence?.hydrated ?? Promise.resolve()
   }
 
   /**

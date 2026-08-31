@@ -20,6 +20,8 @@ export type {
   WalletAdapter,
   FeeBumpSponsor,
   FeeBumpConfig,
+  HistoryStorage,
+  HistoryPersistenceOptions,
   ArchivedLedgerEntry,
   ArchiveDetectionOptions,
   SimulateResponse,
@@ -116,6 +118,7 @@ export type { Result, Option } from './result.js'
 export { resolveConfig } from './SorobanResurrectConfig.js'
 export type { ResolvedConfig } from './SorobanResurrectConfig.js'
 export { SorobanResurrectStateManager } from './SorobanResurrectState.js'
+export { isProcessingState } from './stateUtils.js'
 export { SorobanResurrectSimulator } from './SorobanResurrectSimulation.js'
 export { SorobanResurrectExecutor } from './SorobanResurrectExecution.js'
 export {

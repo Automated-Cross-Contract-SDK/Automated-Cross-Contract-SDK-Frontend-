@@ -1,10 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, renderHook, screen, act } from '@testing-library/react'
 import React from 'react'
-import {
-  SorobanResurrectProvider,
-  useSorobanResurrectContext,
-} from '../SorobanResurrectContext.js'
+import { SorobanResurrectProvider, useSorobanResurrectContext } from '../SorobanResurrectContext.js'
 import { SorobanResurrect } from '@soroban-resurrect/sdk'
 
 const mockOnStateChange = vi.fn()
@@ -13,6 +10,8 @@ const mockDetectArchivedKeys = vi.fn()
 const mockSubmitWithRestore = vi.fn()
 
 vi.mock('@soroban-resurrect/sdk', () => ({
+  isProcessingState: (state: string) =>
+    state !== 'idle' && state !== 'success' && state !== 'error',
   SorobanResurrect: vi.fn().mockImplementation(() => ({
     onStateChange: mockOnStateChange,
     reset: mockReset,
@@ -257,15 +256,12 @@ describe('SorobanResurrectProvider', () => {
   })
 
   it('does not recreate SDK when config is unchanged', () => {
-    const { rerender } = renderHook(
-      (config: { rpcUrl: string }) => useSorobanResurrectContext(),
-      {
-        wrapper: ({ children, config }: any) => (
-          <SorobanResurrectProvider config={config}>{children}</SorobanResurrectProvider>
-        ),
-        initialProps: testConfig,
-      },
-    )
+    const { rerender } = renderHook((config: { rpcUrl: string }) => useSorobanResurrectContext(), {
+      wrapper: ({ children, config }: any) => (
+        <SorobanResurrectProvider config={config}>{children}</SorobanResurrectProvider>
+      ),
+      initialProps: testConfig,
+    })
 
     rerender(testConfig)
     expect(vi.mocked(SorobanResurrect)).toHaveBeenCalledTimes(1)
