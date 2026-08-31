@@ -1,6 +1,8 @@
 import { rpc, xdr } from '@stellar/stellar-sdk'
 import { ArchivedLedgerEntry } from './types.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
 import { asXdrBase64, type XdrBase64 } from './branded-types.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
 
 /**
  * Average ledger close time in seconds. Used for estimating time remaining
@@ -9,11 +11,23 @@ import { asXdrBase64, type XdrBase64 } from './branded-types.js'
 export const LEDGER_CLOSE_TIME_SECONDS = 5
 
 /**
+ * The kind of ledger entry a TTL query was performed against.
+ *
+ * `contractData` covers persistent/temporary contract storage entries;
+ * `contractCode` covers the wasm bytecode entry for a deployed contract
+ * (see {@link buildContractCodeKey}); `other` covers any other ledger
+ * entry type (e.g. `account`, `trustline`).
+ */
+export type LedgerKeyEntryType = 'contractData' | 'contractCode' | 'other'
+
+/**
  * Detailed TTL information for a single ledger entry.
  */
 export interface LedgerEntryTTLInfo {
   /** Base64-encoded XDR representation of the ledger key. */
   keyBase64: XdrBase64
+  /** The kind of ledger entry this key refers to. */
+  entryType: LedgerKeyEntryType
   /** Ledger sequence number at which this entry expires (0 if archived). */
   liveUntilLedger: number
   /** Current ledger sequence number at the time of the query. */
@@ -24,6 +38,22 @@ export interface LedgerEntryTTLInfo {
   isArchived: boolean
   /** Rough estimate of seconds remaining until expiry, based on ~5 s per ledger. */
   estimatedSecondsRemaining: number
+}
+
+/**
+ * Determines whether a ledger key refers to a ContractData, ContractCode, or
+ * other ledger entry. Used to annotate TTL query results so callers can tell
+ * wasm (contract code) entries apart from contract storage entries.
+ */
+export function getLedgerKeyEntryType(key: xdr.LedgerKey): LedgerKeyEntryType {
+  switch (key.switch().name) {
+    case 'contractData':
+      return 'contractData'
+    case 'contractCode':
+      return 'contractCode'
+    default:
+      return 'other'
+  }
 }
 
 /**
@@ -46,9 +76,14 @@ export interface TTLQueryResult {
  * Builds a `LedgerEntryTTLInfo` object for an entry that was not found
  * on-chain (i.e. already archived).
  */
-function makeArchivedInfo(keyBase64: XdrBase64, currentLedger: number): LedgerEntryTTLInfo {
+function makeArchivedInfo(
+  keyBase64: XdrBase64,
+  currentLedger: number,
+  entryType: LedgerKeyEntryType,
+): LedgerEntryTTLInfo {
   return {
     keyBase64,
+    entryType,
     liveUntilLedger: 0,
     currentLedger,
     ttlLedgers: 0,
@@ -64,11 +99,13 @@ function makeLiveInfo(
   keyBase64: XdrBase64,
   liveUntilLedger: number,
   currentLedger: number,
+  entryType: LedgerKeyEntryType,
 ): LedgerEntryTTLInfo {
   const ttlLedgers = Math.max(0, liveUntilLedger - currentLedger)
   const isArchived = ttlLedgers === 0
   return {
     keyBase64,
+    entryType,
     liveUntilLedger,
     currentLedger,
     ttlLedgers,
@@ -111,7 +148,7 @@ export async function queryLedgerTTL(
   // Pre-populate all keys as archived; overwrite if found on-chain
   for (const key of keys) {
     const keyBase64 = asXdrBase64(key.toXDR('base64'))
-    infoMap.set(keyBase64, makeArchivedInfo(keyBase64, currentLedger))
+    infoMap.set(keyBase64, makeArchivedInfo(keyBase64, currentLedger, getLedgerKeyEntryType(key)))
   }
 
   const chunkSize = 50
@@ -123,7 +160,15 @@ export async function queryLedgerTTL(
         for (const entry of result.entries) {
           const keyBase64 = asXdrBase64(entry.key.toXDR('base64'))
           const liveUntilLedger = entry.liveUntilLedgerSeq ?? 0
-          infoMap.set(keyBase64, makeLiveInfo(keyBase64, liveUntilLedger, currentLedger))
+          infoMap.set(
+            keyBase64,
+            makeLiveInfo(
+              keyBase64,
+              liveUntilLedger,
+              currentLedger,
+              getLedgerKeyEntryType(entry.key),
+            ),
+          )
         }
       }
     } catch (err) {

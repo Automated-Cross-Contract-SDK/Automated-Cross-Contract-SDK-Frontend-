@@ -2,6 +2,7 @@ import { rpc, Transaction } from '@stellar/stellar-sdk'
 import { xdr } from '@stellar/stellar-sdk'
 import { ArchivedLedgerEntry, SimulateResponse } from './types.js'
 import { asXdrBase64, asContractIdHex, type ContractIdHex } from './branded-types.js'
+import { extractArchivedKeysSafe, extractFootprintFromSuccessSafe } from './result.js'
 
 /**
  * Type guard — returns true if the simulation response indicates archived
@@ -98,10 +99,12 @@ export function extractArchivedKeys(
         keyBase64,
       })
     }
-  } catch {
+  } catch (err) {
+    debug('extractArchivedKeys: failed to read footprint', err)
     return keys
   }
 
+  debug('extractArchivedKeys: %d archived key(s) in restore footprint', keys.length)
   return keys
 }
 
@@ -139,29 +142,106 @@ export function extractFootprintFromSuccess(response: rpc.Api.SimulateTransactio
 }
 
 /**
+ * Tuning options for chunked, parallel archived-entry detection.
+ *
+ * @see {@link detectArchivedEntries}
+ */
+export interface DetectArchivedEntriesOptions {
+  /**
+   * Ledger keys per `getLedgerEntries` request. Defaults to
+   * {@link LEDGER_ENTRY_CHUNK_SIZE}. Values below 1 fall back to the default.
+   */
+  chunkSize?: number
+  /**
+   * Chunk requests kept in flight at once. Defaults to
+   * {@link LEDGER_ENTRY_CONCURRENCY}. Values below 1 fall back to the default.
+   */
+  concurrency?: number
+}
+
+/**
+ * Splits ledger keys into fixed-size chunks.
+ */
+function chunkKeys(ledgerKeys: xdr.LedgerKey[], chunkSize: number): xdr.LedgerKey[][] {
+  const chunks: xdr.LedgerKey[][] = []
+  for (let i = 0; i < ledgerKeys.length; i += chunkSize) {
+    chunks.push(ledgerKeys.slice(i, i + chunkSize))
+  }
+  return chunks
+}
+
+/**
+ * Resolves one chunk of keys to the archived entries it contains. A failed
+ * request conservatively yields every key in the chunk.
+ */
+async function detectArchivedChunk(
+  server: rpc.Server,
+  chunk: xdr.LedgerKey[],
+  chunkIndex: number,
+): Promise<ArchivedLedgerEntry[]> {
+  try {
+    const result = await server.getLedgerEntries(...chunk)
+    // Build a set of returned entry keys to identify archived ones
+    const knownKeys = new Set<string>()
+    if (result.entries) {
+      for (const entry of result.entries) {
+        knownKeys.add(entry.key.toXDR('base64'))
+      }
+    }
+    // Check each key in the chunk; if not in returned entries, it's archived
+    const archived: ArchivedLedgerEntry[] = []
+    for (const key of chunk) {
+      const keyXdr = key.toXDR('base64')
+      if (!knownKeys.has(keyXdr)) {
+        archived.push({
+          key,
+          keyBase64: keyXdr,
+        })
+      }
+    }
+    return archived
+  } catch (err) {
+    debug('detectArchivedEntries: chunk %d failed, assuming archived', chunkIndex, err)
+    // On network error, conservatively treat all keys in chunk as archived
+    return chunk.map((key) => ({
+      key,
+      keyBase64: key.toXDR('base64'),
+    }))
+  }
+}
+
+/**
  * Queries the Soroban RPC server to determine which of the given ledger keys
  * correspond to archived (non-existent / expired) entries.
  *
- * Keys are fetched in chunks of 50. If a chunk request fails (network error,
- * rate-limit, etc.), every key in that chunk is conservatively treated as
- * archived to avoid false negatives.
+ * Keys are fetched in chunks (50 by default), and several chunks are requested
+ * in parallel, so a large footprint costs roughly
+ * `ceil(chunks / concurrency)` round trips rather than one per chunk. If a
+ * chunk request fails (network error, rate-limit, etc.), every key in that
+ * chunk is conservatively treated as archived to avoid false negatives.
  *
  * @param server - Soroban RPC server instance.
  * @param ledgerKeys - Ledger keys to check (typically the read-write
  *   footprint of a transaction).
+ * @param options - Optional {@link DetectArchivedEntriesOptions} overriding
+ *   chunk size and request concurrency.
  * @returns Array of {@link ArchivedLedgerEntry} for keys that are missing
  *   from `getLedgerEntries` results (i.e. archived), or that could not be
- *   verified due to a request error.
+ *   verified due to a request error. Entries keep the relative order of
+ *   `ledgerKeys` regardless of the order responses arrive in.
  * @see {@link detectArchivedKeysViaDirect}, which wraps this with the
  *   simulate → extract-footprint steps.
  */
 export async function detectArchivedEntries(
   server: ISorobanRpcClient,
   ledgerKeys: xdr.LedgerKey[],
+  options: DetectArchivedEntriesOptions = {},
 ): Promise<ArchivedLedgerEntry[]> {
-  const archived: ArchivedLedgerEntry[] = []
+  if (ledgerKeys.length === 0) {
+    return []
+  }
 
-  const chunkSize = 50
+  const chunks: xdr.LedgerKey[][] = []
   for (let i = 0; i < ledgerKeys.length; i += chunkSize) {
     const chunk = ledgerKeys.slice(i, i + chunkSize)
     try {
@@ -183,17 +263,31 @@ export async function detectArchivedEntries(
           })
         }
       }
-    } catch {
-      // On network error, conservatively treat all keys in chunk as archived
-      archived.push(
-        ...chunk.map((key) => ({
+    }
+    // Check each key in the chunk; if not in returned entries, it's archived
+    for (const key of chunk) {
+      const keyXdr = key.toXDR('base64')
+      if (!knownKeys.has(keyXdr)) {
+        archived.push({
           key,
           keyBase64: asXdrBase64(key.toXDR('base64')),
         })),
       )
     }
+  } catch (err) {
+    // On network error, conservatively treat all keys in chunk as archived
+    debug('detectArchivedEntries: chunk %d failed, assuming archived', chunkIndex, err)
+    return chunk.map((key) => ({
+      key,
+      keyBase64: key.toXDR('base64'),
+    }))
   }
 
+  const workerCount = Math.min(concurrency, chunks.length)
+  await Promise.all(Array.from({ length: workerCount }, () => worker()))
+
+  const archived = results.flat()
+  debug('detectArchivedEntries: %d of %d keys archived', archived.length, ledgerKeys.length)
   return archived
 }
 
@@ -231,6 +325,8 @@ export async function detectArchivedKeysViaSimulation(
  *
  * @param server - Soroban RPC server instance.
  * @param transaction - The transaction to simulate and check.
+ * @param options - Optional {@link DetectArchivedEntriesOptions} forwarded to
+ *   {@link detectArchivedEntries}, for tuning large footprints.
  * @returns Array of {@link ArchivedLedgerEntry} found via direct ledger
  *   lookup.
  * @throws {Error} If the simulation itself fails, or if the simulation
@@ -243,6 +339,7 @@ export async function detectArchivedKeysViaSimulation(
 export async function detectArchivedKeysViaDirect(
   server: ISorobanRpcClient,
   transaction: Transaction,
+  options: DetectArchivedEntriesOptions = {},
 ): Promise<ArchivedLedgerEntry[]> {
   const response = await server.simulateTransaction(transaction)
 
@@ -264,7 +361,7 @@ export async function detectArchivedKeysViaDirect(
     return []
   }
 
-  return detectArchivedEntries(server, readWrite)
+  return detectArchivedEntries(server, readWrite, options)
 }
 
 /**
@@ -332,7 +429,7 @@ export function buildContractDataKey(
  * ```
  */
 export async function checkArchivedContractData(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   contractId: ContractIdHex | string,
   key: xdr.ScVal,
   keyType: 'persistent' | 'temporary' = 'persistent',
@@ -368,12 +465,84 @@ export async function checkArchivedContractData(
  * ```
  */
 export async function getContractDataEntry(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   contractId: ContractIdHex | string,
   key: xdr.ScVal,
   keyType: 'persistent' | 'temporary' = 'persistent',
 ): Promise<rpc.Api.LedgerEntryResult | null> {
   const ledgerKey = buildContractDataKey(contractId, key, keyType)
+
+  try {
+    const result = await server.getLedgerEntries(ledgerKey)
+    if (result.entries && result.entries.length > 0) {
+      return result.entries[0]
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Builds a ContractCode ledger key for a given wasm hash. ContractCode
+ * entries store the wasm bytecode for a deployed contract and, like
+ * ContractData entries, expire and can be restored via `restoreFootprint`.
+ *
+ * @param wasmHash - The wasm hash as a 64-char hex string (as returned by
+ *   `Operation.uploadContractWasm`/`installContractWasm` responses), or a
+ *   raw `Buffer`/`Uint8Array`.
+ * @returns An xdr.LedgerKey for the ContractCode entry.
+ *
+ * @example
+ * ```ts
+ * const key = buildContractCodeKey(wasmHashHex)
+ * const archived = await checkArchivedContractCode(server, wasmHashHex)
+ * ```
+ */
+export function buildContractCodeKey(
+  wasmHash: HexString | string | Buffer | Uint8Array,
+): xdr.LedgerKey {
+  const hash =
+    typeof wasmHash === 'string'
+      ? Buffer.from((wasmHash.match(/.{1,2}/g) ?? []).map((b) => parseInt(b, 16)))
+      : Buffer.from(wasmHash)
+
+  const contractCode = new xdr.LedgerKeyContractCode({ hash })
+
+  return xdr.LedgerKey.contractCode(contractCode)
+}
+
+/**
+ * Checks whether a contract's wasm (ContractCode) ledger entry is archived
+ * (expired / not found on the ledger). Useful before a contract upgrade or
+ * deployment that references an existing wasm hash.
+ *
+ * @param server   - Soroban RPC server instance.
+ * @param wasmHash - The wasm hash as a hex string or raw bytes.
+ * @returns `true` if the entry is archived (not found), `false` if it exists.
+ */
+export async function checkArchivedContractCode(
+  server: ISorobanRpcClient,
+  wasmHash: HexString | string | Buffer | Uint8Array,
+): Promise<boolean> {
+  const ledgerKey = buildContractCodeKey(wasmHash)
+  const archived = await detectArchivedEntries(server, [ledgerKey])
+  return archived.length > 0
+}
+
+/**
+ * Retrieves a contract's wasm (ContractCode) ledger entry.
+ * Returns the ledger entry data if it exists, or `null` if archived / not found.
+ *
+ * @param server   - Soroban RPC server instance.
+ * @param wasmHash - The wasm hash as a hex string or raw bytes.
+ * @returns The ledger entry if found, otherwise `null`.
+ */
+export async function getContractCodeEntry(
+  server: ISorobanRpcClient,
+  wasmHash: HexString | string | Buffer | Uint8Array,
+): Promise<rpc.Api.LedgerEntryResult | null> {
+  const ledgerKey = buildContractCodeKey(wasmHash)
 
   try {
     const result = await server.getLedgerEntries(ledgerKey)

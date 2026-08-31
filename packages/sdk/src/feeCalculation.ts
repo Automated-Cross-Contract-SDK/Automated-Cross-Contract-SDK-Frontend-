@@ -42,43 +42,40 @@ export function calculateRestoreFee(
   return (minResourceFee * multiplier).toString()
 }
 
-/**
- * Thrown by {@link buildRestoreTransaction} (see `Restorer.ts`) when the
- * computed restore fee exceeds `config.maxRestoreFeeStroops`. Carries both
- * numbers so a caller (or the CLI/UI surfacing `ResurrectResult.error`) can
- * show a specific "X exceeds your Y cap" message instead of a generic string.
- */
-export class RestoreFeeExceededError extends Error {
-  constructor(
-    /** The fee the restore transaction would have used, in stroops. */
-    public readonly computedFeeStroops: string,
-    /** The configured `maxRestoreFeeStroops` cap that was exceeded. */
-    public readonly capFeeStroops: string,
-  ) {
-    super(
-      `Restore fee ${computedFeeStroops} stroops exceeds the configured cap of ${capFeeStroops} stroops ` +
-        `(maxRestoreFeeStroops). Raise the cap, lower restoreFeeMultiplier, or omit maxRestoreFeeStroops ` +
-        `to accept the computed fee.`,
-    )
-    this.name = 'RestoreFeeExceededError'
-  }
+/** Structured estimate of the cost (and need) of restoring a transaction's archived entries. */
+export interface RestoreCostEstimate {
+  /** Minimum resource fee from simulation (integer stroops), 0 when no restore is needed. */
+  minResourceFee: number
+  /** Fee multiplier applied to `minResourceFee` (see {@link resolveRestoreFeeMultiplier}). */
+  multiplier: number
+  /** Estimated restore transaction fee, in stroops (`minResourceFee * multiplier`). */
+  estimatedFee: string
+  /** Number of archived ledger entries detected. */
+  archivedKeysDetected: number
+  /** Whether the transaction requires a restore before it can be submitted. */
+  wouldNeedRestore: boolean
 }
 
 /**
- * Throws {@link RestoreFeeExceededError} if `feeStroops` exceeds
- * `config.maxRestoreFeeStroops`. A no-op when the cap is unset (the default),
- * so most callers pay whatever the simulation-derived fee computes to, as
- * before this option existed.
+ * Builds a {@link RestoreCostEstimate} from a `minResourceFee` and archived-key
+ * count, applying the same multiplier math as {@link calculateRestoreFee}.
+ *
+ * @param minResourceFee - Minimum resource fee from simulation (0 when no restore is needed).
+ * @param archivedKeysDetected - Number of archived ledger entries detected.
+ * @param config - SDK configuration (used to resolve the multiplier).
+ * @see {@link SorobanResurrect.estimateRestoreCost} — the facade method that
+ *   simulates a transaction and delegates here for the fee math.
  */
-export function assertRestoreFeeWithinCap(
-  feeStroops: string,
+export function buildRestoreCostEstimate(
+  minResourceFee: number,
+  archivedKeysDetected: number,
   config: SorobanResurrectConfig,
-): void {
-  const cap = config.maxRestoreFeeStroops
-  if (cap === undefined) {
-    return
-  }
-  if (BigInt(feeStroops) > BigInt(cap)) {
-    throw new RestoreFeeExceededError(feeStroops, cap)
+): RestoreCostEstimate {
+  return {
+    minResourceFee,
+    multiplier: resolveRestoreFeeMultiplier(config),
+    estimatedFee: calculateRestoreFee(minResourceFee, config),
+    archivedKeysDetected,
+    wouldNeedRestore: archivedKeysDetected > 0,
   }
 }

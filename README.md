@@ -51,6 +51,11 @@ Soroban-Resurrect solves the "archived ledger entry" problem for Soroban dApps. 
 npm install @soroban-resurrect/sdk @stellar/stellar-sdk
 ```
 
+> All `@soroban-resurrect/*` packages are published from GitHub Actions with
+> [npm provenance](https://docs.npmjs.com/generating-provenance-statements).
+> Verify a published tarball was built from this repo with
+> `npm audit signatures` after install.
+
 ### 1. Direct SDK Usage
 
 ```typescript
@@ -180,6 +185,48 @@ const { state, isProcessing, submitWithRestore, reset } = useSorobanResurrect(co
 
 All hooks in `@soroban-resurrect/react-hook` use only standard React APIs (`useState`, `useCallback`, `useRef`, `useEffect`) and contain no browser-specific code, making them fully compatible with React Native out of the box. See `examples/react-native/` for a complete example.
 
+### Package entry points (tree-shaking)
+
+Each hook package ships focused subpath exports so consumers only pull in the
+code they use. The root entry (`.`) still re-exports everything for backwards
+compatibility.
+
+- `@soroban-resurrect/react-hook/standalone` — `useSorobanResurrect` only (no provider code)
+- `@soroban-resurrect/react-hook/context` — `SorobanResurrectProvider`, `useSorobanResurrectContext`, `useSorobanResurrectSelector`
+- `@soroban-resurrect/vue-hook/composable` — the `useSorobanResurrect` composable
+- `@soroban-resurrect/svelte-hook/store` — the `createSorobanResurrect` factory
+
+```ts
+// Pull in only the standalone hook — the provider/context code is tree-shaken away.
+import { useSorobanResurrect } from '@soroban-resurrect/react-hook/standalone'
+```
+
+#### Context selectors (avoid re-renders)
+
+`useSorobanResurrectSelector(selectorFn, isEqual?)` subscribes to a single slice
+of the context value via `useSyncExternalStore`. A consumer that reads only
+`isProcessing` will not re-render when unrelated state (e.g. `state.message`)
+changes:
+
+```tsx
+import { useSorobanResurrectSelector } from '@soroban-resurrect/react-hook/context'
+
+function Spinner() {
+  const isProcessing = useSorobanResurrectSelector((s) => s.isProcessing)
+  return isProcessing ? <LoadingDots /> : null
+}
+```
+
+#### Vue derived helpers
+
+The Vue composable returns `isProcessing` plus `isIdle`, `isSuccess`, and
+`isError` as reactive `ComputedRef<boolean>` values driven by `state`, reusing
+the SDK's shared `isProcessingState` util:
+
+```ts
+const { isProcessing, isIdle, isSuccess, isError } = useSorobanResurrect(config)
+```
+
 ---
 
 ## Architecture
@@ -223,7 +270,7 @@ The SDK implements the complete [CAP-0066](https://github.com/stellar/stellar-pr
 constructor(config: SorobanResurrectConfig)
 
 // Properties
-server: rpc.Server              // The underlying Soroban RPC server
+server: ISorobanRpcClient       // Injectable RPC transport (defaults to a SorobanRpcClient built from rpcUrl)
 config: Required<SorobanResurrectConfig>
 state: RestoreState              // Current state machine state
 stateInfo: RestoreStateInfo      // State + message + archived keys + error
@@ -233,11 +280,30 @@ simulate(transaction: Transaction): Promise<SimulateResponse>
 detectArchivedKeys(transaction: Transaction): Promise<ArchivedLedgerEntry[]>
 needsRestore(transaction: Transaction): Promise<boolean>
 buildRestoreTx(sourcePublicKey: string, transaction: Transaction): Promise<Transaction>
-estimateRestoreCost(transaction: Transaction): Promise<RestoreCostEstimate>
 submitWithRestore(options: SubmitWithRestoreOptions): Promise<ResurrectResult>
+retry(entryId: string, wallet: WalletAdapter): Promise<ResurrectResult>
 reset(fromState?: RestoreState): void
 onStateChange(listener: (info: RestoreStateInfo) => void): () => void  // unsubscribe
 ```
+
+#### RPC Client Injection
+
+Inject a custom RPC transport — a caching proxy, a logging wrapper, or a
+test double — via `config.rpcClient` instead of letting the SDK build one
+from `rpcUrl`:
+
+```typescript
+import { createRpcClient, SorobanResurrect } from '@soroban-resurrect/sdk'
+
+const client = createRpcClient('https://soroban-testnet.stellar.org')
+const sdk = new SorobanResurrect({ rpcUrl: '...', rpcClient: client })
+```
+
+`createRpcClient`, `SorobanRpcClient`, and the `ISorobanRpcClient` interface
+are all exported from `@soroban-resurrect/sdk`. See
+[RPC Client Injection](docs/API.md#rpc-client-injection) in the API
+reference for the caching/logging wrapper and test-double patterns, and a
+runnable example in [`docs/guide/rpc-client-injection.md`](docs/guide/rpc-client-injection.md).
 
 ### React Hook
 
@@ -267,11 +333,18 @@ useSorobanResurrect({ config }): UseSorobanResurrectReturn  // same shape
 ```typescript
 interface SorobanResurrectConfig {
   rpcUrl: string
-  networkPassphrase?: string // default: Testnet
+  networkPassphrase?: string // default: resolved from rpcUrl, else Testnet
   pollIntervalMs?: number // default: 1000
   pollTimeoutMs?: number // default: 60000
+  rpcClient?: ISorobanRpcClient // default: a SorobanRpcClient built from rpcUrl — inject to customize the RPC transport
 }
+```
 
+> Full field-by-field defaults and guidance live in
+> [`docs/api/types.md`](docs/api/types.md#sorobanresurrectconfig) — this snippet
+> is kept in sync with [`types.ts`](packages/sdk/src/types.ts).
+
+```typescript
 interface WalletAdapter {
   isConnected(): Promise<boolean>
   getPublicKey(): Promise<string>
@@ -322,6 +395,10 @@ npm run dev:example
 # Run the documentation site locally
 npm run docs:dev
 ```
+
+To inject a test double for the RPC client (instead of hitting a real
+Soroban RPC endpoint) when writing tests against this SDK, see
+[`docs/guide/testing.md`](docs/guide/testing.md).
 
 ### Documentation Site
 

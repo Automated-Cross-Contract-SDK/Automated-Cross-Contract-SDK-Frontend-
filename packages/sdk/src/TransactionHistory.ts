@@ -47,8 +47,47 @@ export interface TransactionHistoryEntry {
  * console.log(history.getAll())
  * ```
  */
+/**
+ * Serialisable form of a {@link TransactionHistoryEntry}. The `transaction`
+ * field is stored as a base64 XDR envelope so it can be rebuilt after a restart.
+ */
+export interface SerializedHistoryEntry {
+  id: string
+  timestamp: number
+  transactionXdr: string
+  result: ResurrectResult | null
+  status: TransactionAttemptStatus
+  attemptCount: number
+  lastAttemptAt: number
+}
+
 export class TransactionHistory {
   private entries: Map<string, TransactionHistoryEntry> = new Map()
+
+  /** Called after any mutation so persistence layers can flush. */
+  private changeListeners: Set<() => void> = new Set()
+
+  /**
+   * @param networkPassphrase - Network passphrase used to rebuild `Transaction`
+   *   objects from stored XDR during {@link loadJSON}. Required only when
+   *   history persistence is enabled.
+   */
+  constructor(private readonly networkPassphrase?: string) {}
+
+  /**
+   * Registers a listener invoked after every mutation (`add`, `update`,
+   * `incrementAttempt`, `clear`, `loadJSON`). Returns an unsubscribe function.
+   */
+  onChange(listener: () => void): () => void {
+    this.changeListeners.add(listener)
+    return () => this.changeListeners.delete(listener)
+  }
+
+  private emitChange(): void {
+    for (const listener of this.changeListeners) {
+      listener()
+    }
+  }
 
   /**
    * Adds a new pending entry for the given transaction and returns its id.
@@ -72,6 +111,7 @@ export class TransactionHistory {
       lastAttemptAt: now,
     }
     this.entries.set(id, entry)
+    this.emitChange()
     return id
   }
 
@@ -93,6 +133,7 @@ export class TransactionHistory {
     entry.status = result.success ? 'success' : 'failed'
     entry.lastAttemptAt = Date.now()
     this.entries.set(id, entry)
+    this.emitChange()
   }
 
   /**
@@ -111,6 +152,7 @@ export class TransactionHistory {
     entry.result = null
     entry.lastAttemptAt = Date.now()
     this.entries.set(id, entry)
+    this.emitChange()
   }
 
   /**
@@ -144,6 +186,66 @@ export class TransactionHistory {
    */
   clear(): void {
     this.entries.clear()
+    this.emitChange()
+  }
+
+  /**
+   * Serialises all entries to a JSON string. Transactions are stored as base64
+   * XDR envelopes. Pair with {@link loadJSON} to restore after a restart.
+   */
+  toJSON(): string {
+    const serialized: SerializedHistoryEntry[] = this.getAll().map((entry) => ({
+      id: entry.id,
+      timestamp: entry.timestamp,
+      transactionXdr: entry.transaction.toXDR(),
+      result: entry.result,
+      status: entry.status,
+      attemptCount: entry.attemptCount,
+      lastAttemptAt: entry.lastAttemptAt,
+    }))
+    return JSON.stringify(serialized)
+  }
+
+  /**
+   * Replaces the current entries with those decoded from a string produced by
+   * {@link toJSON}. Malformed input is ignored (history stays empty). Requires
+   * a `networkPassphrase` to have been passed to the constructor so stored XDR
+   * can be rebuilt into `Transaction` objects.
+   *
+   * @param json - Serialised history string, or `null` (no-op).
+   */
+  loadJSON(json: string | null): void {
+    if (!json) return
+    let parsed: SerializedHistoryEntry[]
+    try {
+      parsed = JSON.parse(json) as SerializedHistoryEntry[]
+    } catch {
+      return
+    }
+    if (!Array.isArray(parsed)) return
+    if (!this.networkPassphrase) {
+      throw new Error(
+        'TransactionHistory.loadJSON requires a networkPassphrase to rebuild stored transactions',
+      )
+    }
+    this.entries.clear()
+    for (const item of parsed) {
+      try {
+        const transaction = new Transaction(item.transactionXdr, this.networkPassphrase)
+        this.entries.set(item.id, {
+          id: asHistoryEntryId(item.id),
+          timestamp: item.timestamp,
+          transaction,
+          result: item.result,
+          status: item.status,
+          attemptCount: item.attemptCount,
+          lastAttemptAt: item.lastAttemptAt,
+        })
+      } catch {
+        // Skip entries whose XDR can no longer be decoded.
+      }
+    }
+    this.emitChange()
   }
 
   /**
