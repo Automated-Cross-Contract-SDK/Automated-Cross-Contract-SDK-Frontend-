@@ -45,7 +45,7 @@
   "devDependencies": {
     "@vitest/coverage-v8": "^2.1.9",
     "jsdom": "^29.1.1",
-    "svelte": "^4.0.0",
+    "svelte": "^5.57.0",
     "typescript": "^5.5.0",
     "vitest": "^2.1.9"
   }
