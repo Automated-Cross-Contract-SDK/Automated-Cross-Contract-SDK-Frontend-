@@ -92,7 +92,7 @@ jobs:
             npm run test -w packages/$pkg -- --coverage
           done
 
-      - uses: codecov/codecov-action@v4
+      - uses: codecov/codecov-action@v6
         with:
           files: packages/sdk/coverage/lcov.info,packages/react-hook/coverage/lcov.info
           fail_ci_if_error: true
