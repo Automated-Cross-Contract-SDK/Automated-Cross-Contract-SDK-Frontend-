@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { get, readable } from 'svelte/store'
 
@@ -52,6 +53,23 @@ describe('SSR safety (@soroban-resurrect/svelte-hook)', () => {
     expect(get(s.isProcessing)).toBe(false)
     emit({ state: 'simulating', message: 'working' })
     expect(get(s.isProcessing)).toBe(true)
+
+    s.destroy()
+  })
+
+  it('supports lazy: true to defer SDK instantiation in SSR', async () => {
+    const { createSorobanResurrect } = await import('../index.js')
+    const { SorobanResurrect } = await import('@soroban-resurrect/sdk')
+    vi.clearAllMocks()
+
+    const s = createSorobanResurrect(readable({ rpcUrl: 'https://test' }), { lazy: true })
+
+    expect(SorobanResurrect).not.toHaveBeenCalled()
+    expect(get(s.isProcessing)).toBe(false)
+
+    // Accessing resurrect triggers initialization
+    expect(s.resurrect).toBeDefined()
+    expect(SorobanResurrect).toHaveBeenCalledTimes(1)
 
     s.destroy()
   })

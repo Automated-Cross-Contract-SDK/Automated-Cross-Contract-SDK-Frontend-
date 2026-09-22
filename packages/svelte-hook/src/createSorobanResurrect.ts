@@ -10,6 +10,7 @@ import {
   type ArchivedLedgerEntry,
   type ResurrectResult,
   type SorobanResurrectEvents,
+  type SubmitWithRestoreOptions,
 } from '@soroban-resurrect/sdk'
 import type { Transaction } from '@stellar/stellar-sdk'
 
@@ -111,16 +112,69 @@ export interface SorobanResurrectStore {
  * {#if $feeEstimate}~{$feeEstimate.estimatedRestoreFee} stroops{/if}
  * <button on:click={reset}>Reset</button>
  * ```
+ *
+ * ### SSR & SvelteKit Usage
+ * In SSR environments (such as SvelteKit server-side rendering), either guard
+ * the store creation using SvelteKit's `browser` flag or pass `{ lazy: true }`
+ * to defer instantiation until browser-side interactions occur:
+ * ```svelte
+ * <script>
+ *   import { browser } from '$app/environment'
+ *   import { createSorobanResurrect } from '@soroban-resurrect/svelte-hook'
+ *
+ *   // Option 1: lazy instantiation in SSR
+ *   const store = createSorobanResurrect(config, { lazy: true })
+ *
+ *   // Option 2: instantiate only in browser
+ *   // const store = browser ? createSorobanResurrect(config) : null
+ * </script>
+ * ```
  */
+/** Options for {@link createSorobanResurrect}. */
+export interface CreateSorobanResurrectOptions {
+  /**
+   * Whether to defer instantiation of the SorobanResurrect SDK until first use or method invocation.
+   * Useful in SSR / SvelteKit server environments to avoid creating SDK instances during server rendering.
+   *
+   * @default false
+   */
+  lazy?: boolean
+}
+
 export function createSorobanResurrect(
   configStore: Readable<SorobanResurrectConfig>,
+  options?: CreateSorobanResurrectOptions,
 ): SorobanResurrectStore {
+  const isLazy = options?.lazy ?? false
   const stateWritable: Writable<RestoreStateInfo> = writable({ state: 'idle', message: '' })
   const lastResultWritable: Writable<ResurrectResult | null> = writable(null)
   const feeEstimateWritable: Writable<FeeEstimate | null> = writable(null)
-  let resurrect: SorobanResurrect
-  let currentConfig: SorobanResurrectConfig
+  let resurrect: SorobanResurrect | null = null
+  let currentConfig: SorobanResurrectConfig | null = null
   let unsubscribeState: (() => void) | null = null
+
+  const initSdk = (config: SorobanResurrectConfig): SorobanResurrect => {
+    if (unsubscribeState) {
+      unsubscribeState()
+      unsubscribeState = null
+    }
+
+    resurrect = new SorobanResurrect(config)
+    unsubscribeState = resurrect.onStateChange((info: RestoreStateInfo) => {
+      stateWritable.set(info)
+    })
+    return resurrect
+  }
+
+  const getResurrect = (): SorobanResurrect => {
+    if (!resurrect) {
+      if (!currentConfig) {
+        throw new Error('SorobanResurrectConfig has not been provided.')
+      }
+      return initSdk(currentConfig)
+    }
+    return resurrect
+  }
 
   // React to config store changes — recreate SDK when config updates
   const unsubscribeConfig = configStore.subscribe((newConfig) => {
@@ -132,14 +186,15 @@ export function createSorobanResurrect(
       unsubscribeState = null
     }
 
-    resurrect = new SorobanResurrect(newConfig)
     stateWritable.set({ state: 'idle', message: '' })
     lastResultWritable.set(null)
     feeEstimateWritable.set(null)
 
-    unsubscribeState = resurrect.onStateChange((info: RestoreStateInfo) => {
-      stateWritable.set(info)
-    })
+    if (!isLazy) {
+      initSdk(newConfig)
+    } else {
+      resurrect = null
+    }
   })
 
   const isProcessing = derived(stateWritable, ($state) => isProcessingState($state.state))
@@ -151,7 +206,7 @@ export function createSorobanResurrect(
     transaction: Transaction,
     wallet: WalletAdapter,
   ): Promise<ResurrectResult> => {
-    const result = await resurrect.submitWithRestore({ transaction, wallet })
+    const result = await getResurrect().submitWithRestore({ transaction, wallet })
     lastResultWritable.set(result)
     return result
   }
@@ -163,9 +218,10 @@ export function createSorobanResurrect(
 
     const done = (async () => {
       const results: ResurrectResult[] = []
+      const r = getResurrect()
       for (let i = 0; i < items.length; i++) {
         itemStores[i].set({ status: 'submitting', result: null })
-        const result = await resurrect.submitWithRestore(items[i])
+        const result = await r.submitWithRestore(items[i])
         itemStores[i].set({
           status: result.success ? 'success' : 'error',
           result,
@@ -183,17 +239,18 @@ export function createSorobanResurrect(
   }
 
   const detectArchivedKeys = async (transaction: Transaction): Promise<ArchivedLedgerEntry[]> => {
-    return resurrect.detectArchivedKeys(transaction)
+    return getResurrect().detectArchivedKeys(transaction)
   }
 
   const estimate = async (transaction: Transaction): Promise<FeeEstimate> => {
+    const r = getResurrect()
     const [archived, sim] = await Promise.all([
-      resurrect.detectArchivedKeys(transaction),
-      resurrect.simulate(transaction),
+      r.detectArchivedKeys(transaction),
+      r.simulate(transaction),
     ])
     const minResourceFee =
       'minResourceFee' in sim && sim.minResourceFee ? String(sim.minResourceFee) : '0'
-    const multiplier = currentConfig.restoreFeeMultiplier ?? RESTORE_FEE_MULTIPLIER
+    const multiplier = currentConfig?.restoreFeeMultiplier ?? RESTORE_FEE_MULTIPLIER
     const estimateResult: FeeEstimate = {
       archivedKeysDetected: archived.length,
       minResourceFee,
@@ -205,7 +262,7 @@ export function createSorobanResurrect(
   }
 
   const reset = (fromState?: RestoreState) => {
-    resurrect.reset(fromState)
+    getResurrect().reset(fromState)
     if (get(stateWritable).state === 'idle') {
       feeEstimateWritable.set(null)
     }
@@ -215,14 +272,7 @@ export function createSorobanResurrect(
     event: K,
     listener: (payload: SorobanResurrectEvents[K]) => void,
   ): (() => void) => {
-    return resurrect.on(event, listener)
-  }
-
-  const on = <K extends keyof SorobanResurrectEvents>(
-    event: K,
-    listener: (payload: SorobanResurrectEvents[K]) => void,
-  ) => {
-    return resurrect.on(event, listener)
+    return getResurrect().on(event, listener)
   }
 
   const destroy = () => {
@@ -231,6 +281,7 @@ export function createSorobanResurrect(
       unsubscribeState = null
     }
     unsubscribeConfig()
+    resurrect = null
   }
 
   return {
@@ -245,7 +296,9 @@ export function createSorobanResurrect(
     estimate,
     reset,
     on,
-    resurrect: resurrect!,
+    get resurrect(): SorobanResurrect {
+      return getResurrect()
+    },
     destroy,
   }
 }
