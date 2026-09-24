@@ -3,7 +3,7 @@ import {
   getPublicKey as lobstrGetPublicKey,
   signTransaction as lobstrSignTransaction,
 } from '@lobstrco/signer-extension-api'
-import type { WalletAdapter, WalletCapabilities } from '@soroban-resurrect/sdk'
+import { WalletError, type WalletAdapter, type WalletCapabilities } from '@soroban-resurrect/sdk'
 import { asStellarPublicKey, asXdrBase64 } from '@soroban-resurrect/sdk'
 
 /**
@@ -36,6 +36,23 @@ export class LobstrAdapter implements WalletAdapter {
     // for and takes only the transaction XDR — network options are ignored.
     _opts?: { networkPassphrase?: string; network?: string },
   ) {
-    return asXdrBase64(await lobstrSignTransaction(tx))
+    try {
+      return asXdrBase64(await lobstrSignTransaction(tx))
+    } catch (error) {
+      throw normalizeError(error)
+    }
   }
+}
+
+function normalizeError(error: unknown): WalletError {
+  const message = error instanceof Error ? error.message : String(error)
+  const lower = message.toLowerCase()
+  const code = /reject|declin|cancel|denied/.test(lower)
+    ? 'USER_REJECTED'
+    : /network/.test(lower)
+      ? 'NETWORK_MISMATCH'
+      : /not connected/.test(lower)
+        ? 'NOT_CONNECTED'
+        : 'UNKNOWN'
+  return new WalletError(code, `LOBSTR: ${message}`, error)
 }

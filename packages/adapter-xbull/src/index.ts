@@ -1,5 +1,5 @@
 import { XBullWalletConnect } from '@creit.tech/xbull-wallet-connect'
-import type { WalletAdapter, WalletCapabilities } from '@soroban-resurrect/sdk'
+import { WalletError, type WalletAdapter, type WalletCapabilities } from '@soroban-resurrect/sdk'
 import { asStellarPublicKey, asXdrBase64 } from '@soroban-resurrect/sdk'
 
 /**
@@ -31,19 +31,24 @@ export class XBullAdapter implements WalletAdapter {
     return asStellarPublicKey(publicKey)
   }
 
-  async signTransaction(
-    tx: string,
-    opts?: { networkPassphrase?: string; network?: string },
-  ) {
+  async signTransaction(tx: string, opts?: { networkPassphrase?: string; network?: string }) {
     if (!this.publicKey) {
       throw new Error('xBull: wallet is not connected')
     }
 
-    const signed = await this.connector.sign({
-      xdr: tx,
-      publicKey: this.publicKey,
-      network: opts?.networkPassphrase,
-    })
-    return asXdrBase64(signed)
+    try {
+      const signed = await this.connector.sign({
+        xdr: tx,
+        publicKey: this.publicKey,
+        network: opts?.networkPassphrase,
+      })
+      return asXdrBase64(signed)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      const code = /reject|declin|cancel|denied/.test(message.toLowerCase())
+        ? 'USER_REJECTED'
+        : 'UNKNOWN'
+      throw new WalletError(code, `xBull: ${message}`, error)
+    }
   }
 }

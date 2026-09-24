@@ -16,10 +16,7 @@ export { SorobanResurrect } from './SorobanResurrect.js'
 // Network presets / switching helper
 // ---------------------------------------------------------------------------
 export { SorobanResurrectNetwork, NETWORK_PRESETS } from './SorobanResurrectNetwork.js'
-export type {
-  SorobanNetworkName,
-  SorobanNetworkPreset,
-} from './SorobanResurrectNetwork.js'
+export type { SorobanNetworkName, SorobanNetworkPreset } from './SorobanResurrectNetwork.js'
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -55,6 +52,8 @@ export type {
   // Error types
   ResurrectErrorCode,
 } from './types.js'
+export type { WalletErrorCode } from './types.js'
+export { WalletError } from './types.js'
 export { ResurrectError } from './errors.js'
 
 // ---------------------------------------------------------------------------
@@ -147,7 +146,12 @@ export { NETWORK_PRESETS } from './constants.js'
 // RPC client abstraction (dependency injection / resilient transport)
 // ---------------------------------------------------------------------------
 export type { ISorobanRpcClient, RpcResilienceOptions } from './RpcClient.js'
-export { SorobanRpcClient, createRpcClient, RpcTimeoutError, RpcCircuitOpenError } from './RpcClient.js'
+export {
+  SorobanRpcClient,
+  createRpcClient,
+  RpcTimeoutError,
+  RpcCircuitOpenError,
+} from './RpcClient.js'
 
 // ---------------------------------------------------------------------------
 // Transaction history (returned by SorobanResurrect.history / getHistory)
@@ -189,10 +193,7 @@ export {
   evaluateRestoreFootprint,
   restoreSizeGuidance,
 } from './footprintGuard.js'
-export type {
-  RestoreTxDiagnostics,
-  EvaluateRestoreFootprintOptions,
-} from './footprintGuard.js'
+export type { RestoreTxDiagnostics, EvaluateRestoreFootprintOptions } from './footprintGuard.js'
 
 // ---------------------------------------------------------------------------
 // Typed event emitter (used by SorobanResurrect.on / once / off)
