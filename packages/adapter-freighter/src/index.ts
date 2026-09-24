@@ -4,6 +4,7 @@ import {
   getAddress,
   getNetwork,
   signTransaction as freighterSignTransaction,
+  signAuthEntry as freighterSignAuthEntry,
 } from '@stellar/freighter-api'
 import { WalletError, type WalletAdapter, type WalletCapabilities } from '@soroban-resurrect/sdk'
 import { asStellarPublicKey, asXdrBase64 } from '@soroban-resurrect/sdk'
@@ -19,7 +20,7 @@ export class FreighterAdapter implements WalletAdapter {
    * it does not wire up CAP-0046 per-entry signing.
    */
   readonly capabilities: WalletCapabilities = {
-    signAuthEntry: false,
+    signAuthEntry: true,
     feeBump: true,
     hardware: false,
   }
@@ -65,6 +66,23 @@ export class FreighterAdapter implements WalletAdapter {
     const result = await getNetwork()
     if ('error' in result && result.error) throw normalizeError(result.error)
     return result.networkPassphrase
+  }
+
+  async signAuthEntry(
+    authEntryXdr: string,
+    opts?: { networkPassphrase?: string; address?: string },
+  ): Promise<string> {
+    try {
+      const result = await freighterSignAuthEntry(authEntryXdr, opts)
+      if ('error' in result && result.error) throw normalizeError(result.error)
+      if (!result.signedAuthEntry) {
+        throw new WalletError('UNKNOWN', 'Freighter: missing signed authorization entry')
+      }
+      return result.signedAuthEntry.toString('base64')
+    } catch (error) {
+      if (error instanceof WalletError) throw error
+      throw normalizeError(error)
+    }
   }
 }
 
