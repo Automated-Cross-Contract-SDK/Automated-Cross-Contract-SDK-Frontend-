@@ -308,3 +308,18 @@ For large or potentially breaking features, it is a good idea to open a discussi
 ## License
 
 By contributing, you agree that your contributions will be licensed under the project's [MIT License](./LICENSE).
+
+### Wallet extension end-to-end tests
+
+The Playwright suite in `e2e/` is intended for a nightly or manually
+triggered CI run against a funded Stellar testnet wallet. Set `FREIGHTER_E2E=1`
+and `E2E_BASE_URL` in the workflow environment, then run:
+
+```bash
+npx playwright install --with-deps chromium
+npx playwright test
+```
+
+The test uses the wallet extension's test hooks where available. Never commit
+wallet credentials or seed phrases; configure them as CI secrets and use a
+throwaway testnet account.

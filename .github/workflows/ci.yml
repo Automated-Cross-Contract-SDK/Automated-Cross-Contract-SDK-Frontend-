@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
 
 jobs:
   npm-audit:
@@ -99,3 +102,29 @@ jobs:
 
       - name: Build (all packages via Turbo)
         run: npm run build
+      - name: Build (all packages via Turbo)
+        run: npm run build
+
+  wallet-e2e:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FREIGHTER_E2E: ${{ secrets.FREIGHTER_E2E }}
+      E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx --yes playwright@1.55.0 install --with-deps chromium
+      - run: npx --yes playwright@1.55.0 test
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wallet-e2e-report
+          path: |
+            playwright-report
+            test-results
