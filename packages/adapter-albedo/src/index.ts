@@ -1,5 +1,5 @@
 import albedo from '@albedo-link/intent'
-import type { WalletAdapter, WalletCapabilities } from '@soroban-resurrect/sdk'
+import { WalletError, type WalletAdapter, type WalletCapabilities } from '@soroban-resurrect/sdk'
 import { asStellarPublicKey, asXdrBase64 } from '@soroban-resurrect/sdk'
 
 /**
@@ -25,21 +25,37 @@ export class AlbedoAdapter implements WalletAdapter {
   }
 
   async getPublicKey() {
-    const result = await albedo.publicKey({})
-    this.publicKey = result.pubkey
-    return asStellarPublicKey(result.pubkey)
+    try {
+      const result = await albedo.publicKey({})
+      this.publicKey = result.pubkey
+      return asStellarPublicKey(result.pubkey)
+    } catch (error) {
+      throw normalizeError(error)
+    }
   }
 
   async signTransaction(
     tx: string,
     opts?: { networkPassphrase?: string; network?: string },
   ) {
-    const result = await albedo.tx({
-      xdr: tx,
-      network: opts?.network ?? 'testnet',
-      networkPassphrase: opts?.networkPassphrase,
-      submit: false,
-    })
-    return asXdrBase64(result.signed_envelope_xdr)
+    try {
+      const result = await albedo.tx({
+        xdr: tx,
+        network: opts?.network ?? 'testnet',
+        networkPassphrase: opts?.networkPassphrase,
+        submit: false,
+      })
+      return asXdrBase64(result.signed_envelope_xdr)
+    } catch (error) {
+      throw normalizeError(error)
+    }
   }
+}
+
+function normalizeError(error: unknown): WalletError {
+  const message = error instanceof Error ? error.message : String(error)
+  const code = /reject|declin|cancel|denied/.test(message.toLowerCase())
+    ? 'USER_REJECTED'
+    : 'UNKNOWN'
+  return new WalletError(code, `Albedo: ${message}`, error)
 }

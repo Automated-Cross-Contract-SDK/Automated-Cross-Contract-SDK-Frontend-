@@ -55,6 +55,8 @@ export type {
   // Error types
   ResurrectErrorCode,
 } from './types.js'
+export type { WalletErrorCode } from './types.js'
+export { WalletError } from './types.js'
 export { ResurrectError } from './errors.js'
 
 // ---------------------------------------------------------------------------

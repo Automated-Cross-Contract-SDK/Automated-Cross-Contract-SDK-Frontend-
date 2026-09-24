@@ -16,6 +16,7 @@ import type {
   ResurrectResult,
   DryRunResult,
 } from './types.js'
+import { WalletError } from './types.js'
 import type { ResurrectErrorCode } from './errors.js'
 import {
   isRestoreResponse,
@@ -71,6 +72,27 @@ export interface ExecuteParams {
   onRestoreFailed?: (error: string) => void
   /** Called when a fee-bump sponsor is about to sign a transaction. */
   onSigningFeeBump?: () => void
+}
+
+async function validateWalletNetwork(
+  wallet: WalletAdapter,
+  networkPassphrase: string,
+): Promise<void> {
+  if (!wallet.getNetwork) return
+  const walletNetwork = await wallet.getNetwork()
+  if (walletNetwork !== networkPassphrase) {
+    throw new WalletError(
+      'NETWORK_MISMATCH',
+      `Wallet network mismatch: wallet is on "${walletNetwork}", SDK is configured for "${networkPassphrase}"`,
+    )
+  }
+}
+
+function walletErrorMessage(error: unknown): string {
+  if (error instanceof WalletError && error.code === 'USER_REJECTED') {
+    return 'Signature request declined'
+  }
+  return error instanceof Error ? error.message : String(error)
 }
 
 /**
@@ -239,6 +261,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
   const pollTimeout = config.pollTimeoutMs ?? POLL_TIMEOUT_MS
 
   try {
+    await validateWalletNetwork(wallet, networkPassphrase)
     const simResponse = await simulateWithCache(server, originalTx, simulationCache)
 
     if (isErrorResponse(simResponse)) {
@@ -442,7 +465,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       errorCode: 'UNEXPECTED_SIMULATION_RESPONSE',
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const message = walletErrorMessage(err)
     onRestoreFailed?.(message)
     return { success: false, archivedKeysDetected: 0, error: message, errorCode: 'UNKNOWN_ERROR' }
   }
@@ -474,6 +497,7 @@ export async function sendTransaction(
       }
     }
 
+    await validateWalletNetwork(wallet, networkPassphrase)
     const signedXdr = await wallet.signTransaction(asXdrBase64(transaction.toXDR()), {
       networkPassphrase,
     })
@@ -496,7 +520,7 @@ export async function sendTransaction(
       archivedKeysDetected: 0,
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const message = walletErrorMessage(err)
     return {
       success: false,
       archivedKeysDetected: 0,

@@ -245,6 +245,23 @@ export interface WalletAdapter {
    * @see {@link WalletCapabilities}
    */
   capabilities?: WalletCapabilities
+  /** Returns the wallet network passphrase when the wallet exposes it. */
+  getNetwork?(): Promise<string>
+}
+
+export type WalletErrorCode = 'USER_REJECTED' | 'NOT_CONNECTED' | 'NETWORK_MISMATCH' | 'UNKNOWN'
+
+/** Normalized error raised by wallet adapters. */
+export class WalletError extends Error {
+  readonly code: WalletErrorCode
+  readonly originalError: unknown
+
+  constructor(code: WalletErrorCode, message: string, originalError?: unknown) {
+    super(message)
+    this.name = 'WalletError'
+    this.code = code
+    this.originalError = originalError
+  }
 }
 
 /**
