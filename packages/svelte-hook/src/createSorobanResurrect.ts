@@ -10,6 +10,7 @@ import {
   type ArchivedLedgerEntry,
   type ResurrectResult,
   type SorobanResurrectEvents,
+  type SubmitWithRestoreOptions,
 } from '@soroban-resurrect/sdk'
 import type { Transaction } from '@stellar/stellar-sdk'
 
@@ -215,13 +216,6 @@ export function createSorobanResurrect(
     event: K,
     listener: (payload: SorobanResurrectEvents[K]) => void,
   ): (() => void) => {
-    return resurrect.on(event, listener)
-  }
-
-  const on = <K extends keyof SorobanResurrectEvents>(
-    event: K,
-    listener: (payload: SorobanResurrectEvents[K]) => void,
-  ) => {
     return resurrect.on(event, listener)
   }
 
