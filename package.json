@@ -28,7 +28,10 @@
     "format": "prettier --check \"**/*.{ts,tsx,json,md}\" --ignore-path .gitignore",
     "format:fix": "prettier --write \"**/*.{ts,tsx,json,md}\" --ignore-path .gitignore",
     "test": "turbo run test --filter=\"./packages/*\"",
+    "test:types": "turbo run test:types --filter=\"./packages/*\"",
     "test:watch": "npm run test:watch -w packages/sdk",
+    "benchmark:imports": "node scripts/benchmark-imports.mjs",
+    "benchmark:imports:update": "node scripts/benchmark-imports.mjs --update",
     "clean": "turbo run clean --filter=\"./packages/*\"",
     "prepare": "husky"
   },

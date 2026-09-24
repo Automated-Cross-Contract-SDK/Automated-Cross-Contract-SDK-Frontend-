@@ -45,6 +45,9 @@ jobs:
       - name: Typecheck (all packages via Turbo)
         run: npm run typecheck
 
+      - name: Type tests — public API surface (all packages via Turbo)
+        run: npm run test:types
+
       - name: Lint (all packages via Turbo)
         run: npm run lint
 

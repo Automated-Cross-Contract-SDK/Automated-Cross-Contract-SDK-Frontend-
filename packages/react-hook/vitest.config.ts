@@ -5,6 +5,11 @@ export default defineConfig({
     environment: 'jsdom',
     include: ['src/**/*.test.{ts,tsx}'],
     globals: true,
+    typecheck: {
+      include: ['src/**/*.test-d.ts'],
+      tsconfig: './tsconfig.typecheck.json',
+      ignoreSourceErrors: true,
+    },
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov'],

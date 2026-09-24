@@ -46,19 +46,21 @@ npm run dev:example
 
 ### Useful scripts
 
-| Command              | What it does                               |
-| -------------------- | ------------------------------------------ |
-| `npm run build`      | Build all packages                         |
-| `npm run build:sdk`  | Build only `@soroban-resurrect/sdk`        |
-| `npm run build:hook` | Build only `@soroban-resurrect/react-hook` |
-| `npm test`           | Run all unit tests                         |
-| `npm run test:watch` | Run tests in watch mode                    |
-| `npm run typecheck`  | Type-check all packages without emitting   |
-| `npm run lint`       | Lint all TypeScript source files           |
-| `npm run lint:fix`   | Auto-fix lint issues                       |
-| `npm run format`     | Check formatting                           |
-| `npm run format:fix` | Auto-fix formatting                        |
-| `npm run clean`      | Remove all `dist/` directories             |
+| Command                            | What it does                                                          |
+| ---------------------------------- | --------------------------------------------------------------------- |
+| `npm run build`                    | Build all packages                                                    |
+| `npm run build:sdk`                | Build only `@soroban-resurrect/sdk`                                   |
+| `npm run build:hook`               | Build only `@soroban-resurrect/react-hook`                            |
+| `npm test`                         | Run all unit tests                                                    |
+| `npm run test:watch`               | Run tests in watch mode                                               |
+| `npm run typecheck`                | Type-check all packages without emitting                              |
+| `npm run lint`                     | Lint all TypeScript source files                                      |
+| `npm run lint:fix`                 | Auto-fix lint issues                                                  |
+| `npm run benchmark:imports`        | Measure cold import time per package entry vs. the committed baseline |
+| `npm run benchmark:imports:update` | Regenerate the import-time baseline (run on a CI-class runner)        |
+| `npm run format`                   | Check formatting                                                      |
+| `npm run format:fix`               | Auto-fix formatting                                                   |
+| `npm run clean`                    | Remove all `dist/` directories                                        |
 
 ---
 
