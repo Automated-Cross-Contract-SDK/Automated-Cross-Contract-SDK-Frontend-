@@ -12,6 +12,17 @@
       "inputs": ["src/**", "vitest.config.ts", "tsconfig.json"],
       "outputs": ["coverage/**"]
     },
+    "test:types": {
+      "dependsOn": [],
+      "inputs": [
+        "src/**",
+        "vitest.config.ts",
+        "tsconfig.json",
+        "tsconfig.typecheck.json",
+        "package.json"
+      ],
+      "outputs": []
+    },
     "typecheck": {
       "dependsOn": ["^build"],
       "inputs": ["src/**", "tsconfig.json", "../../tsconfig.base.json"]
