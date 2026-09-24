@@ -49,6 +49,7 @@ export default defineConfig({
           text: 'Framework Integrations',
           items: [
             { text: 'React', link: '/integrations/react' },
+            { text: 'Vue', link: '/integrations/vue' },
             { text: 'Next.js', link: '/integrations/nextjs' },
             { text: 'Vite', link: '/integrations/vite' },
             { text: 'Astro', link: '/integrations/astro' },

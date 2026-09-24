@@ -13,6 +13,17 @@ npm run dev:example
 
 This starts a local dev server demonstrating connecting a wallet, building a transaction, and calling `submitWithRestore`.
 
+Other framework setups ship as examples too:
+
+| Example                                                                                                                                               | Stack                                                                            |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| [`examples/basic`](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/tree/main/examples/basic)                   | Vite + React (`react-hook`)                                                      |
+| [`examples/vue`](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/tree/main/examples/vue)                       | Vite + Vue 3 (`vue-hook`: composable, plus an optional `app.use` plugin variant) |
+| [`examples/nextjs-app`](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/tree/main/examples/nextjs-app)         | Next.js App Router                                                               |
+| [`examples/vanilla-js`](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/tree/main/examples/vanilla-js)         | No framework — the SDK directly                                                  |
+| [`examples/react-native`](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/tree/main/examples/react-native)     | React Native (on-device polyfills)                                               |
+| [`examples/multi-contract`](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/tree/main/examples/multi-contract) | Several contracts through one shared provider                                    |
+
 ## Interactive Snippets
 
 ### Minimal restore check
@@ -56,8 +67,8 @@ function ArchivedKeysBanner({ archivedKeys }: { archivedKeys: ArchivedLedgerEntr
 
   return (
     <div className="banner">
-      {archivedKeys.length} ledger {archivedKeys.length === 1 ? 'entry needs' : 'entries need'}{' '}
-      to be restored before this transaction can be submitted.
+      {archivedKeys.length} ledger {archivedKeys.length === 1 ? 'entry needs' : 'entries need'} to
+      be restored before this transaction can be submitted.
     </div>
   )
 }

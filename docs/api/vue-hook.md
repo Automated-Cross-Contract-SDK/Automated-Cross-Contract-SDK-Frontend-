@@ -49,3 +49,14 @@ async function submit(transaction, wallet) {
 | `injectSorobanResurrect()`      | Returns the shared `SorobanResurrect`. Must run in `setup()`. Throws if the plugin was not installed. |
 | `SOROBAN_RESURRECT_KEY`         | The `InjectionKey` used internally — for advanced/SSR wiring.                                         |
 | `SorobanResurrectPluginOptions` | `{ config: SorobanResurrectConfig }`.                                                                 |
+
+## Runnable example
+
+[`examples/vue`](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/tree/main/examples/vue)
+is a Vite + Vue 3 app that drives both paths against a real wallet: the withdraw
+flow is submitted through the `useSorobanResurrect` composable, and starting it
+with `VITE_USE_PLUGIN=true` renders the same flow through
+`app.use(SorobanResurrectPlugin, { config })` + `injectSorobanResurrect()`.
+
+See [Framework Integrations](/integrations/vue) for the same two paths written
+out with copy-pasteable snippets.
