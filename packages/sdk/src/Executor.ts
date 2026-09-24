@@ -387,6 +387,16 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
         archivedKeysDetected: archivedKeys.length,
         sequenceRetries,
       }
+
+      const originalResult = await server.sendTransaction(signedOriginalTx)
+      onOriginalSubmitted?.(originalResult.hash)
+
+      return {
+        success: true,
+        originalTxHash: originalResult.hash,
+        restoreTxHash: restoreResult.hash,
+        archivedKeysDetected: archivedKeys.length,
+      }
     }
 
     if (isSuccessResponse(simResponse)) {
