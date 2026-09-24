@@ -9,7 +9,14 @@
     "forceConsistentCasingInFileNames": true,
     "noEmit": true,
     "jsx": "react-jsx",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "baseUrl": ".",
+    "paths": {
+      "@sdk/*": ["packages/sdk/src/*"],
+      "@sdk": ["packages/sdk/src/index.ts"],
+      "@hook/*": ["packages/react-hook/src/*"],
+      "@hook": ["packages/react-hook/src/index.ts"]
+    }
   },
   "include": ["packages/*/src"]
 }

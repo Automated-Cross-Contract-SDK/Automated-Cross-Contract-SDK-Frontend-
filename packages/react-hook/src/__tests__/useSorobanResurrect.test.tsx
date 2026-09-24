@@ -9,6 +9,8 @@ const mockDetectArchivedKeys = vi.fn()
 const mockSubmitWithRestore = vi.fn()
 
 vi.mock('@soroban-resurrect/sdk', () => ({
+  isProcessingState: (state: string) =>
+    state !== 'idle' && state !== 'success' && state !== 'error',
   SorobanResurrect: vi.fn().mockImplementation(() => ({
     onStateChange: mockOnStateChange,
     reset: mockReset,

@@ -1,0 +1,42 @@
+# Local Soroban development network.
+#
+# Starts a self-contained Stellar quickstart node running Core, Horizon and the
+# Soroban RPC server against an ephemeral local ledger. See
+# docs/guide/local-development.md for usage.
+
+services:
+  soroban-rpc:
+    image: stellar/quickstart:latest
+    container_name: soroban-resurrect-local
+    command: ['--local', '--enable-soroban-rpc', '--limits', 'testnet']
+    ports:
+      # Soroban RPC (JSON-RPC)
+      - '8000:8000'
+      # Stellar Core HTTP
+      - '11626:11626'
+    environment:
+      ENABLE_LOGS: 'true'
+      ENABLE_SOROBAN_DIAGNOSTIC_EVENTS: 'true'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'curl',
+          '-sf',
+          '-X',
+          'POST',
+          '-H',
+          'Content-Type: application/json',
+          '-d',
+          '{"jsonrpc":"2.0","id":1,"method":"getHealth"}',
+          'http://localhost:8000/soroban/rpc',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    volumes:
+      - soroban-data:/opt/stellar
+
+volumes:
+  soroban-data:

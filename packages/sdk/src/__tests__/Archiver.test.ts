@@ -110,6 +110,70 @@ describe('Archiver', () => {
       })
       expect(extractArchivedKeys(response)).toEqual([])
     })
+
+    it('returns empty array for an explicitly empty readWrite array', () => {
+      const response = makeMockRestoreResponse()
+      Object.defineProperty(response.transactionData, 'getFootprint', {
+        value: () => ({ readOnly: () => [], readWrite: () => [] }),
+      })
+      expect(extractArchivedKeys(response)).toEqual([])
+    })
+
+    it('returns empty array when the footprint itself is undefined', () => {
+      const response = makeMockRestoreResponse()
+      Object.defineProperty(response.transactionData, 'getFootprint', {
+        value: () => undefined,
+      })
+      expect(extractArchivedKeys(response)).toEqual([])
+    })
+
+    it('returns empty array when readWrite() returns undefined', () => {
+      const response = makeMockRestoreResponse()
+      Object.defineProperty(response.transactionData, 'getFootprint', {
+        value: () => ({ readOnly: () => [], readWrite: () => undefined }),
+      })
+      expect(extractArchivedKeys(response)).toEqual([])
+    })
+
+    it('returns empty array for a malformed response missing transactionData', () => {
+      const response = { ...makeMockRestoreResponse(), transactionData: undefined } as never
+      expect(extractArchivedKeys(response)).toEqual([])
+    })
+
+    it('warns and returns empty array when the response has _parsed=false', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const response = { ...makeMockRestoreResponse(), _parsed: false } as never
+      expect(extractArchivedKeys(response)).toEqual([])
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('_parsed=false'))
+      warnSpy.mockRestore()
+    })
+
+    it('ignores readOnly entries and only extracts readWrite keys', () => {
+      const readOnlyKey = { toXDR: () => 'read-only-key' }
+      const readWriteKey = { toXDR: () => 'read-write-key' }
+      const response = makeMockRestoreResponse()
+      Object.defineProperty(response.transactionData, 'getFootprint', {
+        value: () => ({ readOnly: () => [readOnlyKey], readWrite: () => [readWriteKey] }),
+      })
+
+      const keys = extractArchivedKeys(response)
+      expect(keys.length).toBe(1)
+      expect(keys[0].keyBase64).toBe('read-write-key')
+    })
+
+    it('extracts multiple archived keys from a restore response with several readWrite entries', () => {
+      const key1 = { toXDR: () => 'key-1' }
+      const key2 = { toXDR: () => 'key-2' }
+      const key3 = { toXDR: () => 'key-3' }
+      const response = makeMockRestoreResponse()
+      Object.defineProperty(response.transactionData, 'getFootprint', {
+        value: () => ({ readOnly: () => [], readWrite: () => [key1, key2, key3] }),
+      })
+
+      const keys = extractArchivedKeys(response)
+      expect(keys.map((k) => k.keyBase64)).toEqual(['key-1', 'key-2', 'key-3'])
+      expect(keys[0].key).toBe(key1)
+    })
   })
 
   describe('detectArchivedEntries', () => {

@@ -1,49 +1,182 @@
-import { rpc, TransactionBuilder, Transaction } from '@stellar/stellar-sdk'
 import {
+  rpc,
+  TransactionBuilder,
+  Transaction,
+  Operation,
+  SorobanDataBuilder,
+  BASE_FEE,
+  xdr,
+} from '@stellar/stellar-sdk'
+import type { ISorobanRpcClient } from './RpcClient.js'
+import type {
   SorobanResurrectConfig,
   WalletAdapter,
+  FeeBumpConfig,
   ArchivedLedgerEntry,
   ResurrectResult,
+  DryRunResult,
 } from './types.js'
+import type { ResurrectErrorCode } from './errors.js'
 import {
   isRestoreResponse,
   isSuccessResponse,
   isErrorResponse,
   extractArchivedKeys,
 } from './Archiver.js'
+import { createDebugger } from './Debug.js'
 import {
   buildRestoreTransaction,
   waitForTransaction,
+  waitForTransactionSSE,
   buildOriginalAfterRestore,
+  buildFeeBumpTransaction,
+  submitFeeBumpTransaction,
+  isTxBadSeqError,
 } from './Restorer.js'
-import { DEFAULT_NETWORK_PASSPHRASE, POLL_INTERVAL_MS, POLL_TIMEOUT_MS } from './constants.js'
+import { SimulationCache } from './SimulationCache.js'
+import {
+  DEFAULT_NETWORK_PASSPHRASE,
+  POLL_INTERVAL_MS,
+  POLL_TIMEOUT_MS,
+  DEFAULT_MAX_SEQUENCE_RETRIES,
+} from './constants.js'
+import { asTxHash, asXdrBase64, type TxHash, type XdrBase64 } from './branded-types.js'
+import { parseTransactionFailure } from './TransactionFailure.js'
 
 /** Parameters for the full restore-and-submit execution flow. */
 export interface ExecuteParams {
-  /** Soroban RPC server instance. */
-  server: rpc.Server
+  /** RPC client used for all Soroban network calls. */
+  server: ISorobanRpcClient
   /** The original transaction to submit (may need restore first). */
   transaction: Transaction
   /** Wallet adapter used for signing. */
   wallet: WalletAdapter
   /** SDK configuration. */
   config: SorobanResurrectConfig
-  /** Called when restore transaction is ready to be signed. */
+  /** Called when the wallet is prompted to sign the restore transaction. */
   onSigningRestore?: () => void
-  /** Called after restore transaction is signed and being submitted. */
+  /** Called right before the restore transaction is submitted. */
   onSubmittingRestore?: () => void
-  /** Called after restore transaction is confirmed and original is ready to sign. */
-  onSigningOriginal?: () => void
   /** Called when archived entries are detected. */
   onRestoreNeeded?: (archivedKeys: ArchivedLedgerEntry[]) => void
   /** Called after the restore transaction is submitted. */
-  onRestoreSubmitted?: (txHash: string) => void
+  onRestoreSubmitted?: (txHash: TxHash) => void
   /** Called after the restore transaction is confirmed. */
-  onRestoreConfirmed?: (txHash: string) => void
+  onRestoreConfirmed?: (txHash: TxHash) => void
+  /** Called when the wallet is prompted to sign the original transaction. */
+  onSigningOriginal?: () => void
   /** Called after the original transaction is submitted. */
-  onOriginalSubmitted?: (txHash: string) => void
+  onOriginalSubmitted?: (txHash: TxHash) => void
   /** Called when the restore step of the workflow fails. */
   onRestoreFailed?: (error: string) => void
+  /** Called when a fee-bump sponsor is about to sign a transaction. */
+  onSigningFeeBump?: () => void
+}
+
+/**
+ * Helper: signs a transaction with the user's wallet and optionally wraps it
+ * in a fee-bump envelope signed by the sponsor. Returns the final XDR and hash.
+ *
+ * Callbacks fire in order:
+ * - onSigning → before wallet signature
+ * - onSigningFeeBump → before sponsor fee-bump signature (only if fee-bump)
+ * - onSubmitting → right before the final submission
+ */
+async function signAndMaybeFeeBump(params: {
+  tx: Transaction
+  wallet: WalletAdapter
+  feeBumpConfig?: FeeBumpConfig
+  networkPassphrase: string
+  server: ISorobanRpcClient
+  onSigning?: () => void
+  onSigningFeeBump?: () => void
+  onSubmitting?: () => void
+}): Promise<{ hash: TxHash }> {
+  const {
+    tx,
+    wallet,
+    feeBumpConfig,
+    networkPassphrase,
+    server,
+    onSigning,
+    onSigningFeeBump,
+    onSubmitting,
+  } = params
+
+  // Fail fast when a fee-bump is requested but the wallet has opted out of it,
+  // rather than prompting the user only to reject the envelope later.
+  if (feeBumpConfig) {
+    assertWalletCapability(wallet, 'feeBump', 'submitWithRestore (fee-bump)')
+  }
+
+  onSigning?.()
+  const signedXdr = await wallet.signTransaction(asXdrBase64(tx.toXDR()), { networkPassphrase })
+
+  // If no fee-bump, submit directly
+  if (!feeBumpConfig) {
+    const signedTx = TransactionBuilder.fromXDR(signedXdr, networkPassphrase)
+    if (!(signedTx instanceof Transaction)) {
+      throw new Error('Failed to parse signed transaction')
+    }
+    onSubmitting?.()
+    const result = await server.sendTransaction(signedTx)
+    return { hash: asTxHash(result.hash) }
+  }
+
+  // Fee-bump flow: wrap the signed inner tx in a fee-bump
+  onSigningFeeBump?.()
+  const feeBumpXdr = await buildFeeBumpTransaction(
+    signedXdr,
+    feeBumpConfig.sponsor,
+    networkPassphrase,
+    feeBumpConfig.feeBumpFee,
+  )
+
+  onSubmitting?.()
+  const result = await submitFeeBumpTransaction(server, feeBumpXdr, networkPassphrase)
+  return { hash: asTxHash(result.hash) }
+}
+
+/**
+ * Helper: simulates a transaction with optional cache.
+ *
+ * If a SimulationCache is provided, checks the cache first and stores
+ * results on cache miss, reducing RPC calls for repeated simulations
+ * of transactions that differ only by sequence number.
+ */
+async function simulateWithCache(
+  server: ISorobanRpcClient,
+  tx: Transaction,
+  cache?: SimulationCache,
+): Promise<rpc.Api.SimulateTransactionResponse> {
+  if (cache) {
+    const cached = cache.get(tx)
+    if (cached) {
+      return cached as rpc.Api.SimulateTransactionResponse
+    }
+    const response = await server.simulateTransaction(tx)
+    cache.set(tx, response)
+    return response
+  }
+  return server.simulateTransaction(tx)
+}
+
+/**
+ * Helper: waits for a transaction using SSE if configured, otherwise polls.
+ */
+async function waitForTx(
+  server: ISorobanRpcClient,
+  hash: TxHash | string,
+  config: SorobanResurrectConfig,
+): Promise<rpc.Api.GetTransactionResponse> {
+  const pollTimeout = config.pollTimeoutMs ?? POLL_TIMEOUT_MS
+
+  if (config.useSSE) {
+    return waitForTransactionSSE(server, hash, pollTimeout, config.rpcUrl)
+  }
+
+  const pollInterval = config.pollIntervalMs ?? POLL_INTERVAL_MS
+  return waitForTransaction(server, hash, pollInterval, pollTimeout)
 }
 
 /**
@@ -52,10 +185,13 @@ export interface ExecuteParams {
  * 1. Simulate the original transaction.
  * 2. If simulation error → return error.
  * 3. If restore needed → extract archived keys, build restore tx,
- *    sign, submit, wait for confirmation.
- * 4. Rebuild original tx with fresh seq number, assemble.
- * 5. Sign and submit the original transaction.
- * 6. If simulation succeeds → sign and submit directly.
+ *    sign, optionally fee-bump, submit, wait for confirmation.
+ * 4. Rebuild original tx with fresh seq number, re-simulate, assemble.
+ * 5. Sign, optionally fee-bump, and submit the original transaction.
+ * 6. If simulation succeeds → sign, optionally fee-bump, and submit directly.
+ *
+ * When feeBumpConfig is provided, transactions are wrapped in fee-bump
+ * envelopes so the sponsor pays the fees on behalf of the user.
  *
  * All errors (simulation, signing, network) are caught and returned as
  * structured `ResurrectResult` objects — never thrown.
@@ -64,44 +200,57 @@ export interface ExecuteParams {
  * - onRestoreFailed is called for any errors during or after restore initiation
  * - onOriginalSubmitted is only called if the original tx is successfully submitted
  * - onRestoreNeeded is called before any restore attempt
+ *
+ * @param params - See {@link ExecuteParams}.
+ * @returns A {@link ResurrectResult} describing the outcome. `success` is
+ *   `false` for every failure path; this function itself does not throw.
+ * @see {@link SorobanResurrect.submitWithRestore} — the public, stateful
+ *   wrapper around this function used by SDK consumers.
  */
+const debug = createDebugger('executor')
+
 export async function executeWithRestore(params: ExecuteParams): Promise<ResurrectResult> {
   const {
     server,
     transaction: originalTx,
     wallet,
     config,
-    onSigningRestore,
-    onSubmittingRestore,
-    onSigningOriginal,
     onRestoreNeeded,
     onRestoreSubmitted,
     onRestoreConfirmed,
     onOriginalSubmitted,
     onRestoreFailed,
+    onSigningFeeBump,
   } = params
 
   const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
+
+  // Extract optional fields that may not be destructured from params
+  const onSigningRestore = (params as ExecuteParams & { onSigningRestore?: () => void })
+    .onSigningRestore
+  const onSubmittingRestore = (params as ExecuteParams & { onSubmittingRestore?: () => void })
+    .onSubmittingRestore
+  const onSigningOriginal = (params as ExecuteParams & { onSigningOriginal?: () => void })
+    .onSigningOriginal
+  const feeBumpConfig = (params as ExecuteParams & { feeBumpConfig?: FeeBumpConfig }).feeBumpConfig
+  const simulationCache = (params as ExecuteParams & { simulationCache?: SimulationCache })
+    .simulationCache
   const pollInterval = config.pollIntervalMs ?? POLL_INTERVAL_MS
   const pollTimeout = config.pollTimeoutMs ?? POLL_TIMEOUT_MS
 
   try {
-    const simResponse = await server.simulateTransaction(originalTx)
+    const simResponse = await simulateWithCache(server, originalTx, simulationCache)
 
     if (isErrorResponse(simResponse)) {
       const err = `Simulation error: ${simResponse.error}`
       onRestoreFailed?.(err)
-      return {
-        success: false,
-        archivedKeysDetected: 0,
-        error: err,
-      }
+      return { success: false, archivedKeysDetected: 0, error: err, errorCode: 'SIMULATION_FAILED' }
     }
 
     if (isRestoreResponse(simResponse)) {
       const archivedKeys = extractArchivedKeys(simResponse)
+      debug('executeWithRestore: restore required for %d entries', archivedKeys.length)
 
-      // Check wallet connection before attempting to get public key
       const isConnected = await wallet.isConnected()
       if (!isConnected) {
         const err = 'Wallet is not connected'
@@ -110,11 +259,11 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
           success: false,
           archivedKeysDetected: archivedKeys.length,
           error: err,
+          errorCode: 'WALLET_NOT_CONNECTED',
         }
       }
 
       const publicKey = await wallet.getPublicKey()
-
       const account = await server.getAccount(publicKey)
 
       const restoreTx = await buildRestoreTransaction({
@@ -130,7 +279,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       onRestoreNeeded?.(archivedKeys)
 
       onSigningRestore?.()
-      const signedRestoreXdr = await wallet.signTransaction(restoreTx.toXDR(), {
+      const signedRestoreXdr = await wallet.signTransaction(asXdrBase64(restoreTx.toXDR()), {
         networkPassphrase,
       })
 
@@ -142,55 +291,101 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
           success: false,
           archivedKeysDetected: archivedKeys.length,
           error: err,
+          errorCode: 'RESTORE_TX_PARSE_FAILED',
         }
       }
 
       onSubmittingRestore?.()
       const restoreResult = await server.sendTransaction(signedRestoreTx)
-      onRestoreSubmitted?.(restoreResult.hash)
+      const restoreHash = asTxHash(restoreResult.hash)
+      onRestoreSubmitted?.(restoreHash)
 
-      const restoreStatus = await waitForTransaction(
-        server,
-        restoreResult.hash,
-        pollInterval,
-        pollTimeout,
-      )
+      const restoreStatus = await waitForTransaction(server, restoreHash, pollInterval, pollTimeout)
 
       if (restoreStatus.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
         const err = 'Restore transaction failed'
+        const onchainError = parseTransactionFailure(restoreStatus)
         onRestoreFailed?.(err)
+        const diagnostics = parseTransactionDiagnostics(restoreStatus)
         return {
           success: false,
           archivedKeysDetected: archivedKeys.length,
-          restoreTxHash: restoreResult.hash,
+          restoreTxHash: restoreHash,
           error: err,
+          errorCode: 'RESTORE_TX_FAILED',
         }
       }
 
-      onRestoreConfirmed?.(restoreResult.hash)
+      onRestoreConfirmed?.(restoreHash)
 
-      const preparedTx = await buildOriginalAfterRestore(
-        server,
-        originalTx,
-        networkPassphrase,
-        originalTx.fee,
-      )
+      const maxSequenceRetries = config.maxSequenceRetries ?? DEFAULT_MAX_SEQUENCE_RETRIES
 
-      onSigningOriginal?.()
-      const signedOriginalXdr = await wallet.signTransaction(preparedTx.toXDR(), {
-        networkPassphrase,
-      })
+      let sequenceRetries = 0
+      let originalResult: rpc.Api.SendTransactionResponse | undefined
 
-      const signedOriginalTx = TransactionBuilder.fromXDR(signedOriginalXdr, networkPassphrase)
-      if (!(signedOriginalTx instanceof Transaction)) {
-        const err = 'Failed to parse signed original transaction'
+      // Rebuild + sign + submit the original transaction. Retried (with a
+      // freshly-fetched sequence number) if the network rejects it with
+      // tx_bad_seq — the account may have been bumped by another client
+      // between the rebuild above and this submission.
+      for (;;) {
+        const preparedTx = await buildOriginalAfterRestore(
+          server,
+          originalTx,
+          networkPassphrase,
+          originalTx.fee,
+        )
+
+        onSigningOriginal?.()
+        const signedOriginalXdr = await wallet.signTransaction(asXdrBase64(preparedTx.toXDR()), {
+          networkPassphrase,
+        })
+
+        const signedOriginalTx = TransactionBuilder.fromXDR(signedOriginalXdr, networkPassphrase)
+        if (!(signedOriginalTx instanceof Transaction)) {
+          const err = 'Failed to parse signed original transaction'
+          onRestoreFailed?.(err)
+          return {
+            success: false,
+            archivedKeysDetected: archivedKeys.length,
+            restoreTxHash: restoreHash,
+            error: err,
+            sequenceRetries,
+          }
+        }
+
+        originalResult = await server.sendTransaction(signedOriginalTx)
+
+        if (!isTxBadSeqError(originalResult) || sequenceRetries >= maxSequenceRetries) {
+          break
+        }
+
+        sequenceRetries++
+      }
+
+      if (isTxBadSeqError(originalResult!)) {
+        const err = `Original transaction rejected with tx_bad_seq after ${sequenceRetries} retries`
         onRestoreFailed?.(err)
         return {
           success: false,
           archivedKeysDetected: archivedKeys.length,
-          restoreTxHash: restoreResult.hash,
+          restoreTxHash: restoreHash,
           error: err,
+          sequenceRetries,
         }
+
+        originalHash = asTxHash(originalResult.hash)
+        break
+      }
+
+      const originalHash = asTxHash(originalResult!.hash)
+      onOriginalSubmitted?.(originalHash)
+
+      return {
+        success: true,
+        originalTxHash: originalHash,
+        restoreTxHash: restoreHash,
+        archivedKeysDetected: archivedKeys.length,
+        sequenceRetries,
       }
 
       const originalResult = await server.sendTransaction(signedOriginalTx)
@@ -205,35 +400,45 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
     }
 
     if (isSuccessResponse(simResponse)) {
-      onSigningOriginal?.()
-      const signedTx = await wallet.signTransaction(originalTx.toXDR(), { networkPassphrase })
-      const parsedTx = TransactionBuilder.fromXDR(signedTx, networkPassphrase)
-      if (!(parsedTx instanceof Transaction)) {
-        const err = 'Failed to parse signed transaction'
-        return {
-          success: false,
-          archivedKeysDetected: 0,
-          error: err,
-        }
-      }
+      // CAP-0046 fine-grained auth: if simulation surfaced address-credential
+      // auth entries, sign + attach them with the wallet's signAuthEntry
+      // before signing the transaction itself. If the wallet can't sign them
+      // and they're required, ensureAddressAuthorization throws a clear error
+      // which the outer catch turns into { success: false, error }.
+      const { transaction: txToSubmit } = await ensureAddressAuthorization({
+        transaction: originalTx,
+        simulation: simResponse,
+        wallet,
+        networkPassphrase,
+      })
 
-      const sendResult = await server.sendTransaction(parsedTx)
-      onOriginalSubmitted?.(sendResult.hash)
+      const { hash } = await signAndMaybeFeeBump({
+        tx: txToSubmit,
+        wallet,
+        feeBumpConfig,
+        networkPassphrase,
+        server,
+        onSigning: onSigningOriginal,
+        onSigningFeeBump,
+      })
+
+      onOriginalSubmitted?.(hash)
 
       // Wait for confirmation on success path for consistency with restore path
-      const txStatus = await waitForTransaction(server, sendResult.hash, pollInterval, pollTimeout)
+      const txStatus = await waitForTx(server, hash, config)
 
       if (txStatus.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
         return {
           success: false,
           archivedKeysDetected: 0,
           error: 'Transaction failed to confirm',
+          errorCode: 'ORIGINAL_TX_FAILED',
         }
       }
 
       return {
         success: true,
-        originalTxHash: sendResult.hash,
+        originalTxHash: hash,
         archivedKeysDetected: 0,
       }
     }
@@ -244,14 +449,248 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       success: false,
       archivedKeysDetected: 0,
       error: err,
+      errorCode: 'UNEXPECTED_SIMULATION_RESPONSE',
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     onRestoreFailed?.(message)
+    return { success: false, archivedKeysDetected: 0, error: message, errorCode: 'UNKNOWN_ERROR' }
+  }
+}
+
+/**
+ * Signs and submits a single transaction using the wallet adapter, without
+ * any automatic archive restoration. This is a lightweight alternative to
+ * `submitWithRestore` for transactions known not to require restoration.
+ *
+ * Returns a `ResurrectResult` with the transaction hash on success.
+ */
+export async function sendTransaction(
+  server: ISorobanRpcClient,
+  transaction: Transaction,
+  wallet: WalletAdapter,
+  config: SorobanResurrectConfig,
+): Promise<ResurrectResult> {
+  const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
+
+  try {
+    const isConnected = await wallet.isConnected()
+    if (!isConnected) {
+      return {
+        success: false,
+        archivedKeysDetected: 0,
+        error: 'Wallet is not connected',
+        errorCode: 'WALLET_NOT_CONNECTED' as const,
+      }
+    }
+
+    const signedXdr = await wallet.signTransaction(asXdrBase64(transaction.toXDR()), {
+      networkPassphrase,
+    })
+
+    const signedTx = TransactionBuilder.fromXDR(signedXdr, networkPassphrase)
+    if (!(signedTx instanceof Transaction)) {
+      return {
+        success: false,
+        archivedKeysDetected: 0,
+        error: 'Failed to parse signed transaction',
+        errorCode: 'ORIGINAL_TX_PARSE_FAILED' as const,
+      }
+    }
+
+    const result = await server.sendTransaction(signedTx)
+
+    return {
+      success: true,
+      originalTxHash: asTxHash(result.hash),
+      archivedKeysDetected: 0,
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
     return {
       success: false,
       archivedKeysDetected: 0,
       error: message,
+      errorCode: 'UNKNOWN_ERROR' as const,
     }
+  }
+}
+
+/**
+ * Internal wrapper around `waitForTransaction` that fires `onConfirming` on
+ * each poll attempt. Delegates polling logic to the core `waitForTransaction`
+ * helper from Restorer.ts but adds callback support.
+ */
+async function waitForTransactionWithCallbacks(
+  server: ISorobanRpcClient,
+  hash: TxHash | string,
+  pollIntervalMs: number,
+  pollTimeoutMs: number,
+  onConfirming?: (txHash: TxHash | string, attempt: number) => void,
+): Promise<rpc.Api.GetTransactionResponse> {
+  const startTime = Date.now()
+  let attempt = 0
+
+  while (Date.now() - startTime < pollTimeoutMs) {
+    const response = await server.getTransaction(hash)
+
+    if (
+      response.status === rpc.Api.GetTransactionStatus.SUCCESS ||
+      response.status === rpc.Api.GetTransactionStatus.FAILED
+    ) {
+      return response
+    }
+
+    attempt++
+    onConfirming?.(hash, attempt)
+
+    // Exponential backoff with jitter: delay = min(100ms * 2^attempt, pollIntervalMs) * (0.5 + random * 0.5)
+    const exponentialDelay = 100 * Math.pow(2, attempt)
+    const delay = Math.min(exponentialDelay, pollIntervalMs)
+    const jitter = delay * (0.5 + Math.random() * 0.5)
+    await new Promise((resolve) => setTimeout(resolve, jitter))
+  }
+
+  throw new Error(`Transaction ${hash} did not complete within ${pollTimeoutMs}ms`)
+}
+
+/** Parameters for {@link restoreKeys}. */
+export interface RestoreKeysParams {
+  /** RPC client used for all Soroban network calls. */
+  server: ISorobanRpcClient
+  /**
+   * Ledger keys to restore — `LedgerKeyContractData` and/or
+   * `LedgerKeyContractCode` entries. Unlike `submitWithRestore`, these are
+   * not derived from simulating a source transaction: pass any keys you
+   * already know need restoring (proactive maintenance, restoring a
+   * contract's data ahead of an upgrade, etc.).
+   */
+  keys: xdr.LedgerKey[]
+  /** Wallet adapter used for signing. */
+  wallet: WalletAdapter
+  /** SDK configuration. */
+  config: SorobanResurrectConfig
+}
+
+/**
+ * Restores an arbitrary list of ledger keys, with no source transaction
+ * required.
+ *
+ * Every other restore path in this SDK discovers archived keys by simulating
+ * a transaction that touches them. This is for the case where the caller
+ * already knows which keys need restoring — a scheduled sweep of entries
+ * approaching TTL expiry (see `TTLHelpers.getExpiringSoonEntries`), or
+ * restoring a contract's storage before an upgrade touches it.
+ *
+ * A `restoreFootprint` transaction is built directly from `keys` and
+ * simulated once — not to detect whether restore is needed (it always is,
+ * here), but because that simulation is how the real `minResourceFee` for
+ * exactly these keys is obtained, same as every other restore fee in this
+ * SDK. `config.maxRestoreFeeStroops`, if set, applies here too.
+ *
+ * Never throws — every failure path returns
+ * `ResurrectResult { success: false, error }`.
+ *
+ * @example
+ * ```ts
+ * const result = await resurrect.restoreKeys([contractDataKey, contractCodeKey], wallet)
+ * if (result.success) console.log('Restored:', result.restoreTxHash)
+ * ```
+ */
+export async function restoreKeys(params: RestoreKeysParams): Promise<ResurrectResult> {
+  const { server, keys, wallet, config } = params
+  const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
+
+  if (keys.length === 0) {
+    return {
+      success: false,
+      archivedKeysDetected: 0,
+      error: 'restoreKeys called with an empty key list',
+    }
+  }
+
+  try {
+    const isConnected = await wallet.isConnected()
+    if (!isConnected) {
+      return { success: false, archivedKeysDetected: keys.length, error: 'Wallet is not connected' }
+    }
+
+    const publicKey = await wallet.getPublicKey()
+    const account = await server.getAccount(publicKey)
+
+    // A placeholder-fee restoreFootprint tx over exactly these keys, built
+    // only so it can be simulated for its real minResourceFee — mirrors what
+    // simulating a source transaction gives the footprint-derived restore
+    // path, without requiring one.
+    const placeholderData = new SorobanDataBuilder().setReadWrite(keys).build()
+    const placeholderTx = new TransactionBuilder(account, { fee: BASE_FEE, networkPassphrase })
+      .addOperation(Operation.restoreFootprint({}))
+      .setSorobanData(placeholderData)
+      .setTimeout(30)
+      .build()
+
+    const simResponse = await server.simulateTransaction(placeholderTx)
+    if (isErrorResponse(simResponse)) {
+      return {
+        success: false,
+        archivedKeysDetected: keys.length,
+        error: `Simulation error: ${simResponse.error}`,
+      }
+    }
+
+    const minResourceFee = parseInt(simResponse.minResourceFee, 10)
+    const transactionData = isSuccessResponse(simResponse)
+      ? simResponse.transactionData.build()
+      : placeholderData
+
+    const restoreTx = await buildRestoreTransaction({
+      server,
+      sourcePublicKey: publicKey,
+      transactionData,
+      minResourceFee,
+      config,
+      account,
+    })
+
+    const signedXdr = await wallet.signTransaction(asXdrBase64(restoreTx.toXDR()), {
+      networkPassphrase,
+    })
+    const signedTx = TransactionBuilder.fromXDR(signedXdr, networkPassphrase)
+    if (!(signedTx instanceof Transaction)) {
+      return {
+        success: false,
+        archivedKeysDetected: keys.length,
+        error: 'Failed to parse signed restore transaction',
+      }
+    }
+
+    const sendResult = await server.sendTransaction(signedTx)
+    if (isTxBadSeqError(sendResult)) {
+      return {
+        success: false,
+        archivedKeysDetected: keys.length,
+        error: 'Restore transaction rejected with tx_bad_seq',
+      }
+    }
+    const restoreHash = asTxHash(sendResult.hash)
+
+    const status = await waitForTx(server, restoreHash, config)
+    if (status.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
+      return {
+        success: false,
+        archivedKeysDetected: keys.length,
+        restoreTxHash: restoreHash,
+        error: 'Restore transaction failed to confirm',
+      }
+    }
+
+    return {
+      success: true,
+      restoreTxHash: restoreHash,
+      archivedKeysDetected: keys.length,
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return { success: false, archivedKeysDetected: keys.length, error: message }
   }
 }

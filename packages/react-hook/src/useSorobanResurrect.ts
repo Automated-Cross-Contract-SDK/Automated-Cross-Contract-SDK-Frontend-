@@ -1,11 +1,14 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import {
   SorobanResurrect,
+  isProcessingState,
   type SorobanResurrectConfig,
   type WalletAdapter,
   type RestoreStateInfo,
   type ArchivedLedgerEntry,
   type ResurrectResult,
+  type RestoreState,
+  type SorobanResurrectEvents,
 } from '@soroban-resurrect/sdk'
 import type { Transaction } from '@stellar/stellar-sdk'
 
@@ -25,8 +28,17 @@ export interface UseSorobanResurrectReturn {
   submitWithRestore: (transaction: Transaction, wallet: WalletAdapter) => Promise<ResurrectResult>
   /** Check if a transaction requires archive restoration. */
   detectArchivedKeys: (transaction: Transaction) => Promise<ArchivedLedgerEntry[]>
-  /** Reset state back to idle. */
-  reset: () => void
+  /** Reset state back to idle. Optionally, only reset if in a specific state. */
+  reset: (fromState?: RestoreState) => void
+  /**
+   * Subscribes to a typed lifecycle event (`restoreNeeded`, `restoreSubmitted`,
+   * `restoreConfirmed`, `originalSubmitted`, `error`, `restoreComplete`, `stateChange`)
+   * on the current SDK instance. Returns an unsubscribe function.
+   */
+  on: <K extends keyof SorobanResurrectEvents>(
+    event: K,
+    listener: (payload: SorobanResurrectEvents[K]) => void,
+  ) => () => void
   /** The underlying SDK instance. */
   resurrect: SorobanResurrect
 }
@@ -39,6 +51,27 @@ export interface UseSorobanResurrectReturn {
  *
  * When the config prop changes, a new SDK instance is created and
  * state is reset to idle.
+ *
+ * @param options - See {@link UseSorobanResurrectOptions}.
+ * @returns See {@link UseSorobanResurrectReturn}.
+ * @see {@link SorobanResurrectProvider} / `useSorobanResurrectContext` for
+ *   the context-based alternative, useful when multiple components need
+ *   access to the same SDK instance.
+ *
+ * @example
+ * ```tsx
+ * function WithdrawButton() {
+ *   const { submitWithRestore, state, isProcessing } = useSorobanResurrect({
+ *     config: { rpcUrl: 'https://soroban-testnet.stellar.org' },
+ *   })
+ *
+ *   return (
+ *     <button onClick={() => submitWithRestore(tx, wallet)} disabled={isProcessing}>
+ *       {isProcessing ? state.message : 'Withdraw'}
+ *     </button>
+ *   )
+ * }
+ * ```
  */
 export function useSorobanResurrect(
   options: UseSorobanResurrectOptions,
@@ -52,10 +85,7 @@ export function useSorobanResurrect(
   })
 
   // Track config changes and reinitialize SDK when config updates
-  if (
-    !prevConfigRef.current ||
-    JSON.stringify(config) !== JSON.stringify(prevConfigRef.current)
-  ) {
+  if (!prevConfigRef.current || JSON.stringify(config) !== JSON.stringify(prevConfigRef.current)) {
     prevConfigRef.current = config
     resurrectRef.current = new SorobanResurrect(config)
   }
@@ -77,18 +107,18 @@ export function useSorobanResurrect(
     return resurrectRef.current!.detectArchivedKeys(transaction)
   }, [])
 
-  const reset = useCallback(() => {
-    resurrectRef.current!.reset()
-    setState({ state: 'idle', message: '' })
+  const reset = useCallback((fromState?: RestoreState) => {
+    resurrectRef.current!.reset(fromState)
   }, [])
 
-  const isProcessing =
-    state.state === 'simulating' ||
-    state.state === 'signing_restore' ||
-    state.state === 'submitting_restore' ||
-    state.state === 'confirming_restore' ||
-    state.state === 'signing_original' ||
-    state.state === 'submitting_original'
+  const on = useCallback(<K extends keyof SorobanResurrectEvents>(
+    event: K,
+    listener: (payload: SorobanResurrectEvents[K]) => void,
+  ) => {
+    return resurrectRef.current!.on(event, listener)
+  }, [])
+
+  const isProcessing = isProcessingState(state.state)
 
   return {
     state,
@@ -96,6 +126,7 @@ export function useSorobanResurrect(
     submitWithRestore,
     detectArchivedKeys,
     reset,
+    on,
     resurrect: resurrectRef.current!,
   }
 }

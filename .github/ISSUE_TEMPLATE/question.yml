@@ -1,0 +1,30 @@
+name: ❓ Question
+description: Ask a question about using the SDK
+title: "[Question]: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have a question about the SDK? Please search
+        [existing issues](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/issues)
+        and the [documentation](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/blob/main/README.md)
+        first — your question may already be answered.
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: What would you like to know?
+    validations:
+      required: true
+  - type: textarea
+    id: tried
+    attributes:
+      label: What have you tried?
+      description: Anything you've already attempted or researched.
+  - type: textarea
+    id: code
+    attributes:
+      label: Code snippet
+      description: Relevant code that helps explain your question.
+      render: typescript

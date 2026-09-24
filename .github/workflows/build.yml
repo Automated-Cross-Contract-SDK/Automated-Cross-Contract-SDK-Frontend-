@@ -1,0 +1,38 @@
+name: Build Verification
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Build (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - packages/sdk
+          - packages/react-hook
+          - packages/vue-hook
+          - packages/svelte-hook
+          - packages/adapter-freighter
+          - packages/adapter-albedo
+          - packages/adapter-lobstr
+          - packages/adapter-xbull
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build ${{ matrix.package }}
+        run: npm run build -w ${{ matrix.package }}

@@ -1,0 +1,6 @@
+{
+  "packages/sdk": "0.1.0",
+  "packages/react-hook": "0.1.0",
+  "packages/vue-hook": "0.1.0",
+  "packages/svelte-hook": "0.1.0"
+}

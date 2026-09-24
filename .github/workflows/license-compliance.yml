@@ -1,0 +1,51 @@
+name: License Compliance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  license-check:
+    name: Check Dependency Licenses
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install license-checker
+        run: npm install -g license-checker
+
+      - name: Check licenses
+        run: |
+          license-checker \
+            --onlyAllow "MIT;ISC;Apache-2.0;BSD-2-Clause;BSD-3-Clause;CC0-1.0;CC-BY-3.0;CC-BY-4.0;Python-2.0;Unlicense;0BSD" \
+            --excludePrivatePackages \
+            --excludePackages "soroban-resurrect" \
+            --summary
+
+      - name: Generate license report
+        if: always()
+        run: |
+          license-checker \
+            --excludePrivatePackages \
+            --excludePackages "soroban-resurrect" \
+            --csv \
+            --out license-report.csv
+
+      - name: Upload license report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: license-report
+          path: license-report.csv
+          retention-days: 30

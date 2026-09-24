@@ -1,0 +1,35 @@
+name: Integration Tests (Soroban)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      soroban:
+        image: stellar/quickstart:soroban-dev
+        ports:
+          - 8000:8000
+        options: >-
+          --health-cmd "curl -f http://localhost:8000/soroban/rpc"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SOROBAN_RPC_URL: http://localhost:8000/soroban/rpc
+      SOROBAN_NETWORK_PASSPHRASE: "Standalone Network ; February 2017"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run test:integration

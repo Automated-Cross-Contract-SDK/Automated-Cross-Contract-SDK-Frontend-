@@ -1,0 +1,42 @@
+name: Security Audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, Monday 06:00 UTC
+    - cron: '0 6 * * 1'
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # Fail the build on any high/critical advisory in the PRODUCTION
+      # dependency tree of the publishable packages. Dev-only advisories
+      # (test runners, bundlers, example apps) are reported but do not block.
+      - name: Audit production dependencies (publishable packages)
+        run: |
+          npm audit --omit=dev --audit-level=high \
+            --workspace=packages/sdk \
+            --workspace=packages/react-hook \
+            --workspace=packages/vue-hook \
+            --workspace=packages/svelte-hook \
+            --workspace=packages/adapter-freighter \
+            --workspace=packages/adapter-albedo \
+            --workspace=packages/adapter-lobstr \
+            --workspace=packages/adapter-xbull
+
+      - name: Full audit (informational, non-blocking)
+        if: always()
+        run: npm audit || true

@@ -1,0 +1,84 @@
+name: 🐛 Bug report
+description: Report a bug to help us improve the SDK
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report! Please search
+        [existing issues](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/issues)
+        first to make sure this hasn't already been reported.
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: A clear and concise description of what the bug is.
+      placeholder: Tell us what went wrong.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Minimal code snippet or test case that demonstrates the problem.
+      placeholder: |
+        1. Set up the SDK with ...
+        2. Call ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What actually happened. Include error messages and stack traces.
+    validations:
+      required: true
+  - type: input
+    id: sdk-version
+    attributes:
+      label: SDK version
+      description: Version of @soroban-resurrect/sdk you are using.
+      placeholder: e.g. 0.1.0
+  - type: input
+    id: stellar-sdk-version
+    attributes:
+      label: "@stellar/stellar-sdk version"
+      description: Version of @stellar/stellar-sdk (see package.json or the npm page).
+      placeholder: e.g. 12.0.0
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js version
+      placeholder: e.g. 20.11.0
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      description: Where did the bug occur? Select all that apply.
+      multiple: true
+      options:
+        - Node.js
+        - Browser (React)
+        - Browser (Vue)
+        - Browser (Svelte)
+        - Other
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Paste any relevant logs or error output.
+      render: shell
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Anything else that might help — screenshots, related issues, etc.
