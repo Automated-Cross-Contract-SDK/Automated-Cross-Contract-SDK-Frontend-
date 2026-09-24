@@ -41,10 +41,7 @@ export class FreighterAdapter implements WalletAdapter {
     return asStellarPublicKey(access.address)
   }
 
-  async signTransaction(
-    tx: string,
-    opts?: { networkPassphrase?: string; network?: string },
-  ) {
+  async signTransaction(tx: string, opts?: { networkPassphrase?: string; network?: string }) {
     const address = await getAddress()
     if ('error' in address && address.error) {
       throw new WalletError('NOT_CONNECTED', `Freighter: ${address.error}`, address.error)

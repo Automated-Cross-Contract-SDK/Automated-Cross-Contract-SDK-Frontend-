@@ -31,10 +31,7 @@ export class XBullAdapter implements WalletAdapter {
     return asStellarPublicKey(publicKey)
   }
 
-  async signTransaction(
-    tx: string,
-    opts?: { networkPassphrase?: string; network?: string },
-  ) {
+  async signTransaction(tx: string, opts?: { networkPassphrase?: string; network?: string }) {
     if (!this.publicKey) {
       throw new Error('xBull: wallet is not connected')
     }

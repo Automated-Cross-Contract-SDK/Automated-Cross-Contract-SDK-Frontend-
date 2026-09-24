@@ -21,11 +21,11 @@ Thank you for your interest in contributing! This document covers everything you
 
 ### Prerequisites
 
-| Tool | Minimum version |
-|------|----------------|
-| Node.js | 18.x |
-| npm | 9.x (ships with Node 18) |
-| Git | any recent version |
+| Tool    | Minimum version          |
+| ------- | ------------------------ |
+| Node.js | 18.x                     |
+| npm     | 9.x (ships with Node 18) |
+| Git     | any recent version       |
 
 ### Steps
 
@@ -46,19 +46,19 @@ npm run dev:example
 
 ### Useful scripts
 
-| Command | What it does |
-|---------|-------------|
-| `npm run build` | Build all packages |
-| `npm run build:sdk` | Build only `@soroban-resurrect/sdk` |
+| Command              | What it does                               |
+| -------------------- | ------------------------------------------ |
+| `npm run build`      | Build all packages                         |
+| `npm run build:sdk`  | Build only `@soroban-resurrect/sdk`        |
 | `npm run build:hook` | Build only `@soroban-resurrect/react-hook` |
-| `npm test` | Run all unit tests |
-| `npm run test:watch` | Run tests in watch mode |
-| `npm run typecheck` | Type-check all packages without emitting |
-| `npm run lint` | Lint all TypeScript source files |
-| `npm run lint:fix` | Auto-fix lint issues |
-| `npm run format` | Check formatting |
-| `npm run format:fix` | Auto-fix formatting |
-| `npm run clean` | Remove all `dist/` directories |
+| `npm test`           | Run all unit tests                         |
+| `npm run test:watch` | Run tests in watch mode                    |
+| `npm run typecheck`  | Type-check all packages without emitting   |
+| `npm run lint`       | Lint all TypeScript source files           |
+| `npm run lint:fix`   | Auto-fix lint issues                       |
+| `npm run format`     | Check formatting                           |
+| `npm run format:fix` | Auto-fix formatting                        |
+| `npm run clean`      | Remove all `dist/` directories             |
 
 ---
 
@@ -186,28 +186,28 @@ This project follows the [Conventional Commits](https://www.conventionalcommits.
 
 ### Types
 
-| Type | Use for |
-|------|---------|
-| `feat` | New feature |
-| `fix` | Bug fix |
-| `docs` | Documentation only |
+| Type       | Use for                                         |
+| ---------- | ----------------------------------------------- |
+| `feat`     | New feature                                     |
+| `fix`      | Bug fix                                         |
+| `docs`     | Documentation only                              |
 | `refactor` | Code change that is neither a fix nor a feature |
-| `test` | Adding or fixing tests |
-| `chore` | Build process, tooling, dependency updates |
-| `perf` | Performance improvement |
-| `ci` | CI/CD configuration changes |
+| `test`     | Adding or fixing tests                          |
+| `chore`    | Build process, tooling, dependency updates      |
+| `perf`     | Performance improvement                         |
+| `ci`       | CI/CD configuration changes                     |
 
 ### Scopes
 
 Use the package or module being changed:
 
-| Scope | Covers |
-|-------|--------|
-| `sdk` | `packages/sdk` |
+| Scope        | Covers                |
+| ------------ | --------------------- |
+| `sdk`        | `packages/sdk`        |
 | `react-hook` | `packages/react-hook` |
-| `example` | `examples/basic` |
-| `ci` | `.github/workflows` |
-| `deps` | Dependency updates |
+| `example`    | `examples/basic`      |
+| `ci`         | `.github/workflows`   |
+| `deps`       | Dependency updates    |
 
 ### Examples
 

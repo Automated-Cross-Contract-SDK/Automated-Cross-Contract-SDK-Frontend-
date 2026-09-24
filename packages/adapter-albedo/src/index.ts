@@ -34,10 +34,7 @@ export class AlbedoAdapter implements WalletAdapter {
     }
   }
 
-  async signTransaction(
-    tx: string,
-    opts?: { networkPassphrase?: string; network?: string },
-  ) {
+  async signTransaction(tx: string, opts?: { networkPassphrase?: string; network?: string }) {
     try {
       const result = await albedo.tx({
         xdr: tx,
