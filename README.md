@@ -403,7 +403,7 @@ Soroban RPC endpoint) when writing tests against this SDK, see
 
 ### Documentation Site
 
-The full documentation site (getting started guide, complete API reference, interactive examples, tutorial, and framework integration guides) lives in [`docs/`](./docs) and is built with [VitePress](https://vitepress.dev/). Run it locally with `npm run docs:dev`, or build the static site with `npm run docs:build`.
+The full documentation site (getting started guide, complete API reference, interactive examples, tutorial, and framework integration guides) lives in [`docs/`](./docs) and is built with [VitePress](https://vitepress.dev/). Run it locally with `npm run docs:dev`, or build the static site with `npm run docs:build`. The site also ships an [in-browser playground](./docs/examples/playground.md) that exercises the restore flow against a fake RPC client with canned responses — no wallet or testnet required.
 
 ### Project Structure
 
