@@ -13,6 +13,14 @@ npm run dev:example
 
 This starts a local dev server demonstrating connecting a wallet, building a transaction, and calling `submitWithRestore`.
 
+## Interactive Playground
+
+Want to try the flow without installing anything? The
+[Interactive Playground](/examples/playground) runs the SDK's state machine in
+your browser against a fake RPC client with canned responses — no wallet, no
+network. Edit the snippet, pick a scenario, and watch the state transitions,
+RPC calls, and result.
+
 ## Interactive Snippets
 
 ### Minimal restore check
@@ -56,8 +64,8 @@ function ArchivedKeysBanner({ archivedKeys }: { archivedKeys: ArchivedLedgerEntr
 
   return (
     <div className="banner">
-      {archivedKeys.length} ledger {archivedKeys.length === 1 ? 'entry needs' : 'entries need'}{' '}
-      to be restored before this transaction can be submitted.
+      {archivedKeys.length} ledger {archivedKeys.length === 1 ? 'entry needs' : 'entries need'} to
+      be restored before this transaction can be submitted.
     </div>
   )
 }

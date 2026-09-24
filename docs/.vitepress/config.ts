@@ -6,11 +6,19 @@ export default defineConfig({
   base: '/Automated-Cross-Contract-SDK-Frontend-/docs/',
   cleanUrls: true,
 
+  // Several docs pages link to repository files that live outside this
+  // VitePress source root (e.g. `../ARCHITECTURE.md`, `../packages/sdk/src`),
+  // which the dead-link checker can't resolve. Site-internal links are always
+  // root-absolute (`/guide/...`), so ignoring relative `../` links only
+  // silences those out-of-root references.
+  ignoreDeadLinks: [/\.\.\//],
+
   themeConfig: {
     nav: [
       { text: 'Guide', link: '/guide/getting-started' },
       { text: 'API Reference', link: '/api/sdk' },
       { text: 'Examples', link: '/examples/' },
+      { text: 'Playground', link: '/examples/playground' },
       { text: 'Integrations', link: '/integrations/react' },
     ],
 
@@ -41,7 +49,10 @@ export default defineConfig({
       '/examples/': [
         {
           text: 'Examples',
-          items: [{ text: 'Overview', link: '/examples/' }],
+          items: [
+            { text: 'Overview', link: '/examples/' },
+            { text: 'Interactive Playground', link: '/examples/playground' },
+          ],
         },
       ],
       '/integrations/': [
