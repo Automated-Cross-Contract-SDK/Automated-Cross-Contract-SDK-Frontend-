@@ -2,6 +2,7 @@ import {
   isConnected as freighterIsConnected,
   requestAccess,
   getAddress,
+  getNetwork,
   signTransaction as freighterSignTransaction,
 } from '@stellar/freighter-api'
 import { WalletError, type WalletAdapter, type WalletCapabilities } from '@soroban-resurrect/sdk'
@@ -60,6 +61,11 @@ export class FreighterAdapter implements WalletAdapter {
     return asXdrBase64(result.signedTxXdr)
   }
 
+  async getNetwork(): Promise<string> {
+    const result = await getNetwork()
+    if ('error' in result && result.error) throw normalizeError(result.error)
+    return result.networkPassphrase
+  }
 }
 
 function normalizeError(error: unknown): WalletError {
