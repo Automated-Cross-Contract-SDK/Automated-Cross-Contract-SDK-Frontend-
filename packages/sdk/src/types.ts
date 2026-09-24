@@ -1,5 +1,4 @@
-import { Transaction, xdr, Memo } from '@stellar/stellar-sdk'
-import { rpc } from '@stellar/stellar-sdk'
+import type { Transaction, xdr, Memo, rpc } from '@stellar/stellar-sdk'
 import type { ISorobanRpcClient } from './RpcClient.js'
 import type { LedgerEntryTTLInfo } from './TTLHelpers.js'
 import type {
@@ -14,7 +13,9 @@ import type {
   SequenceNumber,
   HistoryEntryId,
 } from './branded-types.js'
-import type { ISorobanRpcClient } from './RpcClient.js'
+import type { OnchainError } from './TransactionFailure.js'
+
+export type { ResurrectErrorCode } from './errors.js'
 
 export type {
   TxHash,
@@ -60,24 +61,13 @@ export interface SorobanResurrectConfig {
    */
   restoreFeeMultiplier?: number
   /**
-   * Hard cap (in stroops, as a string) on the fee a restore transaction may
-   * use. `minResourceFee * restoreFeeMultiplier` is taken from the
-   * simulation response unchecked; a malformed/malicious RPC response or a
-   * footprint that balloons in size could otherwise produce a restore fee
-   * far higher than expected. When set, `buildRestoreTransaction` throws
-   * `RestoreFeeExceededError` instead of building a transaction over the
-   * cap. Unset (the default) accepts whatever fee is computed, unchanged
-   * from prior behavior.
-   */
-  maxRestoreFeeStroops?: string
-  /** Method for detecting archived keys: 'simulation' (default) or 'direct'. */
-  archiveDetectionMethod?: 'simulation' | 'direct'
-  /**
-   * Ledger keys per `getLedgerEntries` request during 'direct' archive
-   * detection (default: 50). Lower it if the RPC endpoint rejects large
-   * batches.
+   * Maximum number of keys sent per `getLedgerEntries` request during
+   * 'direct' archive detection (default: 50). Lower it if the RPC endpoint
+   * rejects large batches.
    */
   archiveDetectionChunkSize?: number
+  /** Method for detecting archived keys: 'simulation' (default) or 'direct'. */
+  archiveDetectionMethod?: 'simulation' | 'direct'
   /**
    * Number of `getLedgerEntries` requests kept in flight at once during
    * 'direct' archive detection (default: 4). Raise it for faster detection on
@@ -134,15 +124,7 @@ export interface SorobanResurrectConfig {
    * `restoreTxMemo` is not), a `Memo.text(restoreTxMemoText)` is attached to
    * restore transactions. Ignored when {@link restoreTxMemo} is provided.
    */
-  restoreTxMemoText?: string
-  /**
-   * Maximum number of times to rebuild and resubmit the original transaction
-   * after a `tx_bad_seq` rejection, each attempt fetching a fresh sequence
-   * number. Defaults to 3. Only `tx_bad_seq` triggers a retry; every other
-   * submission error is surfaced immediately, unchanged.
-   */
-  maxSequenceRetries?: number
-  /**
+  restoreTxMemoText?: string /**
    * Optional pre-built RPC client to use instead of creating one from `rpcUrl`.
    *
    * When provided, the SDK uses this client for all Soroban RPC calls
@@ -171,12 +153,40 @@ export interface SorobanResurrectConfig {
    */
   maxRestoreFeeStroops?: FeeStroops | string
   /**
-   * Maximum number of times the restore workflow will rebuild the original
-   * transaction (with a fresh sequence number) and resubmit it after a
-   * `tx_bad_seq` submission error. Defaults to 3. Only `tx_bad_seq` triggers
-   * a retry — all other submission errors are surfaced immediately.
+   * Maximum serialized size (bytes) tolerated for a restore transaction's
+   * envelope before the footprint guard warns (or throws, when
+   * `throwOnRestoreSizeLimit` is set). Defaults to
+   * {@link SOROBAN_MAX_TX_XDR_BYTES} (128 KiB).
    */
-  maxSequenceRetries?: number
+  maxRestoreTxSizeBytes?: number
+  /**
+   * Fraction of `maxRestoreTxSizeBytes` at which the footprint guard starts
+   * warning that the restore transaction is approaching the size limit.
+   * Defaults to {@link RESTORE_TX_SIZE_WARN_RATIO} (0.8).
+   */
+  restoreSizeWarnRatio?: number
+  /**
+   * When `true`, `buildRestoreTransaction` throws instead of warning once the
+   * restore transaction exceeds `maxRestoreTxSizeBytes`. Default `false`.
+   */
+  throwOnRestoreSizeLimit?: boolean
+  /**
+   * Optional structured logger (see `Logger.ts`). When omitted the SDK is
+   * fully silent — no log strings are built and no sinks are called.
+   */
+  logger?: Logger
+  /**
+   * Opt-in durable transaction-history persistence. When set, restore
+   * attempts are written to `storage` and re-hydrated on construction.
+   */
+  persistHistory?: HistoryPersistenceOptions
+  /**
+   * When the simulation response cannot be classified as success/error/restore
+   * (e.g. an older soroban-rpc version), fall back to the `'direct'`
+   * detection strategy instead of reporting zero archived keys.
+   * Default `true`.
+   */
+  archiveDetectionFallback?: boolean
 }
 
 /**

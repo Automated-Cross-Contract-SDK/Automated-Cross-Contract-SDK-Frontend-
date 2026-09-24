@@ -96,12 +96,73 @@ export const RESTORE_TX_SIZE_WARN_RATIO = 0.8
  */
 export const MAX_SEQUENCE_RETRIES = 3
 
+/** Alias of {@link MAX_SEQUENCE_RETRIES} (name used by the execution layer). */
+export const DEFAULT_MAX_SEQUENCE_RETRIES = MAX_SEQUENCE_RETRIES
+
+/** Per-call RPC timeout (ms) applied by the resilient transport. */
+export const RPC_TIMEOUT_MS = 10_000
+
+/** Number of RPC retries beyond the initial attempt for transient failures. */
+export const RPC_RETRY_COUNT = 2
+
+/** Base backoff (ms) between RPC retries; doubles per attempt with jitter. */
+export const RPC_RETRY_BACKOFF_MS = 250
+
+/** Consecutive RPC failures before the circuit breaker trips. */
+export const RPC_CIRCUIT_BREAKER_THRESHOLD = 5
+
+/** Cooldown (ms) the circuit breaker stays open before half-opening again. */
+export const RPC_CIRCUIT_BREAKER_COOLDOWN_MS = 30_000
+
+/** Default polling cadence (ms) for `watchTTL()` when a call doesn't override it. */
+export const TTL_WATCH_INTERVAL_MS = 60_000
+
+/**
+ * Default "expiring soon" threshold (in remaining ledgers) for `watchTTL()`
+ * when a call doesn't override it — ~24 h at the nominal 5 s ledger close.
+ */
+export const TTL_WATCH_THRESHOLD_LEDGERS = 17_280
+
+/** Whether `watchTTL()` submits a restore automatically by default (observe-only). */
+export const TTL_WATCH_AUTO_EXTEND = false
+
 /** Known Stellar/Soroban network passphrases for validation. */
 export const KNOWN_NETWORK_PASSPHRASES = [
   'Test SDF Network ; September 2015', // Testnet
   'Public Global Stellar Network ; September 2015', // Mainnet
   'Test SDF Future Network ; October 2022', // Futurenet
 ]
+
+// ---------------------------------------------------------------------------
+// Network presets (re-exported by SorobanResurrectNetwork.ts)
+// ---------------------------------------------------------------------------
+
+/** Well-known Soroban network names understood by `SorobanResurrectNetwork`. */
+export type SorobanNetworkName = 'testnet' | 'mainnet' | 'futurenet'
+
+/** RPC URL + passphrase pair for a well-known Soroban network. */
+export interface SorobanNetworkPreset {
+  /** Soroban RPC endpoint for the network. */
+  rpcUrl: string
+  /** Network passphrase identifying the network cryptographically. */
+  networkPassphrase: string
+}
+
+/** Presets for the well-known Stellar/Soroban networks. */
+export const NETWORK_PRESETS: Record<SorobanNetworkName, SorobanNetworkPreset> = {
+  testnet: {
+    rpcUrl: 'https://soroban-testnet.stellar.org',
+    networkPassphrase: 'Test SDF Network ; September 2015',
+  },
+  mainnet: {
+    rpcUrl: 'https://soroban-mainnet.stellar.org',
+    networkPassphrase: 'Public Global Stellar Network ; September 2015',
+  },
+  futurenet: {
+    rpcUrl: 'https://rpc-futurenet.stellar.org',
+    networkPassphrase: 'Test SDF Future Network ; October 2022',
+  },
+}
 
 /** Known Soroban RPC URL to passphrase mapping for common endpoints. */
 export const URL_TO_PASSPHRASE: Record<string, string> = {

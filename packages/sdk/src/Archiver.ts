@@ -1,8 +1,12 @@
 import { rpc, Transaction } from '@stellar/stellar-sdk'
 import { xdr } from '@stellar/stellar-sdk'
 import { ArchivedLedgerEntry, SimulateResponse } from './types.js'
-import { asXdrBase64, asContractIdHex, type ContractIdHex } from './branded-types.js'
-import { extractArchivedKeysSafe, extractFootprintFromSuccessSafe } from './result.js'
+import { asXdrBase64, type ContractIdHex, type HexString } from './branded-types.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
+import { createDebugger } from './Debug.js'
+import { LEDGER_ENTRY_CHUNK_SIZE, LEDGER_ENTRY_CONCURRENCY } from './constants.js'
+
+const debug = createDebugger('archiver')
 
 /**
  * Type guard — returns true if the simulation response indicates archived
@@ -175,7 +179,7 @@ function chunkKeys(ledgerKeys: xdr.LedgerKey[], chunkSize: number): xdr.LedgerKe
  * request conservatively yields every key in the chunk.
  */
 async function detectArchivedChunk(
-  server: rpc.Server,
+  server: ISorobanRpcClient,
   chunk: xdr.LedgerKey[],
   chunkIndex: number,
 ): Promise<ArchivedLedgerEntry[]> {
@@ -195,7 +199,7 @@ async function detectArchivedChunk(
       if (!knownKeys.has(keyXdr)) {
         archived.push({
           key,
-          keyBase64: keyXdr,
+          keyBase64: asXdrBase64(keyXdr),
         })
       }
     }
@@ -205,7 +209,7 @@ async function detectArchivedChunk(
     // On network error, conservatively treat all keys in chunk as archived
     return chunk.map((key) => ({
       key,
-      keyBase64: key.toXDR('base64'),
+      keyBase64: asXdrBase64(key.toXDR('base64')),
     }))
   }
 }
@@ -241,46 +245,21 @@ export async function detectArchivedEntries(
     return []
   }
 
-  const chunks: xdr.LedgerKey[][] = []
-  for (let i = 0; i < ledgerKeys.length; i += chunkSize) {
-    const chunk = ledgerKeys.slice(i, i + chunkSize)
-    try {
-      const result = await server.getLedgerEntries(...chunk)
-      // Build a set of returned entry keys to identify archived ones
-      const knownKeys = new Set<string>()
-      if (result.entries) {
-        for (const entry of result.entries) {
-          knownKeys.add(entry.key.toXDR('base64'))
-        }
-      }
-      // Check each key in the chunk; if not in returned entries, it's archived
-      for (const key of chunk) {
-        const keyXdr = key.toXDR('base64')
-        if (!knownKeys.has(keyXdr)) {
-          archived.push({
-            key,
-            keyBase64: asXdrBase64(keyXdr),
-          })
-        }
-      }
+  const chunkSize =
+    options.chunkSize && options.chunkSize > 0 ? options.chunkSize : LEDGER_ENTRY_CHUNK_SIZE
+  const concurrency =
+    options.concurrency && options.concurrency > 0 ? options.concurrency : LEDGER_ENTRY_CONCURRENCY
+
+  const chunks = chunkKeys(ledgerKeys, chunkSize)
+  const results: ArchivedLedgerEntry[][] = new Array(chunks.length)
+  let nextIndex = 0
+
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const index = nextIndex++
+      if (index >= chunks.length) return
+      results[index] = await detectArchivedChunk(server, chunks[index], index)
     }
-    // Check each key in the chunk; if not in returned entries, it's archived
-    for (const key of chunk) {
-      const keyXdr = key.toXDR('base64')
-      if (!knownKeys.has(keyXdr)) {
-        archived.push({
-          key,
-          keyBase64: asXdrBase64(key.toXDR('base64')),
-        })),
-      )
-    }
-  } catch (err) {
-    // On network error, conservatively treat all keys in chunk as archived
-    debug('detectArchivedEntries: chunk %d failed, assuming archived', chunkIndex, err)
-    return chunk.map((key) => ({
-      key,
-      keyBase64: key.toXDR('base64'),
-    }))
   }
 
   const workerCount = Math.min(concurrency, chunks.length)

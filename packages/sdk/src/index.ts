@@ -16,10 +16,7 @@ export { SorobanResurrect } from './SorobanResurrect.js'
 // Network presets / switching helper
 // ---------------------------------------------------------------------------
 export { SorobanResurrectNetwork, NETWORK_PRESETS } from './SorobanResurrectNetwork.js'
-export type {
-  SorobanNetworkName,
-  SorobanNetworkPreset,
-} from './SorobanResurrectNetwork.js'
+export type { SorobanNetworkName, SorobanNetworkPreset } from './SorobanResurrectNetwork.js'
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -62,6 +59,7 @@ export { ResurrectError } from './errors.js'
 // ---------------------------------------------------------------------------
 export type { ISorobanRpcClient } from './RpcClient.js'
 export { SorobanRpcClient, createRpcClient } from './RpcClient.js'
+export { RpcTimeoutError, RpcCircuitOpenError } from './RpcClient.js'
 
 // ---------------------------------------------------------------------------
 // Observability — injectable logger + RPC call timings (#237)
@@ -147,12 +145,18 @@ export { NETWORK_PRESETS } from './constants.js'
 // RPC client abstraction (dependency injection / resilient transport)
 // ---------------------------------------------------------------------------
 export type { ISorobanRpcClient, RpcResilienceOptions } from './RpcClient.js'
-export { SorobanRpcClient, createRpcClient, RpcTimeoutError, RpcCircuitOpenError } from './RpcClient.js'
+export {
+  SorobanRpcClient,
+  createRpcClient,
+  RpcTimeoutError,
+  RpcCircuitOpenError,
+} from './RpcClient.js'
 
 // ---------------------------------------------------------------------------
 // Transaction history (returned by SorobanResurrect.history / getHistory)
 // ---------------------------------------------------------------------------
 export type { TransactionHistoryEntry, TransactionAttemptStatus } from './TransactionHistory.js'
+export type { SerializedHistoryEntry } from './TransactionHistory.js'
 
 // ---------------------------------------------------------------------------
 // Hardware wallet adapters
@@ -189,10 +193,7 @@ export {
   evaluateRestoreFootprint,
   restoreSizeGuidance,
 } from './footprintGuard.js'
-export type {
-  RestoreTxDiagnostics,
-  EvaluateRestoreFootprintOptions,
-} from './footprintGuard.js'
+export type { RestoreTxDiagnostics, EvaluateRestoreFootprintOptions } from './footprintGuard.js'
 
 // ---------------------------------------------------------------------------
 // Typed event emitter (used by SorobanResurrect.on / once / off)
@@ -231,7 +232,6 @@ export {
   getArchivedEntries,
   getLedgerKeyEntryType,
 } from './TTLHelpers.js'
-export type { TransactionHistoryEntry, TransactionAttemptStatus } from './TransactionHistory.js'
 export { TransactionHistory } from './TransactionHistory.js'
-export type { ISorobanRpcClient } from './RpcClient.js'
 export type { TTLWatchOptions, TTLWatchHandle } from './TTLWatch.js'
+export { watchTTL } from './TTLWatch.js'
