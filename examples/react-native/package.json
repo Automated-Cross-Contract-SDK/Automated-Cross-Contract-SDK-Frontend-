@@ -8,7 +8,7 @@
     "ios": "react-native run-ios"
   },
   "dependencies": {
-    "react": "18.2.0",
+    "react": "19.3.0",
     "react-native": "0.74.5",
     "react-native-get-random-values": "^1.11.0",
     "buffer": "^6.0.3",
@@ -21,7 +21,7 @@
     "@babel/preset-env": "^7.24.0",
     "@react-native/babel-preset": "0.74.87",
     "@react-native/typescript-config": "0.74.87",
-    "@types/react": "^18.3.0",
+    "@types/react": "^19.3.0",
     "typescript": "^5.5.0"
   }
 }
