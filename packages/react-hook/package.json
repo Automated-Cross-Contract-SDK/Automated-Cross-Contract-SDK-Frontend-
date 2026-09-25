@@ -54,7 +54,7 @@
   },
   "devDependencies": {
     "@testing-library/dom": "^10.4.0",
-    "@testing-library/react": "^16.3.2",
+    "@testing-library/react": "^16.3.3",
     "@types/react": "^18.3.0",
     "@vitest/coverage-v8": "^2.1.9",
     "jsdom": "^29.1.1",
