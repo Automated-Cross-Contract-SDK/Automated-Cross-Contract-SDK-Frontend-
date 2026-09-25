@@ -4,10 +4,28 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+      day: "monday"
     open-pull-requests-limit: 10
     labels:
       - "dependencies"
       - "npm"
+    groups:
+      # Stellar SDK + workspace packages: reviewed together, merged manually.
+      stellar:
+        patterns:
+          - "@stellar/*"
+          - "@soroban-resurrect/*"
+          - "soroban-resurrect"
+      # All other devDependencies in a single weekly PR; auto-merged when CI
+      # passes (see .github/workflows/dependabot-auto-merge.yml).
+      dev-dependencies:
+        dependency-type: "development"
+        exclude-patterns:
+          - "@stellar/*"
+          - "@soroban-resurrect/*"
+          - "soroban-resurrect"
+    # Runtime (production) dependencies are intentionally left ungrouped so
+    # each update gets its own PR and a manual review.
 
   - package-ecosystem: "github-actions"
     directory: "/"
