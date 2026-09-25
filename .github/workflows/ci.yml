@@ -108,6 +108,43 @@ jobs:
       - name: Build (all packages via Turbo)
         run: npm run build
 
+  cross-platform:
+    name: ${{ matrix.package }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        package:
+          - react-hook
+          - vue-hook
+          - svelte-hook
+          - adapter-albedo
+          - adapter-freighter
+          - adapter-lobstr
+          - adapter-rabet
+          - adapter-walletconnect
+          - adapter-walletkit
+          - adapter-xbull
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build workspace dependencies
+        run: npx turbo run build --filter=@soroban-resurrect/${{ matrix.package }}^...
+
+      - name: Typecheck
+        run: npm run typecheck -w packages/${{ matrix.package }} --if-present
+
+      - name: Test
+        run: npm run test -w packages/${{ matrix.package }}
+
   wallet-e2e:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
