@@ -38,6 +38,11 @@ Please include:
 | Acknowledgement          | within 3 business days        |
 | Initial assessment       | within 7 business days        |
 | Fix or mitigation plan   | within 30 days for high/critical |
+
+### Security Triage & Release Ownership
+
+Security triage and emergency patch approvals are coordinated directly by the primary code owners designated in [`.github/CODEOWNERS`](./.github/CODEOWNERS). Security advisories require sign-off from `@micmusjnr20` before public vulnerability disclosure or release tags are cut.
+
 | Public disclosure        | coordinated, after a fix ships |
 
 We ask that you give us a reasonable window to release a fix before any public

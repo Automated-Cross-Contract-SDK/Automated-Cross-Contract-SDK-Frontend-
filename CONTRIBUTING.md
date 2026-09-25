@@ -307,6 +307,12 @@ For large or potentially breaking features, it is a good idea to open a discussi
 
 ---
 
+## Code Owners & Review Assignments
+
+Review requests are automatically mapped based on the repository's [`.github/CODEOWNERS`](./.github/CODEOWNERS) configuration. Each package (`packages/*`), documentation path, and CI workflow has assigned maintainers responsible for reviewing code quality, API invariants, and security impact.
+
+---
+
 ## License
 
 By contributing, you agree that your contributions will be licensed under the project's [MIT License](./LICENSE).
