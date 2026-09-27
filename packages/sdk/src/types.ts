@@ -144,3 +144,57 @@ export class TypedEventEmitter<Events extends EventMap> {
     return this.listeners.get(event)?.size ?? 0;
   }
 }
+
+/**
+ * Status of a single ledger entry as reported by {@link queryLedgerTTL}.
+ *
+ * - `live`: the RPC confirmed the entry exists and is not archived.
+ * - `archived`: the RPC confirmed the entry is absent/archived.
+ * - `unknown`: the request for this entry failed, so its status could not
+ *   be determined. Unknown entries must never be treated as archived.
+ */
+export type TTLQueryStatus = 'live' | 'archived' | 'unknown';
+
+/**
+ * A single entry returned by {@link queryLedgerTTL}.
+ */
+export interface TTLQueryEntry {
+  /** The ledger key this entry describes. */
+  key: string;
+  /** Whether the entry is live, archived, or of unknown status. */
+  status: TTLQueryStatus;
+  /**
+   * Convenience flag mirroring `status === 'archived'`. Entries whose status
+   * is `unknown` are never reported as archived.
+   */
+  isArchived: boolean;
+  /** Remaining TTL in ledgers, when known. */
+  ttl?: number;
+}
+
+/**
+ * Describes a chunk of keys whose `getLedgerEntries` request failed.
+ */
+export interface TTLQueryChunkError {
+  /** Index of the failing chunk within the original request. */
+  chunkIndex: number;
+  /** The keys that were part of the failing chunk. */
+  keys: string[];
+  /** The error thrown by the underlying RPC call. */
+  error: unknown;
+}
+
+/**
+ * Result of {@link queryLedgerTTL}.
+ *
+ * `failedChunks` exposes which chunks failed and why so callers can
+ * distinguish a confirmed-absent entry from one whose status is unknown.
+ */
+export interface TTLQueryResult {
+  /** Per-key status, keyed by the requested ledger key. */
+  entries: Record<string, TTLQueryEntry>;
+  /** Chunks whose request failed, with the underlying error. */
+  failedChunks: TTLQueryChunkError[];
+  /** Convenience flag: true when at least one chunk failed. */
+  hasErrors: boolean;
+}
