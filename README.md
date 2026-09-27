@@ -483,3 +483,8 @@ See [MIGRATION.md](./MIGRATION.md) for breaking changes and upgrade steps betwee
 ## License
 
 MIT
+
+## Handsoff notes
+
+<!-- handsoff-issue-389 -->
+- #389: Hooks: no hook exposes retry, restoreKeys, or true batch submission
