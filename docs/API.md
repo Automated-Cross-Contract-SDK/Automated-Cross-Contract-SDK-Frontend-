@@ -94,6 +94,62 @@ result can be retained to collect the remaining signatures later.
 | `MultiSigConfig` | Threshold and signer set for an N-of-M wallet. |
 | `SignatureCollectionResult` | Outcome of `collectSignatures`, including collected signatures and per-signer failures. |
 
+## Restore cost estimation
+
+`estimateRestoreCost(transaction)` is the read-only companion to a restore flow. It inspects a
+transaction's footprint, determines whether any of its keys are archived, and returns the extra
+fee a restore would incur — **without submitting anything**. Use it to show the user what a
+restore will cost before they sign.
+
+```ts
+function estimateRestoreCost(transaction: Transaction): Promise<RestoreCostEstimate>;
+```
+
+### `RestoreCostEstimate`
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `minResourceFee` | `number` | Minimum resource fee for the restore, in stroops. |
+| `multiplier` | `number` | Fee multiplier applied to the restore resources. |
+| `estimatedFee` | `number` | Total estimated restore fee (`minResourceFee` scaled by `multiplier`), in stroops. |
+| `archivedKeysDetected` | `LedgerKey[]` | Footprint keys found to be archived and therefore needing a restore. |
+| `wouldNeedRestore` | `boolean` | `true` when at least one archived key was detected; `false` when no restore is required. |
+
+### Zero-fee behaviour (`wouldNeedRestore: false`)
+
+When none of the transaction's footprint keys are archived, `wouldNeedRestore` is `false` and
+`estimatedFee` is `0` (with `archivedKeysDetected` empty). In that case no restore is needed and
+the transaction can be submitted as-is — you should not add the estimated fee to the user's
+cost, and you can skip the restore confirmation entirely.
+
+### Worked example: confirm the cost before signing
+
+```ts
+import { estimateRestoreCost } from "@sdk/restore";
+
+const estimate = await estimateRestoreCost(tx);
+
+if (estimate.wouldNeedRestore) {
+  // Show the extra cost to the user before they sign.
+  const feeXlm = estimate.estimatedFee / 10_000_000;
+  const confirmed = await ui.confirm(
+    `This transaction needs a restore of ${estimate.archivedKeysDetected.length} ` +
+      `archived key(s) and will cost an extra ${feeXlm} XLM. Continue?`,
+  );
+  if (!confirmed) return;
+} else {
+  // No archived keys: no restore, no extra fee.
+  console.log("No restore needed; submitting as-is.");
+}
+
+// Proceed to sign and submit only after the user has seen the cost.
+const signed = await signer.sign(tx);
+await submit(signed);
+```
+
+See the [fee-model guide](./guide/fees.md) and the [TTL guides](./guide/ttl.md) for how restore
+fees fit into the overall fee model and TTL management.
+
 ## Contract and account scanning
 
 The scanning APIs answer "what in my contract or account is about to expire?" **without

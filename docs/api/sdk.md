@@ -3,8 +3,9 @@
 The `@handsoff/sdk` package exposes the wallet adapter layer used by every integration.
 This page documents the `WalletAdapter` contract, the `createAdapter` factory, the
 `KnownWallet` / `SUPPORTED_WALLETS` registry, the capability flags, the hardware
-wallet setup for Ledger and Trezor, the N-of-M multisig restore flow, and the
-transaction-free contract and account scanning APIs.
+wallet setup for Ledger and Trezor, the N-of-M multisig restore flow, the
+transaction-free contract and account scanning APIs, and the `estimateRestoreCost`
+helper for pricing a restore before the user signs.
 
 ## `WalletAdapter`
 
@@ -181,6 +182,70 @@ class MyWalletAdapter implements WalletAdapter {
 const adapter = createAdapter({ adapter: MyWalletAdapter });
 ```
 
+## `estimateRestoreCost`
+
+`estimateRestoreCost(transaction)` prices the restore work a transaction would
+trigger before the user signs. It inspects the transaction's ledger keys, detects
+which of them are archived, and returns the extra fee the restore would add on top
+of the base fee. It is the natural companion to a "this will cost extra because it
+needs a restore" confirmation step.
+
+```ts
+export function estimateRestoreCost(
+  transaction: Transaction,
+): Promise<RestoreCostEstimate>;
+```
+
+### `RestoreCostEstimate`
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `minResourceFee` | `number` | Minimum resource fee (in stroops) the network charges for the restore operation. |
+| `multiplier` | `number` | Fee multiplier applied to `minResourceFee` to derive `estimatedFee`. |
+| `estimatedFee` | `number` | Total estimated restore fee (in stroops): `minResourceFee * multiplier`. |
+| `archivedKeysDetected` | `PublicKey[]` | Ledger keys referenced by the transaction that are currently archived. |
+| `wouldNeedRestore` | `boolean` | Whether the transaction would trigger a restore at all. |
+
+### Zero-fee behaviour
+
+When none of the transaction's ledger keys are archived, `wouldNeedRestore` is
+`false`, `archivedKeysDetected` is empty, and `estimatedFee` is `0`. In that case
+the transaction can be submitted as-is and no restore step is required — skip the
+confirmation prompt entirely.
+
+### Worked example: confirm the cost before signing
+
+```ts
+import { estimateRestoreCost } from '@handsoff/sdk';
+
+const estimate = await estimateRestoreCost(transaction);
+
+if (estimate.wouldNeedRestore) {
+  // Surface the extra cost to the user before they sign.
+  const feeInSol = estimate.estimatedFee / 1e9;
+  const confirmed = await confirm({
+    title: 'This transaction needs a restore',
+    message:
+      `${estimate.archivedKeysDetected.length} archived key(s) will be restored. ` +
+      `Estimated extra fee: ${feeInSol} SOL.`,
+  });
+
+  if (!confirmed) {
+    return; // User declined — do not sign or submit.
+  }
+} else {
+  // wouldNeedRestore === false: no restore, no extra fee.
+  console.log('No restore needed; estimatedFee is 0.');
+}
+
+const signed = await adapter.signTransaction(transaction);
+await submit(signed);
+```
+
+See the [fee model guide](../guide/fee-model.md) for how the restore fee fits into
+the overall fee calculation, and the [TTL guides](../guide/ttl.md) for how entries
+become archived in the first place.
+
 ## Contract and account scanning
 
 The scanning APIs answer "what in my contract or account is about to expire?"
@@ -253,146 +318,12 @@ const result = await getExpiringEntriesForContract({
 });
 
 if (result.instance?.expiringSoon) {
-  console.warn('contract instance is expiring soon');
+  console.warn('Contract instance is expiring soon');
 }
-if (result.wasm?.expiringSoon) {
-  console.warn('wasm code is expiring soon');
-}
+
 for (const entry of result.storage) {
   if (entry.expiringSoon) {
-    console.warn(`storage key ${entry.key} expires in ${entry.remainingLedgers} ledgers`);
+    console.warn(`Storage key ${entry.key} expires in ${entry.remainingLedgers} ledgers`);
   }
 }
 ```
-
-### `getExpiringEntriesForAccount`
-
-Scans an account's presence entries — the account itself and its trustlines — for
-TTLs that fall within the expiring-soon window. This is a **presence scan**, not a
-TTL scan of contract data: it reports whether the account and each trustline are
-close to being archived.
-
-```ts
-export interface AccountScanOptions {
-  /** Account to scan. */
-  accountId: PublicKey;
-  /** Ledger threshold (in ledgers) below which an entry is "expiring soon". */
-  expiringSoonLedgers?: number;
-}
-```
-
-The result reuses `ClassicEntryStatus` for the account entry and each trustline:
-
-```ts
-import { getExpiringEntriesForAccount } from '@handsoff/sdk';
-
-const { account, trustlines } = await getExpiringEntriesForAccount({
-  accountId,
-});
-
-if (account?.expiringSoon) {
-  console.warn('account is expiring soon');
-}
-for (const line of trustlines) {
-  if (line.expiringSoon) {
-    console.warn(`trustline ${line.key} expires in ${line.remainingLedgers} ledgers`);
-  }
-}
-```
-
-### Scanning vs. `detectArchivedKeys`
-
-`detectArchivedKeys` is **footprint-based**: it inspects the ledger keys a
-transaction touched (its footprint) and reports which of those are already
-archived. Use it when you have a transaction in hand and want to know whether it
-will fail because it references archived state.
-
-The scan functions are **TTL-based and transaction-free**: they read entries
-directly and report which are *about to* expire, so you can act before anything is
-archived. Use them for proactive prompts ("extend your contract state") rather
-than reactive failure handling.
-
-| | `getExpiringEntriesForContract` / `getExpiringEntriesForAccount` | `detectArchivedKeys` |
-| --- | --- | --- |
-| Input | Contract/account id (+ storage keys) | Transaction footprint |
-| Question | What is about to expire? | What is already archived? |
-| Needs a transaction | No | Yes |
-| Use for | Proactive TTL warnings | Pre-flight failure detection |
-
-## Multisig restore
-
-N-of-M restore is handled by `MultiSigWalletAdapter`, which wraps a base
-`WalletAdapter` and coordinates signature collection across signers. The flow is
-**build → collect → submit**: build the restore transaction, collect one signature
-per signer until the threshold is met, then submit the assembled transaction.
-
-### Sequence diagram
-
-```mermaid
-sequenceDiagram
-    participant App
-    participant Adapter as MultiSigWalletAdapter
-    participant S1 as Signer 1
-    participant S2 as Signer 2
-    participant S3 as Signer 3
-    participant Chain
-
-    App->>Adapter: buildRestoreTransaction(restoreKeys)
-    Adapter-->>App: restore tx (unsigned)
-    App->>Adapter: collectSignatures(tx, signers)
-    Adapter->>S1: signTransaction(tx)
-    S1-->>Adapter: signature 1
-    Adapter->>S2: signTransaction(tx)
-    S2-->>Adapter: signature 2
-    Note over Adapter: threshold (2) reached
-    Adapter-->>App: SignatureCollectionResult
-    App->>Adapter: submitWithRestore(result)
-    Adapter->>Chain: submit assembled tx
-    Chain-->>Adapter: confirmation
-    Adapter-->>App: SignedTransaction
-```
-
-### Composing with `submitWithRestore` and `restoreKeys`
-
-`restoreKeys` is the ordered list of public keys that make up the multisig set.
-`MultiSigConfig` carries the threshold and that key list, and
-`MultiSigWalletAdapter` uses it to know how many signatures are required.
-`submitWithRestore` is the terminal step: it takes the
-`SignatureCollectionResult` produced by the collect phase, assembles the fully
-signed transaction, and submits it. You never call `submitWithRestore` before the
-threshold is met — the adapter rejects an under-signed result.
-
-### Worked 2-of-3 example
-
-```ts
-import {
-  MultiSigWalletAdapter,
-  MultiSigSigner,
-  type MultiSigConfig,
-} from '@handsoff/sdk';
-
-const config: MultiSigConfig = {
-  threshold: 2,
-  restoreKeys: [signerA.publicKey, signerB.publicKey, signerC.publicKey],
-};
-
-const adapter = new MultiSigWalletAdapter({ base: baseAdapter, config });
-
-// 1. Build the restore transaction from the multisig key set.
-const tx = await adapter.buildRestoreTransaction({ restoreKeys: config.restoreKeys });
-
-// 2. Collect signatures from each signer until the threshold is met.
-const signers: MultiSigSigner[] = [signerA, signerB, signerC];
-const result = await adapter.collectSignatures(tx, signers);
-
-// 3. Submit the assembled transaction.
-const submitted = await adapter.submitWithRestore(result);
-```
-
-### Failure handling
-
-A signer may refuse to sign (rejected in the wallet, device disconnected, or
-signature invalid). `collectSignatures` surfaces the failure per signer so the
-caller can retry with a replacement signer or abort. Because the threshold is
-enforced at submit time, a partial collection never produces a submitted
-transaction.
