@@ -35,6 +35,74 @@ interface SorobanResurrectConfig {
 | `archiveDetectionChunkSize` | Ledger keys per `getLedgerEntries` request during `'direct'` detection.       |
 | `archiveDetectionConcurrency` | Chunk requests kept in flight at once during `'direct'` detection.          |
 
+## `SorobanResurrectNetwork`
+
+Describes a Soroban network: its RPC endpoint and passphrase. Use the preset
+helpers below instead of hand-writing passphrases — they keep the RPC URL and
+passphrase in sync and are the values `switchNetwork()` accepts.
+
+```typescript
+interface SorobanResurrectNetwork {
+  rpcUrl: string
+  networkPassphrase: string
+}
+
+const SorobanResurrectNetwork = {
+  create(rpcUrl: string, networkPassphrase: string): SorobanResurrectNetwork,
+  testnet(): SorobanResurrectNetwork,
+  mainnet(): SorobanResurrectNetwork,
+  futurenet(): SorobanResurrectNetwork,
+  custom(rpcUrl: string, networkPassphrase: string): SorobanResurrectNetwork,
+}
+```
+
+| Helper                          | RPC URL                              | Passphrase                          |
+| ------------------------------- | ------------------------------------ | ----------------------------------- |
+| `SorobanResurrectNetwork.testnet()`   | `https://soroban-testnet.stellar.org` | `Test SDF Network ; September 2015` |
+| `SorobanResurrectNetwork.mainnet()`   | `https://soroban-mainnet.stellar.org` | `Public Global Stellar Network ; September 2015` |
+| `SorobanResurrectNetwork.futurenet()` | `https://rpc-futurenet.stellar.org`   | `Test SDF Future Network ; October 2022` |
+| `SorobanResurrectNetwork.create(rpcUrl, passphrase)` | caller-supplied | caller-supplied |
+| `SorobanResurrectNetwork.custom(rpcUrl, passphrase)` | caller-supplied | caller-supplied |
+
+`create()` and `custom()` are equivalent — both build a network from an explicit
+RPC URL and passphrase. Use `custom()` when pointing at a local or third-party
+RPC; use `create()` when you already have both values in hand.
+
+> **Futurenet caveat:** Futurenet's passphrase (`Test SDF Future Network ; October 2022`)
+is **not** interchangeable with Testnet's. Signing a Futurenet transaction with the
+Testnet passphrase (or vice versa) produces an invalid signature. Always take the
+passphrase from the preset rather than hard-coding it.
+
+## `NetworkChangedEvent`
+
+Payload emitted on the `networkChanged` event after a successful
+[`switchNetwork()`](/api/sdk#switchnetwork) call.
+
+```typescript
+interface NetworkChangedEvent {
+  previous: SorobanResurrectNetwork
+  current: SorobanResurrectNetwork
+}
+```
+
+| Field      | Description                                              |
+| ---------- | -------------------------------------------------------- |
+| `previous` | The network the instance was on before the switch.       |
+| `current`  | The network the instance is now on.                      |
+
+### What survives a switch
+
+`switchNetwork()` swaps the RPC endpoint and passphrase in place. It does **not**
+recreate the instance, so anything bound to the instance keeps working:
+
+| Concern            | After `switchNetwork()`                                                                 |
+| ------------------ | --------------------------------------------------------------------------------------- |
+| Event listeners    | **Preserved.** `on('networkChanged', …)` and other subscriptions stay attached.          |
+| Restore history    | **Preserved.** Previously recorded restore results remain readable.                      |
+| TTL watchers       | **Preserved.** Active watchers keep running and now poll the new network.                |
+| Archive cache      | **Reset.** Cached archive-detection results are cleared — ledger keys differ per network.|
+| In-flight workflow | **Not migrated.** A submit/restore already running finishes against the old network.     |
+
 ## `WalletAdapter`
 
 Wallet interface that wraps browser or extension wallets (e.g. Freighter).
@@ -218,45 +286,4 @@ Failures surface through two distinct paths, and they are not interchangeable:
 - **`ResurrectResult.error`** — returned (not thrown) when the workflow runs to
   completion but the restore or original transaction fails or times out. The
   result is still resolved with `success: false`; read `result.error` for the
-  message and `result.errorCode` for the machine-readable code.
-
-```typescript
-import { ResurrectError, type ResurrectErrorCode } from '@soroban-resurrect/sdk'
-
-try {
-  const result = await sdk.submitWithRestore({ transaction, wallet })
-  if (!result.success) {
-    // ResurrectResult error path — workflow completed with a failure
-    switch (result.errorCode as ResurrectErrorCode) {
-      case 'RESTORE_TX_FAILED':
-      case 'RESTORE_TX_TIMEOUT':
-        // retry the restore step
-        break
-      case 'ORIGINAL_TX_FAILED':
-      case 'ORIGINAL_TX_TIMEOUT':
-        // re-simulate and resubmit the original transaction
-        break
-      default:
-        // surface result.error to the user
-        break
-    }
-  }
-} catch (err) {
-  // ResurrectError path — workflow aborted before a result was produced
-  if (err instanceof ResurrectError) {
-    switch (err.code) {
-      case 'WALLET_NOT_CONNECTED':
-        // prompt the user to connect their wallet
-        break
-      case 'WALLET_REJECTED':
-        // user declined signing — do not retry automatically
-        break
-      case 'SIMULATION_FAILED':
-        // surface the simulation diagnostics
-        break
-      default:
-        break
-    }
-  }
-}
-```
+  message and `result.errorCode` for the machine-readable code
