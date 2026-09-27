@@ -6,6 +6,7 @@ Thank you for your interest in contributing! This document covers everything you
 
 ## Table of Contents
 
+- [Community & Discussions](#community--discussions)
 - [Dev Environment Setup](#dev-environment-setup)
 - [Project Structure](#project-structure)
 - [Code Style](#code-style)
@@ -15,6 +16,26 @@ Thank you for your interest in contributing! This document covers everything you
 - [Dependency Updates](#dependency-updates)
 - [Reporting Bugs](#reporting-bugs)
 - [Requesting Features](#requesting-features)
+
+---
+
+## Community & Discussions
+
+The issue tracker is reserved for **bugs** and **scoped feature requests**. Everything else goes to
+[GitHub Discussions](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/discussions):
+
+| Category                                                                                                                                     | Who posts        | Use it for                                                                                 |
+| -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------ |
+| [Q&A](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/discussions/categories/q-a)                     | Anyone           | Usage questions and troubleshooting. Mark the answer that solved your problem as accepted. |
+| [Ideas](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/discussions/categories/ideas)                 | Anyone           | Early-stage proposals. Scoped, agreed ideas are converted into feature-request issues.     |
+| [Show & Tell](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/discussions/categories/show-and-tell)   | Anyone           | Projects built with the SDK — candidates for the [showcase](./docs/showcase.md).           |
+| [Announcements](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/discussions/categories/announcements) | Maintainers only | Releases, [roadmap](./docs/roadmap.md) updates, and project news.                          |
+
+- The "New issue" page links to these categories; blank issues are disabled so questions don't land
+  in the tracker by accident.
+- Maintainers may convert an issue that is really a question into a Q&A discussion, and convert an
+  agreed Idea into an issue with the appropriate `epic/*` label.
+- Planned work and phase ordering are documented in the [roadmap](./docs/roadmap.md).
 
 ---
 
@@ -320,7 +341,7 @@ Feature requests are welcome. When opening a feature request:
 - If you have a proposed API design, include a code example.
 - Note any alternatives you considered.
 
-For large or potentially breaking features, it is a good idea to open a discussion issue first before investing time in implementation.
+For large or potentially breaking features, start a thread in [Discussions → Ideas](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/discussions/categories/ideas) before investing time in implementation, and check the [roadmap](./docs/roadmap.md) to see whether it is already planned.
 
 ---
 

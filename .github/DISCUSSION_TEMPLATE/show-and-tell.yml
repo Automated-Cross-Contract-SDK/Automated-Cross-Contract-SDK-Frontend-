@@ -1,0 +1,31 @@
+title: '[Show & Tell]: '
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Built something with Soroban-Resurrect? We'd love to see it! If you'd like it listed
+        publicly, you can also add it to the
+        [showcase](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/blob/main/docs/showcase.md).
+  - type: input
+    id: name
+    attributes:
+      label: Project name
+    validations:
+      required: true
+  - type: input
+    id: link
+    attributes:
+      label: Link
+      description: Website, repository, or demo URL.
+  - type: textarea
+    id: description
+    attributes:
+      label: What does it do, and how does it use the SDK?
+    validations:
+      required: true
+  - type: checkboxes
+    id: showcase
+    attributes:
+      label: Showcase
+      options:
+        - label: I'm happy for maintainers to feature this project in the public showcase.

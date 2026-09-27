@@ -1,0 +1,10 @@
+# Funding status (issue #324): Soroban-Resurrect does not yet have a dedicated
+# GitHub Sponsors or Open Collective account. Until maintainers set one up, the
+# Sponsor button links to the "Funding" section of the README, which records the
+# current status and how to support the project.
+#
+# When an account is created, uncomment and fill in the relevant platform:
+# github: [<maintainer-or-org>]
+# open_collective: <collective-slug>
+custom:
+  - https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-#funding

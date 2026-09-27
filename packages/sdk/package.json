@@ -1,6 +1,17 @@
 {
   "name": "@soroban-resurrect/sdk",
   "version": "0.1.0",
+  "keywords": [
+    "soroban",
+    "stellar",
+    "cap-0066",
+    "ttl",
+    "restore",
+    "smart-contracts",
+    "wallet",
+    "sdk",
+    "typescript"
+  ],
   "type": "module",
   "license": "MIT",
   "repository": {

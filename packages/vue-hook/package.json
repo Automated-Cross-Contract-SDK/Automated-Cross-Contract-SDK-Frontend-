@@ -1,6 +1,18 @@
 {
   "name": "@soroban-resurrect/vue-hook",
   "version": "0.1.0",
+  "keywords": [
+    "soroban",
+    "stellar",
+    "cap-0066",
+    "ttl",
+    "restore",
+    "smart-contracts",
+    "wallet",
+    "vue",
+    "vue3",
+    "composable"
+  ],
   "type": "module",
   "license": "MIT",
   "repository": {

@@ -1,6 +1,18 @@
 {
   "name": "@soroban-resurrect/react-hook",
   "version": "0.1.0",
+  "keywords": [
+    "soroban",
+    "stellar",
+    "cap-0066",
+    "ttl",
+    "restore",
+    "smart-contracts",
+    "wallet",
+    "react",
+    "react-native",
+    "hooks"
+  ],
   "type": "module",
   "license": "MIT",
   "repository": {
