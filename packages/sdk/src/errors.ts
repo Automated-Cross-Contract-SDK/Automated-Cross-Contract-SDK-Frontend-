@@ -64,6 +64,12 @@ export type ResurrectErrorCode =
   | 'UNEXPECTED_SIMULATION_RESPONSE'
 
   /**
+   * The computed restore fee exceeded the configured
+   * `maxRestoreFeeStroops` cap. The transaction was not signed.
+   */
+  | 'RESTORE_FEE_CAP_EXCEEDED'
+
+  /**
    * An unexpected JavaScript exception was thrown during the workflow.
    * Check `result.error` for the exception message.
    */
@@ -96,6 +102,44 @@ export class ResurrectError extends Error {
     // Maintains proper stack trace in V8 environments (Node.js / Chrome).
     if (Error.captureStackTrace) {
       Error.captureStackTrace(this, ResurrectError)
+    }
+  }
+}
+
+/**
+ * Thrown when a computed restore fee exceeds the configured
+ * `maxRestoreFeeStroops` cap. Carries both the computed fee and the cap so
+ * callers can surface or log the exact numbers without parsing the message.
+ *
+ * @example
+ * ```ts
+ * try {
+ *   await sr.buildRestoreTx(publicKey, tx)
+ * } catch (err) {
+ *   if (err instanceof RestoreFeeExceededError) {
+ *     console.error(`fee ${err.computedFeeStroops} > cap ${err.maxFeeStroops}`)
+ *   }
+ * }
+ * ```
+ */
+export class RestoreFeeExceededError extends ResurrectError {
+  /** The fee computed from the restore footprint, in stroops. */
+  readonly computedFeeStroops: number
+
+  /** The configured `maxRestoreFeeStroops` cap, in stroops. */
+  readonly maxFeeStroops: number
+
+  constructor(computedFeeStroops: number, maxFeeStroops: number) {
+    super(
+      'RESTORE_FEE_CAP_EXCEEDED',
+      `Computed restore fee ${computedFeeStroops} stroops exceeds the configured maxRestoreFeeStroops cap of ${maxFeeStroops} stroops`,
+    )
+    this.name = 'RestoreFeeExceededError'
+    this.computedFeeStroops = computedFeeStroops
+    this.maxFeeStroops = maxFeeStroops
+    // Maintains proper stack trace in V8 environments (Node.js / Chrome).
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, RestoreFeeExceededError)
     }
   }
 }
