@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "react": "18.2.0",
-    "react-native": "0.74.5",
+    "react-native": "0.87.1",
     "react-native-get-random-values": "^1.11.0",
     "buffer": "^6.0.3",
     "@soroban-resurrect/sdk": "^0.1.0",
