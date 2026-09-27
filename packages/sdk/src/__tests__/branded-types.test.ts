@@ -651,3 +651,267 @@ describe('type-guard narrowing', () => {
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// Exhaustive helper coverage (#301)
+// ---------------------------------------------------------------------------
+
+/** Every exported `as*` / `is*` pair, with one valid sample per brand. */
+const HELPERS = [
+  { name: 'TxHash', as: asTxHash, is: isTxHash, valid: VALID_HEX_64 },
+  { name: 'ContractIdHex', as: asContractIdHex, is: isContractIdHex, valid: VALID_HEX_64 },
+  {
+    name: 'StellarPublicKey',
+    as: asStellarPublicKey,
+    is: isStellarPublicKey,
+    valid: VALID_G_ADDRESS,
+  },
+  { name: 'XdrBase64', as: asXdrBase64, is: isXdrBase64, valid: VALID_BASE64 },
+  { name: 'HexString', as: asHexString, is: isHexString, valid: 'deadbeef' },
+  {
+    name: 'NetworkPassphrase',
+    as: asNetworkPassphrase,
+    is: isNetworkPassphrase,
+    valid: 'Test SDF Network ; September 2015',
+  },
+  { name: 'RpcUrl', as: asRpcUrl, is: isRpcUrl, valid: 'https://soroban-testnet.stellar.org' },
+  { name: 'FeeStroops', as: asFeeStroops, is: isFeeStroops, valid: '100' },
+  { name: 'SequenceNumber', as: asSequenceNumber, is: isSequenceNumber, valid: '123456789' },
+  { name: 'HistoryEntryId', as: asHistoryEntryId, is: isHistoryEntryId, valid: 'lz1k3x9c-4f7g2h' },
+] as const
+
+const NON_STRING_VALUES: unknown[] = [
+  null,
+  undefined,
+  0,
+  123,
+  Number.NaN,
+  true,
+  false,
+  {},
+  [],
+  ['deadbeef'],
+  () => 'deadbeef',
+  Symbol('x'),
+  10n,
+]
+
+describe('all branded helpers', () => {
+  it('covers all 10 brands (20 helpers)', () => {
+    expect(HELPERS).toHaveLength(10)
+    expect(new Set(HELPERS.map((h) => h.name)).size).toBe(10)
+  })
+
+  describe.each(HELPERS)('$name', ({ as, is, valid }) => {
+    it('is* accepts the canonical valid sample', () => {
+      expect(is(valid)).toBe(true)
+    })
+
+    it('as* returns the identical runtime value for a valid input', () => {
+      expect(as(valid)).toBe(valid)
+      expect(typeof as(valid)).toBe('string')
+    })
+
+    it('is* rejects the empty string', () => {
+      expect(is('')).toBe(false)
+    })
+
+    // Wrapped in tuples so it.each does not spread array values into arguments.
+    it.each(NON_STRING_VALUES.map((v) => [v]))('is* rejects the non-string value %s', (value) => {
+      expect(is(value)).toBe(false)
+    })
+
+    it('is* rejects a boxed String object even when its content is valid', () => {
+      expect(is(new String(valid))).toBe(false)
+    })
+
+    // as* helpers are unchecked, zero-cost casts: they never validate and
+    // never throw. Validation belongs to the paired is* guard at trust
+    // boundaries — these tests pin that contract so a silent change to
+    // throwing behaviour is caught.
+    it('as* does not throw or alter malformed input (unchecked cast)', () => {
+      for (const bad of ['', ' ', 'not valid!', `${valid} `, '\n']) {
+        expect(() => as(bad)).not.toThrow()
+        expect(as(bad)).toBe(bad)
+      }
+    })
+
+    it('as* is idempotent', () => {
+      expect(as(as(valid))).toBe(valid)
+    })
+  })
+
+  it('the is-then-as pattern yields a descriptive error for invalid input', () => {
+    function parseTxHash(raw: unknown): TxHash {
+      if (!isTxHash(raw)) throw new Error(`Invalid transaction hash: ${String(raw)}`)
+      return asTxHash(raw)
+    }
+
+    expect(parseTxHash(VALID_HEX_64)).toBe(VALID_HEX_64)
+    expect(() => parseTxHash('xyz')).toThrow('Invalid transaction hash: xyz')
+    expect(() => parseTxHash(undefined)).toThrow(/Invalid transaction hash/)
+  })
+})
+
+describe('boundary inputs', () => {
+  describe('isTxHash / isContractIdHex (64 lowercase hex chars)', () => {
+    const guards = [
+      ['isTxHash', isTxHash],
+      ['isContractIdHex', isContractIdHex],
+    ] as const
+
+    it.each(guards)('%s rejects 63 and 65 characters', (_, guard) => {
+      expect(guard('a'.repeat(63))).toBe(false)
+      expect(guard('a'.repeat(65))).toBe(false)
+    })
+
+    it.each(guards)('%s accepts every lowercase hex digit', (_, guard) => {
+      expect(guard('0123456789abcdef'.repeat(4))).toBe(true)
+    })
+
+    it.each(guards)('%s rejects a 0x prefix', (_, guard) => {
+      expect(guard(`0x${'a'.repeat(62)}`)).toBe(false)
+    })
+
+    it.each(guards)('%s rejects surrounding whitespace and newlines', (_, guard) => {
+      expect(guard(` ${VALID_HEX_64}`)).toBe(false)
+      expect(guard(`${VALID_HEX_64} `)).toBe(false)
+      expect(guard(`${VALID_HEX_64}\n`)).toBe(false)
+    })
+
+    it.each(guards)('%s rejects a single uppercase character', (_, guard) => {
+      expect(guard(`${'a'.repeat(63)}A`)).toBe(false)
+    })
+  })
+
+  describe('isStellarPublicKey', () => {
+    it('accepts any 56-char G + base32 string (checksum is not verified)', () => {
+      expect(isStellarPublicKey(`G${'A'.repeat(55)}`)).toBe(true)
+    })
+
+    it('rejects 55 and 57 characters', () => {
+      expect(isStellarPublicKey(`G${'A'.repeat(54)}`)).toBe(false)
+      expect(isStellarPublicKey(`G${'A'.repeat(56)}`)).toBe(false)
+    })
+
+    it('rejects secret seeds (S...), contract addresses (C...), and muxed accounts (M...)', () => {
+      expect(isStellarPublicKey(`S${VALID_G_ADDRESS.slice(1)}`)).toBe(false)
+      expect(isStellarPublicKey(`C${VALID_G_ADDRESS.slice(1)}`)).toBe(false)
+      expect(isStellarPublicKey(`M${VALID_G_ADDRESS.slice(1)}`)).toBe(false)
+    })
+
+    it.each(['0', '1', '8', '9'])('rejects the non-base32 digit "%s"', (digit) => {
+      expect(isStellarPublicKey(`G${digit}${'A'.repeat(54)}`)).toBe(false)
+    })
+
+    it('rejects a lowercase g prefix and surrounding whitespace', () => {
+      expect(isStellarPublicKey(`g${VALID_G_ADDRESS.slice(1)}`)).toBe(false)
+      expect(isStellarPublicKey(` ${VALID_G_ADDRESS}`)).toBe(false)
+      expect(isStellarPublicKey(`${VALID_G_ADDRESS}\n`)).toBe(false)
+    })
+  })
+
+  describe('isXdrBase64', () => {
+    it.each(['AAAA', 'AAA=', 'AA==', 'ab+/', 'Zm9vYmFy'])('accepts "%s"', (value) => {
+      expect(isXdrBase64(value)).toBe(true)
+    })
+
+    it.each([
+      ['a lone padding character', '='],
+      ['only padding', '===='],
+      ['three padding characters', 'A==='],
+      ['padding before data', '=AAA'],
+      ['padding in the middle', 'AA=A'],
+      ['length 1', 'A'],
+      ['length 5', 'AAAAA'],
+      ['URL-safe alphabet (-)', 'AB-C'],
+      ['URL-safe alphabet (_)', 'AB_C'],
+      ['embedded whitespace', 'AA AA==='],
+      ['a trailing newline', 'AAAA\n'],
+      ['non-ASCII characters', 'AAé='],
+    ])('rejects malformed base64: %s', (_, value) => {
+      expect(isXdrBase64(value)).toBe(false)
+    })
+  })
+
+  describe('isHexString', () => {
+    it('accepts the shortest valid value (one byte)', () => {
+      expect(isHexString('00')).toBe(true)
+    })
+
+    it.each([
+      ['odd length 1', 'a'],
+      ['odd length 3', 'abc'],
+      ['a 0x prefix', '0x00'],
+      ['uppercase digits', 'AB'],
+      ['non-hex letters', 'zz'],
+      ['embedded whitespace', 'ab cd'],
+    ])('rejects %s', (_, value) => {
+      expect(isHexString(value)).toBe(false)
+    })
+  })
+
+  describe('isNetworkPassphrase', () => {
+    it('accepts any non-empty string, including whitespace-only', () => {
+      expect(isNetworkPassphrase(' ')).toBe(true)
+      expect(isNetworkPassphrase('x')).toBe(true)
+    })
+  })
+
+  describe('isRpcUrl', () => {
+    it('accepts a minimal http(s) URL', () => {
+      expect(isRpcUrl('http://x')).toBe(true)
+      expect(isRpcUrl('https://localhost:8000/soroban/rpc')).toBe(true)
+    })
+
+    it.each([
+      ['a scheme with no host', 'https://'],
+      ['an uppercase scheme', 'HTTPS://example.com'],
+      ['a websocket scheme', 'wss://example.com'],
+      ['an ftp scheme', 'ftp://example.com'],
+      ['a leading space', ' https://example.com'],
+      ['a missing slash', 'https:/example.com'],
+    ])('rejects %s', (_, value) => {
+      expect(isRpcUrl(value)).toBe(false)
+    })
+  })
+
+  describe('isFeeStroops / isSequenceNumber (unsigned decimal integers)', () => {
+    const guards = [
+      ['isFeeStroops', isFeeStroops],
+      ['isSequenceNumber', isSequenceNumber],
+    ] as const
+
+    it.each(guards)('%s accepts values beyond Number.MAX_SAFE_INTEGER', (_, guard) => {
+      expect(guard('9007199254740993')).toBe(true)
+      expect(guard('340282366920938463463374607431768211455')).toBe(true)
+    })
+
+    it.each(guards)('%s accepts leading zeros', (_, guard) => {
+      expect(guard('007')).toBe(true)
+    })
+
+    it.each(guards)('%s rejects non-canonical numeric forms', (_, guard) => {
+      for (const value of ['+1', '1e3', '0x10', '1_000', '1,000', ' 1', '1 ', '1\n', 'Infinity']) {
+        expect(guard(value), value).toBe(false)
+      }
+    })
+  })
+
+  describe('isHistoryEntryId', () => {
+    it('accepts single-character segments', () => {
+      expect(isHistoryEntryId('a-b')).toBe(true)
+    })
+
+    it.each([
+      ['a missing suffix', 'abc-'],
+      ['a missing prefix', '-abc'],
+      ['a lone hyphen', '-'],
+      ['an underscore separator', 'abc_def'],
+      ['a non-alphanumeric character', 'ab!-cd'],
+      ['surrounding whitespace', ' abc-def'],
+    ])('rejects %s', (_, value) => {
+      expect(isHistoryEntryId(value)).toBe(false)
+    })
+  })
+})
