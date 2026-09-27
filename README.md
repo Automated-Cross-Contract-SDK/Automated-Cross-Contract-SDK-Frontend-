@@ -483,3 +483,8 @@ See [MIGRATION.md](./MIGRATION.md) for breaking changes and upgrade steps betwee
 ## License
 
 MIT
+
+## Handsoff notes
+
+<!-- handsoff-issue-394 -->
+- #394: Hooks: the config-change and teardown paths are untested in all three packages
