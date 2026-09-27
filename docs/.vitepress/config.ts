@@ -31,6 +31,7 @@ export default defineConfig({
           items: [
             { text: 'Getting Started', link: '/guide/getting-started' },
             { text: 'Tutorial: Common Use Cases', link: '/guide/tutorial' },
+            { text: 'Restore Fees and Limits', link: '/guide/restore-fees' },
             { text: 'Local Development', link: '/guide/local-development' },
             { text: 'Local Package Development', link: '/guide/local-package-development' },
           ],
