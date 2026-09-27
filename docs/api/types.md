@@ -185,3 +185,78 @@ interface RpcTimingEvent {
   error?: string // message when ok === false
 }
 ```
+
+## `ResurrectErrorCode`
+
+Machine-readable error contract for the SDK. Branch on `errorCode` rather than
+matching on human-readable messages — messages may change between releases, codes
+will not. See the [Error Reference](/api/errors) for the full list of codes with
+causes and recommended recovery.
+
+```typescript
+type ResurrectErrorCode =
+  | 'WALLET_NOT_CONNECTED'
+  | 'WALLET_REJECTED'
+  | 'SIMULATION_FAILED'
+  | 'ARCHIVE_DETECTION_FAILED'
+  | 'RESTORE_TX_FAILED'
+  | 'RESTORE_TX_TIMEOUT'
+  | 'ORIGINAL_TX_FAILED'
+  | 'ORIGINAL_TX_TIMEOUT'
+  | 'INVALID_CONFIG'
+  | 'UNKNOWN_ERROR'
+```
+
+### `ResurrectError` vs the `ResurrectResult` error path
+
+Failures surface through two distinct paths, and they are not interchangeable:
+
+- **`ResurrectError`** — thrown for failures that abort the workflow before a
+  result can be produced (bad configuration, wallet not connected, wallet
+  rejection, simulation failure). Catch these with `try`/`catch` and read
+  `err.code` (a `ResurrectErrorCode`).
+- **`ResurrectResult.error`** — returned (not thrown) when the workflow runs to
+  completion but the restore or original transaction fails or times out. The
+  result is still resolved with `success: false`; read `result.error` for the
+  message and `result.errorCode` for the machine-readable code.
+
+```typescript
+import { ResurrectError, type ResurrectErrorCode } from '@soroban-resurrect/sdk'
+
+try {
+  const result = await sdk.submitWithRestore({ transaction, wallet })
+  if (!result.success) {
+    // ResurrectResult error path — workflow completed with a failure
+    switch (result.errorCode as ResurrectErrorCode) {
+      case 'RESTORE_TX_FAILED':
+      case 'RESTORE_TX_TIMEOUT':
+        // retry the restore step
+        break
+      case 'ORIGINAL_TX_FAILED':
+      case 'ORIGINAL_TX_TIMEOUT':
+        // re-simulate and resubmit the original transaction
+        break
+      default:
+        // surface result.error to the user
+        break
+    }
+  }
+} catch (err) {
+  // ResurrectError path — workflow aborted before a result was produced
+  if (err instanceof ResurrectError) {
+    switch (err.code) {
+      case 'WALLET_NOT_CONNECTED':
+        // prompt the user to connect their wallet
+        break
+      case 'WALLET_REJECTED':
+        // user declined signing — do not retry automatically
+        break
+      case 'SIMULATION_FAILED':
+        // surface the simulation diagnostics
+        break
+      default:
+        break
+    }
+  }
+}
+```
