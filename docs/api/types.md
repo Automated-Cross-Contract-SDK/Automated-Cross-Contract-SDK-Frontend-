@@ -189,151 +189,218 @@ pass it wherever a `WalletAdapter` is expected:
 ```typescript
 import type { WalletAdapter } from '@soroban-resurrect/sdk'
 
-const myAdapter: WalletAdapter = {
+const custom: WalletAdapter = {
   async isConnected() {
-    return Boolean(window.myWallet)
+    return true
   },
   async getPublicKey() {
-    return window.myWallet.getPublicKey()
+    return myProvider.publicKey
   },
   async signTransaction(tx, opts) {
-    return window.myWallet.sign(tx, opts?.networkPassphrase)
+    return myProvider.sign(tx, opts)
   },
 }
 ```
 
-## `ArchivedLedgerEntry`
+## `MultiSigConfig`
 
-Represents a single ledger entry that has been archived (expired TTL).
+Configuration for an N-of-M multisig restore. Pass it to
+[`MultiSigWalletAdapter`](#multisigwalletadapter) to describe the signer set and
+the threshold required to submit.
 
 ```typescript
-interface ArchivedLedgerEntry {
-  key: xdr.LedgerKey
-  keyBase64: string
+interface MultiSigConfig {
+  threshold: number
+  signers: MultiSigSigner[]
 }
 ```
 
-## `SimulateResponse`
+| Field       | Description                                                                 |
+| ----------- | --------------------------------------------------------------------------- |
+| `threshold` | Number of signatures required before the restore can be submitted (`N`).    |
+| `signers`   | The signer set (`M`). Each entry is a [`MultiSigSigner`](#multisigsigner).  |
 
-Convenience alias for the Soroban RPC simulate response type.
+## `MultiSigSigner`
 
-```typescript
-type SimulateResponse = rpc.Api.SimulateTransactionResponse
-```
-
-## `ResurrectResult`
-
-Result returned from the restore-and-submit workflow.
+A single participant in a multisig restore. Each signer wraps a `WalletAdapter`
+so the SDK can request a signature from that wallet.
 
 ```typescript
-interface ResurrectResult {
-  success: boolean
-  originalTxHash?: string
-  restoreTxHash?: string
-  archivedKeysDetected: number
-  error?: string
+interface MultiSigSigner {
+  publicKey: string
+  adapter: WalletAdapter
 }
 ```
 
-## `SubmitWithRestoreOptions`
+| Field       | Description                                                              |
+| ----------- | ------------------------------------------------------------------------ |
+| `publicKey` | The signer's Stellar public key (`G...`).                                |
+| `adapter`   | The [`WalletAdapter`](#walletadapter) used to collect this signer's signature. |
 
-Options for submitting a transaction with automatic archive restoration.
+## `MultiSigWalletAdapter`
+
+A `WalletAdapter` that coordinates an N-of-M restore. It builds the restore
+transaction, collects signatures from each signer until the threshold is met,
+then submits the fully-signed transaction.
 
 ```typescript
-interface SubmitWithRestoreOptions {
-  transaction: Transaction
-  wallet: WalletAdapter
-  onSigningRestore?: () => void
-  onSubmittingRestore?: () => void
-  onSigningOriginal?: () => void
-  onRestoreNeeded?: (archivedKeys: ArchivedLedgerEntry[]) => void
-  onRestoreSubmitted?: (txHash: string) => void
-  onRestoreConfirmed?: (txHash: string) => void
-  onOriginalSubmitted?: (txHash: string) => void
-  onRestoreFailed?: (error: string) => void
+class MultiSigWalletAdapter implements WalletAdapter {
+  constructor(config: MultiSigConfig)
+
+  collectSignatures(tx: string): Promise<SignatureCollectionResult>
 }
 ```
 
-| Callback              | Fires when...                                                           |
-| --------------------- | ----------------------------------------------------------------------- |
-| `onRestoreNeeded`     | Archived entries are detected and restoration is required.              |
-| `onSigningRestore`    | Restore transaction is ready to be signed.                              |
-| `onSubmittingRestore` | Restore transaction is signed and about to be submitted.                |
-| `onRestoreSubmitted`  | The restore transaction has been submitted.                             |
-| `onRestoreConfirmed`  | The restore transaction is confirmed on-chain.                          |
-| `onSigningOriginal`   | The restore step (if any) is done and the original tx is ready to sign. |
-| `onOriginalSubmitted` | The original transaction has been submitted.                            |
-| `onRestoreFailed`     | The restore step of the workflow fails.                                 |
+Because it implements `WalletAdapter`, a `MultiSigWalletAdapter` can be passed
+directly to [`submitWithRestore`](#submitwithrestore) — the collect-then-submit
+flow is driven for you.
 
-## `RestoreState`
+## `SignatureCollectionResult`
 
-Tracks the current stage of the restore-and-submit workflow.
+Returned by `MultiSigWalletAdapter.collectSignatures`. Describes how many
+signatures were gathered and whether the threshold was reached.
 
 ```typescript
-type RestoreState =
-  | 'idle'
-  | 'simulating'
-  | 'restore_needed'
-  | 'signing_restore'
-  | 'submitting_restore'
-  | 'confirming_restore'
-  | 'signing_original'
-  | 'submitting_original'
-  | 'success'
-  | 'error'
-  // Proactive / estimation states (additive, non-submit)
-  | 'estimating'
-  | 'watching_ttl'
-  | 'extending_ttl'
-```
-
-The last three are **additive** — they model long-running activity outside
-the reactive submit flow (fee estimation and proactive TTL
-watch-and-extend). Existing consumers keep working unchanged.
-`isProcessingState()` returns `true` for `estimating` and `extending_ttl`
-(active work) and `false` for `watching_ttl` (a passive background poll,
-like `idle`); its result for every pre-existing state is unchanged.
-
-## `RestoreStateInfo`
-
-Snapshot of the current workflow state, including message and optional error.
-
-```typescript
-interface RestoreStateInfo {
-  state: RestoreState
-  message: string
-  archivedKeys?: ArchivedLedgerEntry[]
-  error?: string
+interface SignatureCollectionResult {
+  signedTx: string
+  signatures: string[]
+  thresholdMet: boolean
+  refused: string[]
 }
 ```
 
-## `Logger`
+| Field          | Description                                                                 |
+| -------------- | --------------------------------------------------------------------------- |
+| `signedTx`     | The transaction envelope with the collected signatures attached.            |
+| `signatures`   | Signatures collected, in the order they were gathered.                      |
+| `thresholdMet` | `true` when `signatures.length >= config.threshold`.                        |
+| `refused`      | Public keys of signers that declined or failed to sign.                     |
 
-Structured logging sink supplied via [`SorobanResurrectConfig.logger`](#sorobanresurrectconfig).
-Silent by default — see the [Observability section](/api/sdk#observability-injectable-logger-rpc-timings).
+## Multisig restore flow
+
+A multisig restore is a **collect-then-submit** flow: build the restore
+transaction, gather signatures from each signer until the threshold is met, then
+submit the fully-signed transaction. `MultiSigWalletAdapter` implements
+`WalletAdapter`, so it composes with `submitWithRestore` and `restoreKeys`
+exactly like a single-signer wallet.
+
+```mermaid
+sequenceDiagram
+    participant App
+    participant SDK as SorobanResurrect
+    participant MS as MultiSigWalletAdapter
+    participant S1 as Signer 1
+    participant S2 as Signer 2
+    participant S3 as Signer 3
+    participant RPC as Soroban RPC
+
+    App->>SDK: submitWithRestore(keys, msAdapter)
+    SDK->>SDK: build restore transaction
+    SDK->>MS: signTransaction(tx)
+    MS->>S1: signTransaction(tx)
+    S1-->>MS: signature
+    MS->>S2: signTransaction(tx)
+    S2-->>MS: signature
+    Note over MS: threshold met (2 of 3)
+    MS-->>SDK: SignatureCollectionResult
+    SDK->>RPC: submit signed restore tx
+    RPC-->>SDK: result
+    SDK-->>App: restore result
+```
+
+### Composing with `submitWithRestore` and `restoreKeys`
+
+`restoreKeys` detects which ledger keys are archived and builds the restore
+transaction. `submitWithRestore` then signs and submits it. When the wallet you
+pass is a `MultiSigWalletAdapter`, `submitWithRestore` calls
+`collectSignatures` internally instead of a single `signTransaction`, so the
+same call site works for both single-signer and multisig wallets:
 
 ```typescript
-type LogLevel = 'debug' | 'info' | 'warn' | 'error'
-type LogContext = Record<string, unknown>
+import {
+  SorobanResurrect,
+  MultiSigWalletAdapter,
+  createAdapter,
+} from '@soroban-resurrect/sdk'
 
-interface Logger {
-  debug(message: string, context?: LogContext): void
-  info(message: string, context?: LogContext): void
-  warn(message: string, context?: LogContext): void
-  error(message: string, context?: LogContext): void
+const sdk = new SorobanResurrect({ rpcUrl: 'https://soroban-testnet.stellar.org' })
+
+const multisig = new MultiSigWalletAdapter({
+  threshold: 2,
+  signers: [
+    { publicKey: 'GAAA...', adapter: createAdapter('freighter') },
+    { publicKey: 'GBBB...', adapter: createAdapter('xbull') },
+    { publicKey: 'GCCC...', adapter: createAdapter('albedo') },
+  ],
+})
+
+// restoreKeys builds the restore tx; submitWithRestore collects signatures
+// from the multisig adapter and submits once the threshold is met.
+const result = await sdk.submitWithRestore(keys, multisig)
+```
+
+### Worked 2-of-3 example
+
+Three signers, any two of which can authorize the restore:
+
+```typescript
+import {
+  SorobanResurrect,
+  MultiSigWalletAdapter,
+  createAdapter,
+} from '@soroban-resurrect/sdk'
+
+const sdk = new SorobanResurrect({ rpcUrl: 'https://soroban-testnet.stellar.org' })
+
+const multisig = new MultiSigWalletAdapter({
+  threshold: 2,
+  signers: [
+    { publicKey: 'GAAA...', adapter: createAdapter('freighter') },
+    { publicKey: 'GBBB...', adapter: createAdapter('xbull') },
+    { publicKey: 'GCCC...', adapter: createAdapter('albedo') },
+  ],
+})
+
+// 1. Detect archived keys and build the restore transaction.
+const keys = await sdk.restoreKeys(['G...contractDataKey'])
+
+// 2. Collect signatures. The adapter stops once `threshold` (2) is reached.
+const collection = await multisig.collectSignatures(keys.restoreTx)
+
+if (!collection.thresholdMet) {
+  throw new Error(`Only ${collection.signatures.length} of 2 signatures collected`)
+}
+
+// 3. Submit the fully-signed restore transaction.
+const result = await sdk.submitWithRestore(keys, multisig)
+```
+
+### Failure handling for a refusing signer
+
+A signer can decline (user rejects the prompt) or fail to sign (device error,
+timeout). The adapter records those public keys in `SignatureCollectionResult.refused`
+and keeps collecting from the remaining signers — one refusal does not abort the
+flow as long as the threshold is still reachable.
+
+```typescript
+const collection = await multisig.collectSignatures(keys.restoreTx)
+
+if (collection.refused.length > 0) {
+  console.warn('Signers that refused:', collection.refused)
+}
+
+if (!collection.thresholdMet) {
+  // Not enough signatures — surface which signers are still needed.
+  const needed = multisig.config.threshold - collection.signatures.length
+  throw new Error(`Restore needs ${needed} more signature(s)`)
 }
 ```
 
-## `RpcTimingEvent`
+Guidance:
 
-Emitted via `logger.debug` once per RPC round-trip.
-
-```typescript
-interface RpcTimingEvent {
-  method: string // the ISorobanRpcClient method called
-  durationMs: number // wall-clock duration
-  ok: boolean // resolved (true) or rejected (false)
-  requestId?: string // correlation id of the enclosing workflow
-  error?: string // message when ok === false
-}
-```
+- **Threshold still reachable** — continue collecting; the refused signer is
+  skipped and listed in `refused`.
+- **Threshold no longer reachable** — `thresholdMet` is `false`. Do not submit;
+  prompt the user to retry with a different signer or re-collect.
+- **Retrying** — call `collectSignatures` again on the same restore transaction;
+  already-collected signatures are preserved and only missing ones are requested.
