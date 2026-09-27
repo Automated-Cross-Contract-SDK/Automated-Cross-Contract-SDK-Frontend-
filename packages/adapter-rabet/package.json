@@ -1,6 +1,17 @@
 {
   "name": "@soroban-resurrect/adapter-rabet",
   "version": "0.1.0",
+  "keywords": [
+    "soroban",
+    "stellar",
+    "cap-0066",
+    "ttl",
+    "restore",
+    "smart-contracts",
+    "wallet",
+    "wallet-adapter",
+    "rabet"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

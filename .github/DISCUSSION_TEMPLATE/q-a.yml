@@ -1,0 +1,35 @@
+title: '[Q&A]: '
+labels: ['question']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for asking! Before posting, please search
+        [existing discussions](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/discussions)
+        and the [documentation](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/blob/main/README.md).
+
+        If you believe you have found a **bug**, please open a
+        [bug report](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/issues/new?template=bug_report.yml) instead.
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: What would you like to know?
+    validations:
+      required: true
+  - type: textarea
+    id: tried
+    attributes:
+      label: What have you tried?
+      description: Anything you've already attempted or researched.
+  - type: textarea
+    id: code
+    attributes:
+      label: Code snippet
+      description: Relevant code that helps explain your question.
+      render: typescript
+  - type: input
+    id: versions
+    attributes:
+      label: Package versions
+      description: e.g. `@soroban-resurrect/sdk@0.1.0`, `@stellar/stellar-sdk@13.x`, Node 20

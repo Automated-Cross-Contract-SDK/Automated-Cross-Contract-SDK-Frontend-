@@ -1,5 +1,17 @@
-blank_issues_enabled: true
+blank_issues_enabled: false
 contact_links:
+  - name: ❓ Ask a question (Q&A)
+    url: https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/discussions/categories/q-a
+    about: Usage questions, "how do I…", and troubleshooting help belong in GitHub Discussions, not the issue tracker.
+  - name: 💡 Share an idea
+    url: https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/discussions/categories/ideas
+    about: Early-stage proposals and open-ended ideas. Once an idea is scoped, it can be turned into a feature request.
+  - name: 🚀 Show & Tell
+    url: https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/discussions/categories/show-and-tell
+    about: Built something with Soroban-Resurrect? Share it with the community (and consider adding it to the showcase).
+  - name: 📣 Announcements
+    url: https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/discussions/categories/announcements
+    about: Release notes, roadmap updates, and project news from the maintainers.
   - name: 📖 Documentation
     url: https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/blob/main/README.md
     about: Read the README and the docs/ folder for answers to common questions.

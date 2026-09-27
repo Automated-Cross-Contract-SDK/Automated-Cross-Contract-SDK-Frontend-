@@ -20,6 +20,8 @@ export default defineConfig({
       { text: 'Examples', link: '/examples/' },
       { text: 'Playground', link: '/examples/playground' },
       { text: 'Integrations', link: '/integrations/react' },
+      { text: 'Showcase', link: '/showcase' },
+      { text: 'Roadmap', link: '/roadmap' },
     ],
 
     sidebar: {

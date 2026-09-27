@@ -1,6 +1,7 @@
 {
   "name": "soroban-resurrect",
   "version": "0.1.0",
+  "keywords": ["soroban", "stellar", "cap-0066", "ttl", "restore", "smart-contracts", "wallet"],
   "private": true,
   "description": "Automated Cross-Contract State Restoration SDK & Wallet Middleware for Soroban",
   "license": "MIT",

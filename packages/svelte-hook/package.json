@@ -1,6 +1,17 @@
 {
   "name": "@soroban-resurrect/svelte-hook",
   "version": "0.1.0",
+  "keywords": [
+    "soroban",
+    "stellar",
+    "cap-0066",
+    "ttl",
+    "restore",
+    "smart-contracts",
+    "wallet",
+    "svelte",
+    "svelte-store"
+  ],
   "type": "module",
   "license": "MIT",
   "repository": {
