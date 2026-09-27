@@ -3,7 +3,8 @@
 The `@handsoff/sdk` package exposes the wallet adapter layer used by every integration.
 This page documents the `WalletAdapter` contract, the `createAdapter` factory, the
 `KnownWallet` / `SUPPORTED_WALLETS` registry, the capability flags, the hardware
-wallet setup for Ledger and Trezor, and the N-of-M multisig restore flow.
+wallet setup for Ledger and Trezor, the N-of-M multisig restore flow, and the
+transaction-free contract and account scanning APIs.
 
 ## `WalletAdapter`
 
@@ -180,6 +181,144 @@ class MyWalletAdapter implements WalletAdapter {
 const adapter = createAdapter({ adapter: MyWalletAdapter });
 ```
 
+## Contract and account scanning
+
+The scanning APIs answer "what in my contract or account is about to expire?"
+without submitting a transaction. They read ledger entries directly and report
+which ones are close to their TTL, so a dApp can prompt the user to extend or
+restore state before it is archived.
+
+### `getExpiringEntriesForContract`
+
+Scans a contract's instance, wasm code, and storage entries for TTLs that fall
+within the expiring-soon window.
+
+> **Important:** a contract's storage keys **cannot be enumerated** on-chain. The
+> SDK has no way to discover which keys a contract wrote, so **you must supply the
+> storage keys yourself**. Instance and wasm code entries are discovered
+> automatically; storage entries are only scanned for the keys you pass in.
+
+```ts
+export interface ContractScanOptions {
+  /** Contract address to scan. */
+  contractId: PublicKey;
+  /** Storage keys to check. Required — keys cannot be enumerated on-chain. */
+  storageKeys: PublicKey[];
+  /** Ledger threshold (in ledgers) below which an entry is "expiring soon". */
+  expiringSoonLedgers?: number;
+}
+
+export interface ContractScanResult {
+  /** Instance entry status, if present. */
+  instance?: ClassicEntryStatus;
+  /** Wasm code entry status, if present. */
+  wasm?: ClassicEntryStatus;
+  /** Per-storage-key status, keyed by the supplied storage key. */
+  storage: ClassicEntryStatus[];
+}
+```
+
+`ClassicEntryStatus` describes a single entry's TTL state:
+
+```ts
+export interface ClassicEntryStatus {
+  /** The ledger entry key. */
+  key: PublicKey;
+  /** Current live-until ledger, or `null` if the entry does not exist. */
+  liveUntilLedger: number | null;
+  /** Ledgers remaining until expiry, or `null` if the entry does not exist. */
+  remainingLedgers: number | null;
+  /** Whether the entry is within the expiring-soon window. */
+  expiringSoon: boolean;
+}
+```
+
+`DEFAULT_EXPIRING_SOON_LEDGERS` is the default window used when
+`expiringSoonLedgers` is omitted. Pass a larger value to warn earlier, or a
+smaller value to only flag entries that are truly imminent.
+
+### Worked example: instance, wasm code, and storage keys
+
+```ts
+import {
+  getExpiringEntriesForContract,
+  DEFAULT_EXPIRING_SOON_LEDGERS,
+} from '@handsoff/sdk';
+
+const result = await getExpiringEntriesForContract({
+  contractId,
+  // Required: the SDK cannot enumerate a contract's storage keys for you.
+  storageKeys: [userKey, configKey, counterKey],
+  expiringSoonLedgers: DEFAULT_EXPIRING_SOON_LEDGERS,
+});
+
+if (result.instance?.expiringSoon) {
+  console.warn('contract instance is expiring soon');
+}
+if (result.wasm?.expiringSoon) {
+  console.warn('wasm code is expiring soon');
+}
+for (const entry of result.storage) {
+  if (entry.expiringSoon) {
+    console.warn(`storage key ${entry.key} expires in ${entry.remainingLedgers} ledgers`);
+  }
+}
+```
+
+### `getExpiringEntriesForAccount`
+
+Scans an account's presence entries — the account itself and its trustlines — for
+TTLs that fall within the expiring-soon window. This is a **presence scan**, not a
+TTL scan of contract data: it reports whether the account and each trustline are
+close to being archived.
+
+```ts
+export interface AccountScanOptions {
+  /** Account to scan. */
+  accountId: PublicKey;
+  /** Ledger threshold (in ledgers) below which an entry is "expiring soon". */
+  expiringSoonLedgers?: number;
+}
+```
+
+The result reuses `ClassicEntryStatus` for the account entry and each trustline:
+
+```ts
+import { getExpiringEntriesForAccount } from '@handsoff/sdk';
+
+const { account, trustlines } = await getExpiringEntriesForAccount({
+  accountId,
+});
+
+if (account?.expiringSoon) {
+  console.warn('account is expiring soon');
+}
+for (const line of trustlines) {
+  if (line.expiringSoon) {
+    console.warn(`trustline ${line.key} expires in ${line.remainingLedgers} ledgers`);
+  }
+}
+```
+
+### Scanning vs. `detectArchivedKeys`
+
+`detectArchivedKeys` is **footprint-based**: it inspects the ledger keys a
+transaction touched (its footprint) and reports which of those are already
+archived. Use it when you have a transaction in hand and want to know whether it
+will fail because it references archived state.
+
+The scan functions are **TTL-based and transaction-free**: they read entries
+directly and report which are *about to* expire, so you can act before anything is
+archived. Use them for proactive prompts ("extend your contract state") rather
+than reactive failure handling.
+
+| | `getExpiringEntriesForContract` / `getExpiringEntriesForAccount` | `detectArchivedKeys` |
+| --- | --- | --- |
+| Input | Contract/account id (+ storage keys) | Transaction footprint |
+| Question | What is about to expire? | What is already archived? |
+| Needs a transaction | No | Yes |
+| Use for | Proactive TTL warnings | Pre-flight failure detection |
+
 ## Multisig restore
 
 N-of-M restore is handled by `MultiSigWalletAdapter`, which wraps a base
@@ -252,24 +391,8 @@ const submitted = await adapter.submitWithRestore(result);
 
 ### Failure handling
 
-A signer may refuse to sign (user rejects the prompt, the device is unavailable,
-or the signer is offline). `collectSignatures` records the refusal in the
-`SignatureCollectionResult` rather than throwing immediately, so the caller can
-decide how to proceed:
-
-- If the remaining signers still reach the threshold, the result is complete and
-  `submitWithRestore` succeeds.
-- If a refusal drops the collected signatures below the threshold, the result is
-  incomplete and `submitWithRestore` throws — surface the refusing signer to the
-  user and retry collection with a replacement signer.
-
-```ts
-const result = await adapter.collectSignatures(tx, signers);
-
-if (!result.satisfiesThreshold) {
-  // e.g. signerB refused; retry with another signer from the set.
-  throw new Error(`Need ${config.threshold} signatures, got ${result.signatures.length}`);
-}
-
-await adapter.submitWithRestore(result);
-```
+A signer may refuse to sign (rejected in the wallet, device disconnected, or
+signature invalid). `collectSignatures` surfaces the failure per signer so the
+caller can retry with a replacement signer or abort. Because the threshold is
+enforced at submit time, a partial collection never produces a submitted
+transaction.

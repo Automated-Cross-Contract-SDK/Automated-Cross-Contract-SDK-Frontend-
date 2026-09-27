@@ -189,218 +189,173 @@ pass it wherever a `WalletAdapter` is expected:
 ```typescript
 import type { WalletAdapter } from '@soroban-resurrect/sdk'
 
-const custom: WalletAdapter = {
+const myWallet: WalletAdapter = {
   async isConnected() {
     return true
   },
   async getPublicKey() {
-    return myProvider.publicKey
+    return 'G...'
   },
-  async signTransaction(tx, opts) {
-    return myProvider.sign(tx, opts)
+  async signTransaction(tx) {
+    return tx
   },
 }
 ```
 
-## `MultiSigConfig`
+## Contract and account scanning
 
-Configuration for an N-of-M multisig restore. Pass it to
-[`MultiSigWalletAdapter`](#multisigwalletadapter) to describe the signer set and
-the threshold required to submit.
+These APIs answer "what in my contract is about to expire?" **without submitting a
+transaction**. They read ledger entries directly, so they are safe to call on page
+load, in a background poll, or before you decide whether a restore is needed.
+
+> **Important limitation — contract storage keys cannot be enumerated.**
+> Soroban does not expose a way to list the storage keys a contract holds. The
+> scan functions therefore only check the keys **you supply**. If you omit a key,
+> it will not be scanned, and an expiring entry behind it will be missed. You are
+> responsible for knowing your contract's instance, wasm code, and storage keys.
+
+### `getExpiringEntriesForContract`
+
+Scans a contract's instance entry, its wasm code entry, and any storage keys you
+provide, returning the ones that are already archived or expiring soon.
 
 ```typescript
-interface MultiSigConfig {
-  threshold: number
-  signers: MultiSigSigner[]
+function getExpiringEntriesForContract(
+  contractId: string,
+  options?: ContractScanOptions,
+): Promise<ContractScanResult>
+```
+
+```typescript
+interface ContractScanOptions {
+  /** Storage keys to scan. Required to cover contract data — see the caveat above. */
+  storageKeys?: LedgerKey[]
+  /** Include the contract instance entry. Default: true. */
+  includeInstance?: boolean
+  /** Include the contract's wasm code entry. Default: true. */
+  includeWasmCode?: boolean
+  /** Ledgers remaining below which an entry counts as "expiring soon". */
+  expiringSoonLedgers?: number
 }
 ```
 
-| Field       | Description                                                                 |
-| ----------- | --------------------------------------------------------------------------- |
-| `threshold` | Number of signatures required before the restore can be submitted (`N`).    |
-| `signers`   | The signer set (`M`). Each entry is a [`MultiSigSigner`](#multisigsigner).  |
-
-## `MultiSigSigner`
-
-A single participant in a multisig restore. Each signer wraps a `WalletAdapter`
-so the SDK can request a signature from that wallet.
-
 ```typescript
-interface MultiSigSigner {
-  publicKey: string
-  adapter: WalletAdapter
+interface ContractScanResult {
+  contractId: string
+  /** Every scanned entry, with its status and remaining TTL. */
+  entries: ClassicEntryStatus[]
+  /** Entries that are already archived. */
+  archived: ClassicEntryStatus[]
+  /** Entries that are still live but expiring soon. */
+  expiringSoon: ClassicEntryStatus[]
 }
 ```
 
-| Field       | Description                                                              |
-| ----------- | ------------------------------------------------------------------------ |
-| `publicKey` | The signer's Stellar public key (`G...`).                                |
-| `adapter`   | The [`WalletAdapter`](#walletadapter) used to collect this signer's signature. |
+### `getExpiringEntriesForAccount`
 
-## `MultiSigWalletAdapter`
-
-A `WalletAdapter` that coordinates an N-of-M restore. It builds the restore
-transaction, collects signatures from each signer until the threshold is met,
-then submits the fully-signed transaction.
+Scans an account's presence and its trustlines. This is a **presence scan**, not a
+TTL scan: it reports whether the account and each trustline entry still exist on
+ledger, so you can detect accounts that have been merged away or trustlines that
+have been removed.
 
 ```typescript
-class MultiSigWalletAdapter implements WalletAdapter {
-  constructor(config: MultiSigConfig)
+function getExpiringEntriesForAccount(
+  accountId: string,
+  options?: AccountScanOptions,
+): Promise<ContractScanResult>
+```
 
-  collectSignatures(tx: string): Promise<SignatureCollectionResult>
+```typescript
+interface AccountScanOptions {
+  /** Trustline asset keys to check. Omit to scan only the account entry. */
+  trustlines?: LedgerKey[]
 }
 ```
 
-Because it implements `WalletAdapter`, a `MultiSigWalletAdapter` can be passed
-directly to [`submitWithRestore`](#submitwithrestore) — the collect-then-submit
-flow is driven for you.
+### `ClassicEntryStatus`
 
-## `SignatureCollectionResult`
-
-Returned by `MultiSigWalletAdapter.collectSignatures`. Describes how many
-signatures were gathered and whether the threshold was reached.
+One scanned entry and its current state.
 
 ```typescript
-interface SignatureCollectionResult {
-  signedTx: string
-  signatures: string[]
-  thresholdMet: boolean
-  refused: string[]
+interface ClassicEntryStatus {
+  /** The ledger key that was scanned. */
+  key: LedgerKey
+  /** 'live' | 'archived' | 'expiring-soon' | 'missing'. */
+  status: 'live' | 'archived' | 'expiring-soon' | 'missing'
+  /** Ledgers remaining before expiry, when known. */
+  remainingLedgers?: number
 }
 ```
 
-| Field          | Description                                                                 |
-| -------------- | --------------------------------------------------------------------------- |
-| `signedTx`     | The transaction envelope with the collected signatures attached.            |
-| `signatures`   | Signatures collected, in the order they were gathered.                      |
-| `thresholdMet` | `true` when `signatures.length >= config.threshold`.                        |
-| `refused`      | Public keys of signers that declined or failed to sign.                     |
+### `DEFAULT_EXPIRING_SOON_LEDGERS`
 
-## Multisig restore flow
+The default threshold (in ledgers) below which a live entry is reported as
+`'expiring-soon'`. Pass `expiringSoonLedgers` in `ContractScanOptions` to override
+it per call.
 
-A multisig restore is a **collect-then-submit** flow: build the restore
-transaction, gather signatures from each signer until the threshold is met, then
-submit the fully-signed transaction. `MultiSigWalletAdapter` implements
-`WalletAdapter`, so it composes with `submitWithRestore` and `restoreKeys`
-exactly like a single-signer wallet.
-
-```mermaid
-sequenceDiagram
-    participant App
-    participant SDK as SorobanResurrect
-    participant MS as MultiSigWalletAdapter
-    participant S1 as Signer 1
-    participant S2 as Signer 2
-    participant S3 as Signer 3
-    participant RPC as Soroban RPC
-
-    App->>SDK: submitWithRestore(keys, msAdapter)
-    SDK->>SDK: build restore transaction
-    SDK->>MS: signTransaction(tx)
-    MS->>S1: signTransaction(tx)
-    S1-->>MS: signature
-    MS->>S2: signTransaction(tx)
-    S2-->>MS: signature
-    Note over MS: threshold met (2 of 3)
-    MS-->>SDK: SignatureCollectionResult
-    SDK->>RPC: submit signed restore tx
-    RPC-->>SDK: result
-    SDK-->>App: restore result
+```typescript
+const DEFAULT_EXPIRING_SOON_LEDGERS: number
 ```
 
-### Composing with `submitWithRestore` and `restoreKeys`
+### Worked example
 
-`restoreKeys` detects which ledger keys are archived and builds the restore
-transaction. `submitWithRestore` then signs and submits it. When the wallet you
-pass is a `MultiSigWalletAdapter`, `submitWithRestore` calls
-`collectSignatures` internally instead of a single `signTransaction`, so the
-same call site works for both single-signer and multisig wallets:
+Scan a contract's instance, wasm code, and a storage key, then scan an account and
+one of its trustlines:
 
 ```typescript
 import {
-  SorobanResurrect,
-  MultiSigWalletAdapter,
-  createAdapter,
+  getExpiringEntriesForContract,
+  getExpiringEntriesForAccount,
+  xdr,
 } from '@soroban-resurrect/sdk'
 
-const sdk = new SorobanResurrect({ rpcUrl: 'https://soroban-testnet.stellar.org' })
-
-const multisig = new MultiSigWalletAdapter({
-  threshold: 2,
-  signers: [
-    { publicKey: 'GAAA...', adapter: createAdapter('freighter') },
-    { publicKey: 'GBBB...', adapter: createAdapter('xbull') },
-    { publicKey: 'GCCC...', adapter: createAdapter('albedo') },
+// Contract scan: instance + wasm code are included by default; storage keys
+// must be supplied by the caller because they cannot be enumerated.
+const contract = await getExpiringEntriesForContract(contractId, {
+  includeInstance: true,
+  includeWasmCode: true,
+  storageKeys: [
+    xdr.LedgerKey.contractData(
+      new xdr.LedgerKeyContractData({
+        contract: xdr.ScAddress.scAddressTypeContract(contractId),
+        key: xdr.ScVal.scvSymbol('counter'),
+        durability: xdr.ContractDataDurability.persistent(),
+      }),
+    ),
   ],
 })
 
-// restoreKeys builds the restore tx; submitWithRestore collects signatures
-// from the multisig adapter and submits once the threshold is met.
-const result = await sdk.submitWithRestore(keys, multisig)
-```
+if (contract.archived.length > 0 || contract.expiringSoon.length > 0) {
+  // Decide whether to restore before submitting a transaction.
+}
 
-### Worked 2-of-3 example
-
-Three signers, any two of which can authorize the restore:
-
-```typescript
-import {
-  SorobanResurrect,
-  MultiSigWalletAdapter,
-  createAdapter,
-} from '@soroban-resurrect/sdk'
-
-const sdk = new SorobanResurrect({ rpcUrl: 'https://soroban-testnet.stellar.org' })
-
-const multisig = new MultiSigWalletAdapter({
-  threshold: 2,
-  signers: [
-    { publicKey: 'GAAA...', adapter: createAdapter('freighter') },
-    { publicKey: 'GBBB...', adapter: createAdapter('xbull') },
-    { publicKey: 'GCCC...', adapter: createAdapter('albedo') },
+// Account scan: presence of the account entry and its trustlines.
+const account = await getExpiringEntriesForAccount(accountId, {
+  trustlines: [
+    xdr.LedgerKey.trustline(
+      new xdr.LedgerKeyTrustLine({
+        accountId: xdr.AccountId.publicKeyTypeEd25519(accountId),
+        asset: xdr.TrustLineAsset.assetTypeCreditAlphanum4(
+          new xdr.AlphaNum4({
+            assetCode: Buffer.from('USDC'),
+            issuer: xdr.AccountId.publicKeyTypeEd25519(issuerId),
+          }),
+        ),
+      }),
+    ),
   ],
 })
-
-// 1. Detect archived keys and build the restore transaction.
-const keys = await sdk.restoreKeys(['G...contractDataKey'])
-
-// 2. Collect signatures. The adapter stops once `threshold` (2) is reached.
-const collection = await multisig.collectSignatures(keys.restoreTx)
-
-if (!collection.thresholdMet) {
-  throw new Error(`Only ${collection.signatures.length} of 2 signatures collected`)
-}
-
-// 3. Submit the fully-signed restore transaction.
-const result = await sdk.submitWithRestore(keys, multisig)
 ```
 
-### Failure handling for a refusing signer
+### When to use scanning vs. `detectArchivedKeys`
 
-A signer can decline (user rejects the prompt) or fail to sign (device error,
-timeout). The adapter records those public keys in `SignatureCollectionResult.refused`
-and keeps collecting from the remaining signers — one refusal does not abort the
-flow as long as the threshold is still reachable.
+| | `getExpiringEntriesFor*` | `detectArchivedKeys` |
+| --- | --- | --- |
+| Input | Contract/account id plus the keys you supply | A transaction footprint |
+| Transaction | None — read-only | None — read-only |
+| Answers | "What is archived or expiring soon?" | "Which keys in this transaction are archived?" |
+| Use when | You want a proactive, pre-transaction view of a contract or account | You already have a transaction and want to know if it needs a restore first |
 
-```typescript
-const collection = await multisig.collectSignatures(keys.restoreTx)
-
-if (collection.refused.length > 0) {
-  console.warn('Signers that refused:', collection.refused)
-}
-
-if (!collection.thresholdMet) {
-  // Not enough signatures — surface which signers are still needed.
-  const needed = multisig.config.threshold - collection.signatures.length
-  throw new Error(`Restore needs ${needed} more signature(s)`)
-}
-```
-
-Guidance:
-
-- **Threshold still reachable** — continue collecting; the refused signer is
-  skipped and listed in `refused`.
-- **Threshold no longer reachable** — `thresholdMet` is `false`. Do not submit;
-  prompt the user to retry with a different signer or re-collect.
-- **Retrying** — call `collectSignatures` again on the same restore transaction;
-  already-collected signatures are preserved and only missing ones are requested.
+Use the scan functions to build a dashboard or a pre-flight check. Use
+`detectArchivedKeys` when you have a specific transaction in hand and want to know
+whether its footprint touches archived entries.
