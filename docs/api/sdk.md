@@ -115,6 +115,112 @@ These are exported alongside the class for advanced/lower-level usage:
 | `isDebugEnabled(namespace)`      | `Debug.js`    | Returns whether the active `DEBUG` filter enables a namespace.                 |
 | `refreshDebugFilter(spec?)`      | `Debug.js`    | Re-reads the filter after `DEBUG` or `localStorage.debug` changes at runtime.  |
 
+## History persistence
+
+`TransactionHistory` can persist its records so a failed restore can be replayed
+after a page reload. Persistence is **opt-in** — nothing is written unless you
+supply a `storage` adapter via `persistHistory`.
+
+### Opting in
+
+```typescript
+import { SorobanResurrect, TransactionHistory } from '@soroban-resurrect/sdk'
+
+const history = new TransactionHistory()
+
+const sr = new SorobanResurrect({
+  rpcUrl: 'https://soroban-testnet.stellar.org',
+  persistHistory: {
+    storage: window.localStorage, // any HistoryStorage adapter
+    key: 'my-app:restore-history', // optional; defaults to DEFAULT_HISTORY_STORAGE_KEY
+  },
+})
+```
+
+`persistHistory` accepts a [`HistoryPersistenceOptions`](/api/types#historypersistenceoptions)
+object. When omitted, the SDK keeps history in memory only.
+
+### The `HistoryStorage` interface
+
+Any object matching this shape works — `localStorage`, `sessionStorage`, and
+React Native's `AsyncStorage` all qualify:
+
+```typescript
+interface HistoryStorage {
+  getItem(key: string): string | null | Promise<string | null>
+  setItem(key: string, value: string): void | Promise<void>
+  removeItem(key: string): void | Promise<void>
+}
+```
+
+Both synchronous and promise-returning implementations are supported. The
+default key is `DEFAULT_HISTORY_STORAGE_KEY`; override it with `key` when you
+need to namespace multiple histories in the same storage.
+
+### Hydration timing (`ready`)
+
+Because a storage adapter may be asynchronous, hydration is not guaranteed to be
+complete when the constructor returns. Await `ready` before reading history:
+
+```typescript
+await sr.history.ready
+const records = sr.history.getAll()
+```
+
+### Browser example (`localStorage`)
+
+```typescript
+const sr = new SorobanResurrect({
+  rpcUrl: 'https://soroban-testnet.stellar.org',
+  persistHistory: { storage: window.localStorage },
+})
+
+await sr.history.ready
+```
+
+### React Native example (`AsyncStorage`)
+
+```typescript
+import AsyncStorage from '@react-native-async-storage/async-storage'
+
+const sr = new SorobanResurrect({
+  rpcUrl: 'https://soroban-testnet.stellar.org',
+  persistHistory: { storage: AsyncStorage },
+})
+
+await sr.history.ready
+```
+
+### Replaying after a reload
+
+`TransactionHistory` serializes to JSON via `toJSON()` and restores via
+`loadJSON()`. `loadJSON` **requires** the `networkPassphrase` so records can be
+re-associated with the correct network — pass the same value you configured on
+the client:
+
+```typescript
+const raw = await storage.getItem(DEFAULT_HISTORY_STORAGE_KEY)
+if (raw) {
+  sr.history.loadJSON(raw, { networkPassphrase: 'Test SDF Network ; September 2015' })
+}
+```
+
+### What is persisted (privacy)
+
+Each record stores the **full transaction XDR** — the complete, signed envelope
+— plus its hash, status, and timestamps. This is what makes replay possible, but
+it also means the storage backend holds signed transaction payloads. Treat the
+chosen storage as sensitive: prefer device-local storage, avoid syncing it to a
+shared backend, and clear it with `removeItem` when records are no longer needed.
+
+### Failure semantics
+
+Persistence is best-effort and never blocks the restore workflow. A storage
+adapter that throws on read or write is caught and logged through the
+`soroban-resurrect:core` debug namespace; the in-memory history stays correct and
+the workflow continues. If hydration fails, `ready` still resolves and history
+starts empty rather than rejecting.
+
 ## Debug logging
 
 The SDK logs its internal operations through a namespaced debug logger. Nothing
@@ -150,67 +256,12 @@ DEBUG=soroban-resurrect:*,-soroban-resurrect:core   # all but core
 
 ### Logging from your own code
 
-`createDebugger` is exported, so application code can log under the same filter:
+`createDebugger` is exported, so application code can log under the same
+namespaces and honour the same `DEBUG` filter:
 
 ```typescript
 import { createDebugger } from '@soroban-resurrect/sdk'
 
-const debug = createDebugger('my-app')
-
-debug('submitting transaction %s', hash)
-// soroban-resurrect:my-app submitting transaction abc123 +4ms
+const debug = createDebugger('my-app:restore')
+debug('starting restore for %s', txHash)
 ```
-
-Guard expensive work with the `enabled` flag:
-
-```typescript
-if (debug.enabled) {
-  debug('footprint: %o', keys.map((k) => k.keyBase64))
-}
-```
-
-Output goes to `console.debug`. Note that most browser consoles hide
-`console.debug` behind a "Verbose" log level filter.
-
-| `createDebugger(scope)`          | `debug.js`    | Creates a namespaced debug logger for internal SDK operations.                |
-
-## Debug Logging
-
-The SDK logs its internal operations through namespaced loggers that stay silent
-unless a filter is set. Namespaces are prefixed with `soroban-resurrect`:
-`soroban-resurrect:resurrect` for lifecycle and state transitions, and
-`soroban-resurrect:archiver` for archive detection.
-
-In Node, set the `DEBUG` environment variable:
-
-```bash
-DEBUG=soroban-resurrect:* node ./scripts/restore.mjs
-```
-
-In the browser, set `localStorage.debug` and reload:
-
-```javascript
-localStorage.debug = 'soroban-resurrect:*'
-```
-
-The filter is a comma or space separated list of patterns. `*` matches any run
-of characters and a `-` prefix excludes a namespace:
-
-```bash
-DEBUG='soroban-resurrect:*,-soroban-resurrect:archiver' npm run dev:example
-```
-
-Filters are read once when the module loads, so change `DEBUG` before starting
-the process rather than during it. Output goes to `console.debug`, prefixed with
-an ISO timestamp and the namespace.
-
-Application code can create its own loggers under the same filter:
-
-```typescript
-import { createDebugger } from '@soroban-resurrect/sdk'
-
-const debug = createDebugger('my-dapp')
-debug('submitting transaction %s', tx.hash().toString('hex'))
-```
-
-For the full type definitions used throughout this API, see [Types](/api/types).
