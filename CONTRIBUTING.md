@@ -12,6 +12,7 @@ Thank you for your interest in contributing! This document covers everything you
 - [Testing Requirements](#testing-requirements)
 - [Commit Format](#commit-format)
 - [Pull Request Process](#pull-request-process)
+- [Dependency Updates](#dependency-updates)
 - [Reporting Bugs](#reporting-bugs)
 - [Requesting Features](#requesting-features)
 
@@ -274,6 +275,22 @@ removed. Use the three-argument form instead.
 ### After merge
 
 Delete your feature branch from your fork. The maintainer will delete the branch from the upstream repo.
+
+---
+
+## Dependency Updates
+
+Dependabot (`.github/dependabot.yml`) opens npm update PRs every Monday, grouped to keep review load low:
+
+| Group              | Contents                                                                                | Merge policy                                              |
+| ------------------ | --------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `dev-dependencies` | All `devDependencies` except the Stellar/workspace packages below, in **one** weekly PR | **Auto-merged** (squash) once all required CI checks pass |
+| `stellar`          | `@stellar/*`, `@soroban-resurrect/*`, `soroban-resurrect`                               | Manual review                                             |
+| _(ungrouped)_      | Runtime (`dependencies`) updates, one PR each                                           | Manual review                                             |
+
+Auto-merge is enabled by `.github/workflows/dependabot-auto-merge.yml`, which only acts on Dependabot-authored PRs in the `dev-dependencies` group. It relies on GitHub's native auto-merge, so a PR is never merged while CI is failing or pending — this requires "Allow auto-merge" to be enabled in the repository settings and CI to be a required status check on `main`. If a grouped devDependency update breaks CI, fix it on the Dependabot branch or close the PR and pin the offending package.
+
+GitHub Actions versions are updated weekly as separate PRs and reviewed manually.
 
 ---
 
