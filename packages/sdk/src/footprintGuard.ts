@@ -87,7 +87,21 @@ export function restoreSizeGuidance(d: RestoreTxDiagnostics): string {
 }
 
 /**
+ * Minimal logger surface used to emit size warnings without depending on
+ * `console` directly, so callers can inject their own logger.
+ */
+export interface FootprintGuardLogger {
+  warn(message: string): void
+}
+
+/**
  * Resolves the size-guard options from SDK config, applying defaults.
+ *
+ * The three fields (`maxRestoreTxSizeBytes`, `restoreSizeWarnRatio`,
+ * `throwOnRestoreSizeLimit`) are declared on {@link SorobanResurrectConfig} and
+ * resolved by `resolveConfig()`, so the guard options come from the resolved
+ * config. Defaults are {@link SOROBAN_MAX_TX_XDR_BYTES},
+ * {@link RESTORE_TX_SIZE_WARN_RATIO}, and no throw.
  */
 export function resolveFootprintGuardOptions(config: SorobanResurrectConfig): {
   maxSizeBytes: number
@@ -98,5 +112,22 @@ export function resolveFootprintGuardOptions(config: SorobanResurrectConfig): {
     maxSizeBytes: config.maxRestoreTxSizeBytes ?? SOROBAN_MAX_TX_XDR_BYTES,
     warnRatio: config.restoreSizeWarnRatio ?? RESTORE_TX_SIZE_WARN_RATIO,
     throwOnLimit: config.throwOnRestoreSizeLimit ?? false,
+  }
+}
+
+/**
+ * Emits the size warning for a restore transaction through the injectable
+ * logger (never `console`), and throws when the diagnostics exceed the limit
+ * and `throwOnLimit` is set.
+ */
+export function reportRestoreFootprint(
+  d: RestoreTxDiagnostics,
+  options: { throwOnLimit?: boolean; logger?: FootprintGuardLogger } = {},
+): void {
+  if (d.exceedsLimit && options.throwOnLimit) {
+    throw new Error(restoreSizeGuidance(d))
+  }
+  if (d.approachingLimit) {
+    options.logger?.warn(restoreSizeGuidance(d))
   }
 }
