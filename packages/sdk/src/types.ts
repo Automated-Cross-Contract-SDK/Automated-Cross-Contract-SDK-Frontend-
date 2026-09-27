@@ -198,3 +198,42 @@ export interface TTLQueryResult {
   /** Convenience flag: true when at least one chunk failed. */
   hasErrors: boolean;
 }
+
+/**
+ * A single entry in the SDK transaction history.
+ */
+export interface TransactionHistoryEntry {
+  /**
+   * Unique identifier for this history entry.
+   *
+   * When `crypto.randomUUID` is available this is a UUID v4. On older
+   * runtimes that lack it, a collision-resistant fallback of the form
+   * `<timestamp>-<random>` is used instead. Both formats are opaque
+   * strings and are accepted by {@link loadJSON} on hydration.
+   */
+  id: string;
+  /** The transaction hash this entry refers to. */
+  hash: string;
+  /** The ledger the transaction was included in, when known. */
+  ledger?: number;
+  /** Unix timestamp (ms) at which the entry was recorded. */
+  timestamp: number;
+  /** Arbitrary caller-supplied metadata attached to the entry. */
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Generate a unique id for a {@link TransactionHistoryEntry}.
+ *
+ * Prefers `crypto.randomUUID()` (UUID v4) when the runtime exposes it.
+ * Falls back to a timestamp + random suffix for older runtimes; the
+ * fallback is documented on {@link TransactionHistoryEntry.id} and is
+ * still accepted by {@link loadJSON} on hydration.
+ */
+export function generateId(): string {
+  const cryptoObj = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (cryptoObj && typeof cryptoObj.randomUUID === 'function') {
+    return cryptoObj.randomUUID();
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
