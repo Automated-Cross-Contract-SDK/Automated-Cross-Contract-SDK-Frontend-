@@ -483,3 +483,8 @@ See [MIGRATION.md](./MIGRATION.md) for breaking changes and upgrade steps betwee
 ## License
 
 MIT
+
+## Handsoff notes
+
+<!-- handsoff-issue-372 -->
+- #372: SDK: reset() leaves the standalone archived-key cache populated
