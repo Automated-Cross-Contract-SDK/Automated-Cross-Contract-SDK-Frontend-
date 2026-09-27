@@ -1,52 +1,120 @@
-/** Map of event name to the payload type emitted for that event. */
-export type EventMap = Record<string, unknown>
-
-// Helper type that adds an index signature to make an interface compatible
-// with EventMap (needed for TypedEventEmitter's generic constraint).
-export type WithIndexSignature<T> = T & Record<string, unknown>
-
-type Listener<T> = (payload: T) => void
+import { Logger, NOOP_LOGGER, resolveLogger } from './logger';
 
 /**
- * Minimal typed event emitter. Listeners registered for an event only ever
- * receive the payload type declared for that event in the `Events` map.
+ * Options accepted by {@link TypedEventEmitter}.
  */
-export class TypedEventEmitter<Events extends EventMap> {
-  private listeners: { [K in keyof Events]?: Array<Listener<Events[K]>> } = {}
+export interface TypedEventEmitterOptions {
+  /**
+   * Optional logger used to report listener failures and leak warnings.
+   * Defaults to {@link NOOP_LOGGER} so nothing is written to the console.
+   */
+  logger?: Logger;
+  /**
+   * Listener count for a single event above which a leak warning is emitted.
+   * Defaults to {@link DEFAULT_MAX_LISTENERS}.
+   */
+  maxListeners?: number;
+}
 
-  /** Registers a listener for `event`. Returns a function that removes it. */
-  on<K extends keyof Events>(event: K, listener: Listener<Events[K]>): () => void {
-    const list = this.listeners[event] ?? (this.listeners[event] = [])
-    list.push(listener)
-    return () => this.off(event, listener)
+/** Default listener-count threshold before a leak warning is emitted. */
+export const DEFAULT_MAX_LISTENERS = 10;
+
+type Listener = (...args: any[]) => void;
+
+/**
+ * A small typed event emitter with injectable logging and listener cleanup.
+ *
+ * Listener exceptions are routed through the injected {@link Logger} and never
+ * prevent other listeners from running. A one-time warning is emitted when the
+ * listener count for a single event exceeds the configured threshold.
+ */
+export class TypedEventEmitter<Events extends Record<string, (...args: any[]) => void>> {
+  private readonly listeners = new Map<keyof Events, Set<Listener>>();
+  private readonly warnedEvents = new Set<keyof Events>();
+  private readonly logger: Logger;
+  private readonly maxListeners: number;
+
+  constructor(options: TypedEventEmitterOptions = {}) {
+    this.logger = resolveLogger(options.logger);
+    this.maxListeners = options.maxListeners ?? DEFAULT_MAX_LISTENERS;
   }
 
-  /** Registers a listener that fires at most once for `event`. */
-  once<K extends keyof Events>(event: K, listener: Listener<Events[K]>): () => void {
-    const wrapped: Listener<Events[K]> = (payload) => {
-      this.off(event, wrapped)
-      listener(payload)
+  on<E extends keyof Events>(event: E, listener: Events[E]): this {
+    let set = this.listeners.get(event);
+    if (!set) {
+      set = new Set<Listener>();
+      this.listeners.set(event, set);
     }
-    return this.on(event, wrapped)
+    set.add(listener as Listener);
+
+    if (set.size > this.maxListeners && !this.warnedEvents.has(event)) {
+      this.warnedEvents.add(event);
+      this.logger.warn(
+        `Possible event listener leak detected: ${String(event)} has ${set.size} listeners ` +
+          `(threshold ${this.maxListeners}).`,
+      );
+    }
+
+    return this;
   }
 
-  /** Removes a previously registered listener for `event`. */
-  off<K extends keyof Events>(event: K, listener: Listener<Events[K]>): void {
-    const list = this.listeners[event]
-    if (!list) return
-    this.listeners[event] = list.filter((l) => l !== listener)
-  }
-
-  /** Invokes every listener registered for `event` with `payload`. */
-  emit<K extends keyof Events>(event: K, payload: Events[K]): void {
-    const list = this.listeners[event]
-    if (!list) return
-    for (const listener of [...list]) {
-      try {
-        listener(payload)
-      } catch (err) {
-        console.warn(`SorobanResurrect: event listener error for "${String(event)}":`, err)
+  off<E extends keyof Events>(event: E, listener: Events[E]): this {
+    const set = this.listeners.get(event);
+    if (set) {
+      set.delete(listener as Listener);
+      if (set.size === 0) {
+        this.listeners.delete(event);
       }
     }
+    return this;
+  }
+
+  once<E extends keyof Events>(event: E, listener: Events[E]): this {
+    const wrapper = ((...args: any[]) => {
+      this.off(event, wrapper as Events[E]);
+      (listener as Listener)(...args);
+    }) as Events[E];
+    return this.on(event, wrapper);
+  }
+
+  emit<E extends keyof Events>(event: E, ...args: Parameters<Events[E]>): boolean {
+    const set = this.listeners.get(event);
+    if (!set || set.size === 0) {
+      return false;
+    }
+
+    for (const listener of Array.from(set)) {
+      try {
+        listener(...args);
+      } catch (error) {
+        this.logger.error(
+          `Error in listener for event "${String(event)}":`,
+          error,
+        );
+      }
+    }
+
+    return true;
+  }
+
+  /**
+   * Remove listeners for a single event, or every listener when no event is
+   * provided. Also clears the leak-warning state so a re-populated event can
+   * warn again.
+   */
+  removeAllListeners<E extends keyof Events>(event?: E): this {
+    if (event === undefined) {
+      this.listeners.clear();
+      this.warnedEvents.clear();
+    } else {
+      this.listeners.delete(event);
+      this.warnedEvents.delete(event);
+    }
+    return this;
+  }
+
+  /** Number of listeners currently registered for the given event. */
+  listenerCount<E extends keyof Events>(event: E): number {
+    return this.listeners.get(event)?.size ?? 0;
   }
 }
