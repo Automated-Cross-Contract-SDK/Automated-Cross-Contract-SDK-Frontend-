@@ -1,0 +1,45 @@
+# CODEOWNERS
+# This file defines individuals or teams responsible for code review,
+# triage, and approvals across different areas of the repository.
+# Syntax: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Global fallback maintainers
+* @micmusjnr20
+
+# Core SDK and Architecture
+/packages/sdk/ @micmusjnr20
+/packages/sdk/src/branded-types.ts @micmusjnr20
+
+# Framework Hooks
+/packages/react-hook/ @micmusjnr20
+/packages/vue-hook/ @micmusjnr20
+/packages/svelte-hook/ @micmusjnr20
+
+# Wallet Adapters
+/packages/adapter-albedo/ @micmusjnr20
+/packages/adapter-freighter/ @micmusjnr20
+/packages/adapter-lobstr/ @micmusjnr20
+/packages/adapter-rabet/ @micmusjnr20
+/packages/adapter-walletconnect/ @micmusjnr20
+/packages/adapter-walletkit/ @micmusjnr20
+/packages/adapter-xbull/ @micmusjnr20
+
+# CI / CD & Workflows
+/.github/ @micmusjnr20
+/.github/workflows/ @micmusjnr20
+
+# Security Policies & Audits
+/SECURITY.md @micmusjnr20
+/security/ @micmusjnr20
+
+# Documentation & Architecture Guides
+/docs/ @micmusjnr20
+/ARCHITECTURE.md @micmusjnr20
+/MIGRATION.md @micmusjnr20
+/README.md @micmusjnr20
+
+# Testing, Benchmarks, and E2E
+/benchmarks/ @micmusjnr20
+/e2e/ @micmusjnr20
+/examples/ @micmusjnr20
+/scripts/ @micmusjnr20
