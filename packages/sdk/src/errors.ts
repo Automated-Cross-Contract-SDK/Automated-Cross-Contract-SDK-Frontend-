@@ -64,6 +64,14 @@ export type ResurrectErrorCode =
   | 'UNEXPECTED_SIMULATION_RESPONSE'
 
   /**
+   * The connected wallet declared that it does not support a required
+   * capability (e.g. `capabilities.feeBump === false` or
+   * `capabilities.signAuthEntry === false`). The caller should surface a
+   * "wallet not supported" message rather than a generic failure.
+   */
+  | 'UNSUPPORTED_WALLET_CAPABILITY'
+
+  /**
    * An unexpected JavaScript exception was thrown during the workflow.
    * Check `result.error` for the exception message.
    */
