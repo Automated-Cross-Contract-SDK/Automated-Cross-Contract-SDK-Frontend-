@@ -212,30 +212,26 @@ export function createSorobanResurrect(
   }
 
   const submitBatch = (items: SubmitWithRestoreOptions[]): BatchSubmission => {
-    const itemStores = items.map(() =>
-      writable<BatchItemState>({ status: 'pending', result: null }),
-    )
+    const itemStores = items.map(() => writable<BatchItemState>({ status: 'pending', result: null }))
 
     const done = (async () => {
       const results: ResurrectResult[] = []
-      const r = getResurrect()
       for (let i = 0; i < items.length; i++) {
-        itemStores[i].set({ status: 'submitting', result: null })
-        const result = await r.submitWithRestore(items[i])
-        itemStores[i].set({
-          status: result.success ? 'success' : 'error',
-          result,
-        })
-        lastResultWritable.set(result)
-        results.push(result)
+        const itemStore = itemStores[i]
+        itemStore.set({ status: 'submitting', result: null })
+        try {
+          const result = await getResurrect().submitWithRestore(items[i])
+          itemStore.set({ status: 'success', result })
+          results.push(result)
+        } catch (error) {
+          itemStore.set({ status: 'error', result: null })
+          throw error
+        }
       }
       return results
     })()
 
-    return {
-      items: itemStores.map((s) => ({ subscribe: s.subscribe })),
-      done,
-    }
+    return { items: itemStores, done }
   }
 
   const detectArchivedKeys = async (transaction: Transaction): Promise<ArchivedLedgerEntry[]> => {
@@ -243,29 +239,28 @@ export function createSorobanResurrect(
   }
 
   const estimate = async (transaction: Transaction): Promise<FeeEstimate> => {
-    const r = getResurrect()
-    const [archived, sim] = await Promise.all([
-      r.detectArchivedKeys(transaction),
-      r.simulate(transaction),
-    ])
-    const minResourceFee =
-      'minResourceFee' in sim && sim.minResourceFee ? String(sim.minResourceFee) : '0'
-    const multiplier = currentConfig?.restoreFeeMultiplier ?? RESTORE_FEE_MULTIPLIER
+    const archivedKeysDetected = await getResurrect().detectArchivedKeys(transaction)
+    const minResourceFee = await getResurrect().estimateRestoreFee(transaction)
+    const estimatedRestoreFee = (
+      BigInt(minResourceFee) * BigInt(RESTORE_FEE_MULTIPLIER)
+    ).toString()
     const estimateResult: FeeEstimate = {
-      archivedKeysDetected: archived.length,
+      archivedKeysDetected: archivedKeysDetected.length,
       minResourceFee,
-      estimatedRestoreFee: (Number(minResourceFee) * multiplier).toString(),
-      multiplier,
+      estimatedRestoreFee,
+      multiplier: RESTORE_FEE_MULTIPLIER,
     }
     feeEstimateWritable.set(estimateResult)
     return estimateResult
   }
 
-  const reset = (fromState?: RestoreState) => {
-    getResurrect().reset(fromState)
-    if (get(stateWritable).state === 'idle') {
-      feeEstimateWritable.set(null)
+  const reset = (fromState?: RestoreState): void => {
+    if (fromState && get(stateWritable).state !== fromState) {
+      return
     }
+    stateWritable.set({ state: 'idle', message: '' })
+    lastResultWritable.set(null)
+    feeEstimateWritable.set(null)
   }
 
   const on = <K extends keyof SorobanResurrectEvents>(
@@ -275,12 +270,12 @@ export function createSorobanResurrect(
     return getResurrect().on(event, listener)
   }
 
-  const destroy = () => {
+  const destroy = (): void => {
+    unsubscribeConfig()
     if (unsubscribeState) {
       unsubscribeState()
       unsubscribeState = null
     }
-    unsubscribeConfig()
     resurrect = null
   }
 
@@ -296,7 +291,7 @@ export function createSorobanResurrect(
     estimate,
     reset,
     on,
-    get resurrect(): SorobanResurrect {
+    get resurrect() {
       return getResurrect()
     },
     destroy,

@@ -54,7 +54,7 @@ export type {
 } from './types.js'
 export type { WalletErrorCode } from './types.js'
 export { WalletError } from './types.js'
-export { ResurrectError } from './errors.js'
+export { ResurrectError, RestoreFeeExceededError } from './errors.js'
 
 // ---------------------------------------------------------------------------
 // RPC abstraction layer (dependency injection / testing — see RpcClient.ts)
@@ -132,6 +132,12 @@ export type { ParsableTransactionResponse } from './TransactionFailure.js'
 export type { LedgerEntryTTLInfo, TTLQueryResult, LedgerKeyEntryType } from './TTLHelpers.js'
 
 // ---------------------------------------------------------------------------
+// Proactive TTL watching (resurrect.watchTTL)
+// ---------------------------------------------------------------------------
+export { watchTTL } from './TTLWatch.js'
+export type { TTLWatchOptions, TTLWatchHandle } from './TTLWatch.js'
+
+// ---------------------------------------------------------------------------
 // Fee calculation (returned by SorobanResurrect.estimateRestoreCost)
 // ---------------------------------------------------------------------------
 export type { RestoreCostEstimate } from './feeCalculation.js'
@@ -197,5 +203,3 @@ export type { RestoreTxDiagnostics, EvaluateRestoreFootprintOptions } from './fo
 
 // ---------------------------------------------------------------------------
 //
-
-/* … truncated 1447 chars — edit only what you need near the top … */
