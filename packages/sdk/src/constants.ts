@@ -96,6 +96,67 @@ export const RESTORE_TX_SIZE_WARN_RATIO = 0.8
  */
 export const MAX_SEQUENCE_RETRIES = 3
 
+/**
+ * Default number of ledger keys fetched per `getLedgerEntries` request when
+ * detecting archived entries. Configurable via
+ * `SorobanResurrectConfig.archiveDetectionChunkSize`.
+ */
+export const ARCHIVE_DETECTION_CHUNK_SIZE = LEDGER_ENTRY_CHUNK_SIZE
+
+/**
+ * Default number of archive-detection chunk requests kept in flight at once.
+ * Configurable via `SorobanResurrectConfig.archiveDetectionConcurrency`.
+ */
+export const ARCHIVE_DETECTION_CONCURRENCY = LEDGER_ENTRY_CONCURRENCY
+
+/**
+ * Default upper bound (in stroops) on the total fee a restore transaction may
+ * pay. Restores above this bound are rejected before signing. Configurable via
+ * `SorobanResurrectConfig.maxRestoreFeeStroops`.
+ */
+export const MAX_RESTORE_FEE_STROOPS = 10_000_000
+
+/** Default timeout (ms) for a single RPC request. */
+export const RPC_TIMEOUT_MS = 30_000
+
+/** Default number of times an RPC request is retried on transient failure. */
+export const RPC_RETRY_COUNT = 3
+
+/** Default base backoff (ms) between RPC retries. */
+export const RPC_RETRY_BACKOFF_MS = 500
+
+/**
+ * Default number of consecutive RPC failures that trips the circuit breaker.
+ */
+export const RPC_CIRCUIT_BREAKER_THRESHOLD = 5
+
+/**
+ * Default cooldown (ms) before the circuit breaker allows requests again.
+ */
+export const RPC_CIRCUIT_BREAKER_COOLDOWN_MS = 30_000
+
+/** Default interval (ms) between TTL watch sweeps. */
+export const TTL_WATCH_INTERVAL_MS = 60_000
+
+/**
+ * Default remaining-TTL threshold (in ledgers) below which the TTL watcher
+ * considers an entry at risk and triggers an extension.
+ */
+export const TTL_WATCH_THRESHOLD = 100
+
+/**
+ * Whether the TTL watcher automatically extends entries that fall below
+ * {@link TTL_WATCH_THRESHOLD}. Configurable via
+ * `SorobanResurrectConfig.ttlWatchAutoExtend`.
+ */
+export const TTL_WATCH_AUTO_EXTEND = false
+
+/** Default memo type attached to restore transactions. */
+export const RESTORE_TX_MEMO = 'none'
+
+/** Default memo text attached to restore transactions when memo is `text`. */
+export const RESTORE_TX_MEMO_TEXT = ''
+
 /** Known Stellar/Soroban network passphrases for validation. */
 export const KNOWN_NETWORK_PASSPHRASES = [
   'Test SDF Network ; September 2015', // Testnet
@@ -122,4 +183,54 @@ export function resolveNetworkPassphrase(rpcUrl: string): string | undefined {
   } catch {
     return undefined
   }
+}
+
+/** Canonical Soroban network names supported by the SDK. */
+export type SorobanNetworkName = 'testnet' | 'mainnet' | 'futurenet'
+
+/**
+ * A named Soroban network preset.
+ *
+ * Bundles the RPC endpoint, the network passphrase used to sign transactions,
+ * and a human-readable label for display in UIs and logs.
+ */
+export interface SorobanNetworkPreset {
+  /** Canonical network name. */
+  name: SorobanNetworkName
+  /** Soroban RPC endpoint URL. */
+  rpcUrl: string
+  /** Network passphrase used when signing transactions. */
+  networkPassphrase: string
+  /** Human-readable label for display in UIs and logs. */
+  displayName: string
+}
+
+/**
+ * Built-in network presets for the Soroban Testnet, Mainnet, and Futurenet.
+ *
+ * @example
+ * ```ts
+ * import { NETWORK_PRESETS } from '@soroban-resurrect/sdk'
+ * const { rpcUrl, networkPassphrase } = NETWORK_PRESETS.testnet
+ * ```
+ */
+export const NETWORK_PRESETS: Record<SorobanNetworkName, SorobanNetworkPreset> = {
+  testnet: {
+    name: 'testnet',
+    rpcUrl: 'https://soroban-testnet.stellar.org',
+    networkPassphrase: 'Test SDF Network ; September 2015',
+    displayName: 'Soroban Testnet',
+  },
+  mainnet: {
+    name: 'mainnet',
+    rpcUrl: 'https://soroban-mainnet.stellar.org',
+    networkPassphrase: 'Public Global Stellar Network ; September 2015',
+    displayName: 'Soroban Mainnet',
+  },
+  futurenet: {
+    name: 'futurenet',
+    rpcUrl: 'https://futurenet.stellar.org',
+    networkPassphrase: 'Test SDF Future Network ; October 2022',
+    displayName: 'Soroban Futurenet',
+  },
 }

@@ -113,3 +113,112 @@ const myWallet: WalletAdapter = {
     window.myWallet.sign(txXdr, { networkPassphrase: opts?.networkPassphrase }),
 }
 ```
+
+## 9. Restoring with an N-of-M multisig account
+
+When the account that pays for the restore is a multisig account (e.g. a treasury or a DAO vault), a single `signTransaction` call is not enough: the restore transaction must be signed by `N` of its `M` signers before it can be submitted. The SDK models this with `MultiSigWalletAdapter`, `MultiSigSigner`, `MultiSigConfig`, and `SignatureCollectionResult`.
+
+The flow is **build → collect → submit**:
+
+1. **Build** the restore transaction. `MultiSigWalletAdapter` wraps the underlying wallet and produces the unsigned restore transaction XDR from the archived keys.
+2. **Collect** signatures from each signer. Each `MultiSigSigner` signs the same XDR independently; the adapter accumulates the results into a `SignatureCollectionResult` until the configured threshold is met.
+3. **Submit** the fully-signed restore transaction, then continue with the original transaction as usual.
+
+### Sequence diagram
+
+```mermaid
+sequenceDiagram
+    participant App
+    participant Adapter as MultiSigWalletAdapter
+    participant S1 as Signer 1
+    participant S2 as Signer 2
+    participant RPC as Soroban RPC
+
+    App->>Adapter: submitWithRestore({ transaction, wallet, restoreKeys })
+    Adapter->>RPC: simulate / detect archived keys
+    RPC-->>Adapter: archivedKeys
+    Adapter->>Adapter: build restore transaction XDR
+    Adapter->>S1: signTransaction(restoreXdr)
+    S1-->>Adapter: signed XDR
+    Adapter->>S2: signTransaction(restoreXdr)
+    S2-->>Adapter: signed XDR
+    Adapter->>Adapter: collect until threshold (N of M)
+    Adapter->>RPC: submit signed restore transaction
+    RPC-->>Adapter: restore confirmed
+    Adapter->>RPC: submit original transaction
+    RPC-->>App: success
+```
+
+### Worked 2-of-3 example
+
+A 2-of-3 treasury: any two of `alice`, `bob`, and `carol` must sign the restore transaction.
+
+```typescript
+import {
+  SorobanResurrect,
+  MultiSigWalletAdapter,
+  type MultiSigSigner,
+  type MultiSigConfig,
+} from '@soroban-resurrect/sdk'
+
+const signers: MultiSigSigner[] = [
+  { publicKey: alicePublicKey, signTransaction: (xdr) => aliceWallet.sign(xdr) },
+  { publicKey: bobPublicKey, signTransaction: (xdr) => bobWallet.sign(xdr) },
+  { publicKey: carolPublicKey, signTransaction: (xdr) => carolWallet.sign(xdr) },
+]
+
+const config: MultiSigConfig = {
+  signers,
+  threshold: 2, // 2-of-3
+}
+
+const wallet = new MultiSigWalletAdapter({
+  config,
+  // the account whose signature pays for and authorizes the restore
+  publicKey: treasuryPublicKey,
+})
+
+const sr = new SorobanResurrect({ rpcUrl: 'https://soroban-testnet.stellar.org' })
+
+const result = await sr.submitWithRestore({
+  transaction: tx,
+  wallet,
+  // restoreKeys scopes the restore to the archived entries you detected;
+  // omit it to let the SDK derive them from simulation.
+  restoreKeys: archivedKeys,
+})
+
+console.log(result.hash)
+```
+
+`submitWithRestore` drives the same lifecycle as in section 2, but delegates signing to the multisig adapter: it builds the restore transaction, asks each signer for a signature, and only submits once `threshold` signatures have been collected. `restoreKeys` lets you pass the exact archived keys to restore (for example the output of `detectArchivedKeys`); when omitted, the SDK derives them from simulation.
+
+### Handling a signer that refuses
+
+A signer may reject the request (user cancels, hardware wallet unplugged, policy denies the signature). The adapter surfaces this as a failed `SignatureCollectionResult` rather than submitting a partially-signed transaction:
+
+```typescript
+const result = await sr.submitWithRestore({
+  transaction: tx,
+  wallet,
+  restoreKeys: archivedKeys,
+  onRestoreFailed: (error) => {
+    // e.g. "signature collection failed: signer G... refused"
+    console.error('Restore aborted:', error)
+  },
+})
+```
+
+Because the threshold was never reached, no restore transaction is submitted and the original transaction is left untouched — the caller can retry with a different set of signers. If you collect signatures yourself, inspect the `SignatureCollectionResult` before submitting:
+
+```typescript
+const collection = await wallet.collectSignatures(restoreXdr)
+
+if (!collection.satisfied) {
+  // collection.signatures holds the ones you did get; collection.missing
+  // lists the signers that have not signed yet.
+  throw new Error(`Need ${collection.missing.length} more signature(s)`)
+}
+
+await sr.submitRestore(collection.transaction)
+```

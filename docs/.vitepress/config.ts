@@ -67,6 +67,7 @@ export default defineConfig({
             { text: 'Next.js', link: '/integrations/nextjs' },
             { text: 'Vite', link: '/integrations/vite' },
             { text: 'Astro', link: '/integrations/astro' },
+            { text: 'Adapters and Wallets', link: '/integrations/adapters' },
           ],
         },
       ],

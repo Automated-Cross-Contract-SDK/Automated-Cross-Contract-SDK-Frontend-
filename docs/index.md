@@ -19,6 +19,8 @@ hero:
 features:
   - title: Automatic Restoration
     details: Implements the full CAP-0066 restore flow — simulate, detect, build restore tx, sign, submit, then resubmit the original transaction.
+  - title: Proactive TTL Management
+    details: Watch ledger entry TTLs and extend them before they expire with watchTTL, thresholdLedgers, and autoExtend.
   - title: Wallet-Agnostic
     details: Works with any wallet through a small WalletAdapter interface (Freighter, xBull, custom signers, etc.).
   - title: React-Ready

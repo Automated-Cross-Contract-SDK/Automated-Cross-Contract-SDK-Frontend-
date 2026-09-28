@@ -1,419 +1,260 @@
 # API Reference
 
-This document is a consolidated reference for the public API of
-`@soroban-resurrect/sdk` and `@soroban-resurrect/react-hook`. Every export
-listed here also carries full JSDoc (parameters, return values, `@throws`,
-`@see`, and `@example`) directly in source — hover it in your editor for
-inline docs, or read the linked source file below.
+This document describes the public API surface of the SDK. For integration guides see
+[`docs/integrations/adapters-and-wallets.md`](./integrations/adapters-and-wallets.md).
 
-For a narrative walkthrough of how these pieces fit together, see
-[`ARCHITECTURE.md`](../ARCHITECTURE.md). For the full, canonical
-`SorobanResurrectConfig` field table (kept in sync with `types.ts`), see
-[`docs/api/types.md`](api/types.md#sorobanresurrectconfig). For how to inject a
-test double / swap the RPC client in tests, see
-[`docs/guide/testing.md`](guide/testing.md).
+## MultiSig restore
 
-## Contents
+N-of-M restore support is provided by `MultiSigWalletAdapter`, `MultiSigSigner`,
+`MultiSigConfig`, and `SignatureCollectionResult`. The flow is **collect-then-submit**: build a
+restore transaction, collect signatures from each signer, then submit the fully signed
+transaction.
 
-- [`@soroban-resurrect/sdk`](#soroban-resurrectsdk)
-  - [`SorobanResurrect`](#sorobanresurrect)
-  - [`executeWithRestore`](#executewithrestore)
-  - [Archiver functions](#archiver-functions)
-  - [Restorer functions](#restorer-functions)
-  - [RPC Client Injection](#rpc-client-injection)
-  - [Processing State Helpers](#processing-state-helpers)
-  - [Types](#types)
-- [`@soroban-resurrect/react-hook`](#soroban-resurrectreact-hook)
-  - [`SorobanResurrectProvider` / `useSorobanResurrectContext`](#sorobanresurrectprovider--usesorobanresurrectcontext)
-  - [`useSorobanResurrect`](#usesorobanresurrect)
-- [Testing with an injected RPC client](#testing-with-an-injected-rpc-client)
+### Sequence diagram
 
----
+```mermaid
+sequenceDiagram
+    participant App
+    participant Adapter as MultiSigWalletAdapter
+    participant S1 as MultiSigSigner (1)
+    participant S2 as MultiSigSigner (2)
+    participant S3 as MultiSigSigner (3)
+    participant Chain
 
-## `@soroban-resurrect/sdk`
-
-Source: [`packages/sdk/src`](../packages/sdk/src)
-
-### `SorobanResurrect`
-
-Source: [`SorobanResurrect.ts`](../packages/sdk/src/SorobanResurrect.ts)
-
-The main facade class. Wraps a Soroban RPC server, detects archived ledger
-entries, and drives the full restore-and-submit workflow while publishing
-state transitions to subscribers.
-
-```ts
-new SorobanResurrect(config: SorobanResurrectConfig)
+    App->>Adapter: buildRestoreTransaction(config, restoreKeys)
+    Adapter-->>App: unsigned restore tx
+    App->>S1: sign(tx)
+    S1-->>App: signature
+    App->>S2: sign(tx)
+    S2-->>App: signature
+    Note over App,S3: S3 refuses to sign
+    App->>S3: sign(tx)
+    S3-->>App: refusal / error
+    App->>Adapter: collectSignatures(tx, signatures)
+    Adapter-->>App: SignatureCollectionResult
+    App->>Adapter: submitWithRestore(result)
+    Adapter->>Chain: submit signed tx
+    Chain-->>Adapter: tx receipt
+    Adapter-->>App: restore result
 ```
 
-| Member | Signature | Description |
-| --- | --- | --- |
-| `server` | `readonly rpc.Server` | The underlying Soroban RPC server instance. |
-| `config` | `readonly Required<SorobanResurrectConfig>` | Resolved configuration with defaults applied. Builds a default `SorobanRpcClient` from `rpcUrl` unless `rpcClient` is supplied — see [RPC Client Injection](#rpc-client-injection). |
-| `state` | `get state(): RestoreState` | Current workflow state. |
-| `stateInfo` | `get stateInfo(): RestoreStateInfo` | Snapshot of state, message, archived keys, and error. |
-| `onStateChange` | `(listener: (info: RestoreStateInfo) => void) => () => void` | Subscribe to state transitions. Returns an unsubscribe function. |
-| `reset` | `(): void` | Reset back to `idle`, clearing archived keys and errors. |
-| `simulate` | `(transaction: Transaction) => Promise<SimulateResponse>` | Simulate a transaction; sets state to `simulating`. |
-| `detectArchivedKeys` | `(transaction: Transaction) => Promise<ArchivedLedgerEntry[]>` | Detect archived entries using the configured detection method. Never throws. |
-| `needsRestore` | `(transaction: Transaction) => Promise<boolean>` | Convenience boolean wrapper around `detectArchivedKeys`. |
-| `buildRestoreTx` | `(sourcePublicKey: string, transaction: Transaction, simulationResponse?) => Promise<Transaction>` | Build an unsigned restore transaction. **Throws** if no restore is needed. |
-| `submitWithRestore` | `(options: SubmitWithRestoreOptions) => Promise<ResurrectResult>` | Full workflow: detect → restore (if needed) → submit original. Never throws — failures are returned in the result. |
+### Composing with `submitWithRestore` and `restoreKeys`
+
+- `restoreKeys` are the keys being restored; they are passed when building the restore
+  transaction and are not required again at submit time.
+- `submitWithRestore` accepts the `SignatureCollectionResult` produced by
+  `collectSignatures` and submits it once the threshold is met. It does not re-collect
+  signatures, so a partial collection can be resumed and submitted later.
+
+### Worked 2-of-3 example
 
 ```ts
-import { SorobanResurrect } from '@soroban-resurrect/sdk'
+import {
+  MultiSigWalletAdapter,
+  MultiSigConfig,
+  MultiSigSigner,
+} from "@sdk/wallets";
 
-const resurrect = new SorobanResurrect({ rpcUrl: 'https://soroban-testnet.stellar.org' })
+const config: MultiSigConfig = {
+  threshold: 2,
+  signers: [signerA, signerB, signerC],
+};
 
-const unsubscribe = resurrect.onStateChange((info) => console.log(info.state, info.message))
+const adapter = new MultiSigWalletAdapter(config);
 
-const result = await resurrect.submitWithRestore({
-  transaction: tx,
-  wallet,
-  onRestoreNeeded: (keys) => console.log(`Restoring ${keys.length} entries`),
-})
+// 1. Build the restore transaction for the keys being restored.
+const tx = await adapter.buildRestoreTransaction({ restoreKeys });
 
-if (!result.success) {
-  console.error(result.error)
+// 2. Collect signatures from each signer (2 of 3 required).
+const signatures = [];
+for (const signer of [signerA, signerB]) {
+  signatures.push(await signer.sign(tx));
 }
 
-unsubscribe()
+const result = await adapter.collectSignatures(tx, signatures);
+
+// 3. Submit once the threshold is met.
+const receipt = await adapter.submitWithRestore(result);
 ```
 
-`restoreKeys` skips the source-transaction step entirely — useful for
-proactive maintenance (e.g. restoring a contract's storage ahead of an
-upgrade):
+### Failure handling for a refusing signer
 
-```ts
-import { buildContractDataKey, buildContractCodeKey } from '@soroban-resurrect/sdk'
-
-const result = await resurrect.restoreKeys(
-  [buildContractDataKey(contractId, key), buildContractCodeKey(wasmHash)],
-  wallet,
-)
-if (result.success) console.log('Restored:', result.restoreTxHash)
-```
-
-### `executeWithRestore`
-
-Source: [`Executor.ts`](../packages/sdk/src/Executor.ts)
-
-```ts
-function executeWithRestore(params: ExecuteParams): Promise<ResurrectResult>
-```
-
-Lower-level, stateless orchestration function that `SorobanResurrect.submitWithRestore`
-wraps. Useful if you want to drive the restore workflow without the
-class's built-in state machine. Never throws — every failure path returns
-a `ResurrectResult` with `success: false`.
-
-### Archiver functions
-
-Source: [`Archiver.ts`](../packages/sdk/src/Archiver.ts)
-
-| Function                                                                                     | Description                                                                                                                                          |
-| -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `isRestoreResponse(response)`                                                                | Type guard: does the simulation response require a restore?                                                                                          |
-| `isSuccessResponse(response)`                                                                | Type guard: did the simulation succeed with no restore needed?                                                                                       |
-| `isErrorResponse(response)`                                                                  | Type guard: did the simulation fail?                                                                                                                 |
-| `extractArchivedKeys(response)`                                                              | Extract archived ledger keys from a restore response's footprint.                                                                                    |
-| `extractFootprintFromSuccess(response)`                                                      | Extract `{ readOnly, readWrite }` keys from a success response's footprint.                                                                          |
-| `detectArchivedEntries(server, ledgerKeys)`                                                  | Query the ledger directly to find which of the given keys are archived. Errors per-chunk are treated conservatively as archived.                     |
-| `detectArchivedKeysViaSimulation(server, transaction)`                                       | Simulation-based detection strategy (default).                                                                                                       |
-| `detectArchivedKeysViaDirect(server, transaction)`                                           | Direct-ledger-query detection strategy. **Throws** if simulation fails or already indicates a restore is needed.                                     |
-| `buildContractDataKey(contractId, key, keyType?)`                                            | Build a `ContractData` ledger key for a given contract ID and storage key.                                                                           |
-| `checkArchivedContractData(server, contractId, key, keyType?)` / `getContractDataEntry(...)` | Check/fetch a single contract storage entry without simulating a full transaction.                                                                   |
-| `buildContractCodeKey(wasmHash)`                                                             | Build a `ContractCode` (wasm) ledger key from a wasm hash — deployed contract bytecode expires and can be restored the same way as contract storage. |
-| `checkArchivedContractCode(server, wasmHash)` / `getContractCodeEntry(server, wasmHash)`     | Check/fetch a contract's wasm entry, e.g. before an upgrade or deployment that references an existing wasm hash.                                     |
-
-### Restorer functions
-
-Source: [`Restorer.ts`](../packages/sdk/src/Restorer.ts)
-
-| Function                                                                | Description                                                                                                                                                                                                                                                                 |
-| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `buildRestoreTransaction(params)`                                       | Build an unsigned `restoreFootprint` transaction. Fee = `minResourceFee * restoreFeeMultiplier`. **Throws** `RestoreFeeCapExceededError` if that fee exceeds `config.maxRestoreFeeStroops`.                                                                                 |
-| `buildRestoreTransactionFromKeys(params)`                               | Build an unsigned `restoreFootprint` transaction for an arbitrary list of ledger keys, with no source transaction or footprint required — prices the restore via a throwaway simulation, then delegates to `buildRestoreTransaction`. Backs `SorobanResurrect.restoreKeys`. |
-| `waitForTransaction(server, hash, pollIntervalMs?, pollTimeoutMs?)`     | Poll until a transaction reaches `SUCCESS`/`FAILED`, with exponential backoff + jitter. **Throws** on timeout.                                                                                                                                                              |
-| `extractXdrOperations(tx)`                                              | Extract raw XDR operations from a transaction, handling fee-bump envelopes.                                                                                                                                                                                                 |
-| `buildOriginalAfterRestore(server, originalTx, networkPassphrase, fee)` | Rebuild the original transaction after a successful restore (fresh sequence number + re-simulation). **Throws** if restoration was insufficient.                                                                                                                            |
-| `prepareTransaction(server, tx)`                                        | Simulate and assemble a transaction in one step. **Throws** on simulation error or if a restore is required.                                                                                                                                                                |
-| `isTxBadSeqError(sendResponse)`                                         | Type guard: was a `sendTransaction` response rejected specifically because of `tx_bad_seq`? Used by `executeWithRestore` to decide whether to rebuild-and-retry the original transaction.                                                                                   |
-
-### RPC Client Injection
-
-Source: [`RpcClient.ts`](../packages/sdk/src/RpcClient.ts)
-
-By default, `SorobanResurrect` talks to the network through a `SorobanRpcClient`
-that it builds internally from `config.rpcUrl`. To inject a custom transport —
-a caching proxy, a logging wrapper, a rate-limiter, or a test double — pass
-`config.rpcClient` instead. Every SDK function that talks to the network
-(`SorobanResurrect`, `executeWithRestore`, the `Archiver`/`Restorer` free
-functions) is typed against `ISorobanRpcClient`, not the concrete
-`rpc.Server` class, so any conforming object works.
-
-| Export | Description |
-| --- | --- |
-| `ISorobanRpcClient` (type) | Minimal interface covering the six `rpc.Server` methods the SDK uses: `simulateTransaction`, `sendTransaction`, `getTransaction`, `getAccount`, `getLedgerEntries`, `getLatestLedger`. |
-| `SorobanRpcClient` | Default implementation — a thin, transparent wrapper that delegates every call to an underlying `rpc.Server`. |
-| `createRpcClient(rpcUrl)` | Factory that returns a `SorobanRpcClient` bound to `rpcUrl`. The recommended way to build a client you intend to wrap or inject. |
-
-**Inject a custom client:**
-
-```ts
-import { createRpcClient, SorobanResurrect } from '@soroban-resurrect/sdk'
-
-const client = createRpcClient('https://soroban-testnet.stellar.org')
-const sdk = new SorobanResurrect({
-  rpcUrl: 'https://soroban-testnet.stellar.org',
-  rpcClient: client,
-})
-```
-
-**Wrap it with caching/logging** (see the runnable version in
-[`docs/guide/rpc-client-injection.md`](./guide/rpc-client-injection.md)):
-
-```ts
-import { createRpcClient, type ISorobanRpcClient } from '@soroban-resurrect/sdk'
-
-function withLogging(client: ISorobanRpcClient): ISorobanRpcClient {
-  return {
-    ...client,
-    async getLatestLedger(...args) {
-      console.log('[rpc] getLatestLedger')
-      return client.getLatestLedger(...args)
-    },
-  }
-}
-
-const sdk = new SorobanResurrect({
-  rpcUrl: 'https://soroban-testnet.stellar.org',
-  rpcClient: withLogging(createRpcClient('https://soroban-testnet.stellar.org')),
-})
-```
-
-**Test doubles:** implement `ISorobanRpcClient` directly — TypeScript enforces
-that every required method is present, so a mock can't silently omit one:
-
-```ts
-import type { ISorobanRpcClient } from '@soroban-resurrect/sdk'
-import { vi } from 'vitest'
-
-const mockClient: ISorobanRpcClient = {
-  simulateTransaction: vi.fn(),
-  sendTransaction: vi.fn(),
-  getTransaction: vi.fn(),
-  getAccount: vi.fn(),
-  getLedgerEntries: vi.fn(),
-  getLatestLedger: vi.fn(),
-}
-
-const sdk = new SorobanResurrect({ rpcUrl: '...', rpcClient: mockClient })
-```
-
-### Processing State Helpers
-
-Source: [`stateUtils.ts`](../packages/sdk/src/stateUtils.ts)
-
-Every framework hook (`react-hook`, `vue-hook`, `svelte-hook`) derives its
-`isProcessing` flag from these two exports rather than duplicating the state
-list — they are the single source of truth for what counts as "in flight".
-
-| Export | Description |
-| --- | --- |
-| `PROCESSING_STATES` | `Set<RestoreState>` containing every state considered actively in-flight. |
-| `isProcessingState(state)` | Predicate: `PROCESSING_STATES.has(state)`. |
-
-`PROCESSING_STATES` contains: `simulating`, `signing_restore`,
-`submitting_restore`, `confirming_restore`, `signing_original`,
-`submitting_original`.
-
-It excludes `idle`, `success`, and `error` because those are terminal or
-not-yet-started — no operation is running. It also excludes
-**`restore_needed`**: that state is set the instant archived entries are
-detected, as a notification that a restore is about to happen, but no
-network call or wallet prompt is in flight yet at that exact point — the
-workflow moves on to `signing_restore` (or, in `submitWithRestore`, straight
-into the restore flow) immediately after. Treating `restore_needed` as
-"processing" would make UI spinners appear one tick before there's actually
-anything to wait on.
-
-```ts
-import { isProcessingState, PROCESSING_STATES } from '@soroban-resurrect/sdk'
-
-isProcessingState('confirming_restore') // true
-isProcessingState('restore_needed')     // false
-isProcessingState('idle')               // false
-
-PROCESSING_STATES.has('signing_original') // true
-```
-
-Each hook's `isProcessing` field (React's `useSorobanResurrect` /
-`useSorobanResurrectContext`, Vue's `useSorobanResurrect` composable, and
-Svelte's `createSorobanResurrect` store) is computed by calling
-`isProcessingState(state.state)` — see
-[React Hook API](./api/react-hook.md#isprocessing-contract) for the React
-return shape, and each hook's source (`packages/vue-hook/src/useSorobanResurrect.ts`,
-`packages/svelte-hook/src/createSorobanResurrect.ts`) for the Vue/Svelte
-equivalents.
+If a signer refuses (throws or returns an error), `collectSignatures` records the failure in
+the returned `SignatureCollectionResult` rather than aborting the whole flow. As long as the
+number of successful signatures still meets `config.threshold`, the result can be passed to
+`submitWithRestore`. If the threshold is not met, `submitWithRestore` rejects and the partial
+result can be retained to collect the remaining signatures later.
 
 ### Types
 
-Source: [`types.ts`](../packages/sdk/src/types.ts)
+| Type | Description |
+| --- | --- |
+| `MultiSigWalletAdapter` | Builds restore transactions, collects signatures, and submits them. |
+| `MultiSigSigner` | A single signer that produces a signature for a restore transaction. |
+| `MultiSigConfig` | Threshold and signer set for an N-of-M wallet. |
+| `SignatureCollectionResult` | Outcome of `collectSignatures`, including collected signatures and per-signer failures. |
 
-- `SorobanResurrectConfig` — constructor options (`rpcUrl`, `networkPassphrase?`, `pollIntervalMs?`, `pollTimeoutMs?`, `restoreFeeMultiplier?`, `archiveDetectionMethod?`, `rpcClient?`). See [RPC Client Injection](#rpc-client-injection) for `rpcClient`.
-- `ISorobanRpcClient` — interface for injectable RPC transports/test doubles. See [RPC Client Injection](#rpc-client-injection).
-- `WalletAdapter` — `isConnected()`, `getPublicKey()`, `signTransaction(xdr, opts?)`.
-- `ArchivedLedgerEntry` — `{ key: xdr.LedgerKey, keyBase64: string }`.
-- `SimulateResponse` — alias for `rpc.Api.SimulateTransactionResponse`.
-- `ResurrectResult` — `{ success, originalTxHash?, restoreTxHash?, archivedKeysDetected, error?, sequenceRetries? }`. `sequenceRetries` counts `tx_bad_seq` rebuild-and-resubmit attempts for the original transaction (only present when a restore occurred).
-- `SubmitWithRestoreOptions` — `{ transaction, wallet, ...lifecycle callbacks }`.
-- `RestoreKeysOptions` — `{ onSigningRestore?, onSubmittingRestore?, onRestoreSubmitted?, onRestoreConfirmed? }`, passed to `SorobanResurrect.restoreKeys`.
-- `RestoreState` — the workflow's state machine states (see `ARCHITECTURE.md` for the diagram).
-- `RestoreStateInfo` — `{ state, message, archivedKeys?, error? }`.
-- `RestoreFeeCapExceededError` — thrown by `buildRestoreTransaction`/`restoreKeys` when the computed fee exceeds `maxRestoreFeeStroops`; carries `computedFeeStroops` and `capFeeStroops`.
-- `LedgerEntryTTLInfo` (from `TTLHelpers.ts`) — now includes `entryType: 'contractData' | 'contractCode' | 'other'`, so `queryLedgerTTL`/`getExpiringSoonEntries` results distinguish wasm (contract-code) entries from contract storage entries.
-- `ISorobanRpcClient` (from `RpcClient.ts`) — minimal RPC interface for dependency injection / test doubles; pass a custom implementation via `SorobanResurrectConfig.rpcClient`.
+## Restore cost estimation
 
----
+`estimateRestoreCost(transaction)` is the read-only companion to a restore flow. It inspects a
+transaction's footprint, determines whether any of its keys are archived, and returns the extra
+fee a restore would incur — **without submitting anything**. Use it to show the user what a
+restore will cost before they sign.
 
-## `@soroban-resurrect/react-hook`
-
-Source: [`packages/react-hook/src`](../packages/react-hook/src)
-
-### `SorobanResurrectProvider` / `useSorobanResurrectContext`
-
-Source: [`SorobanResurrectContext.tsx`](../packages/react-hook/src/SorobanResurrectContext.tsx)
-
-Context-based integration — instantiate the SDK once at the top of your
-component tree, then consume it anywhere below.
-
-```tsx
-import { SorobanResurrectProvider, useSorobanResurrectContext } from '@soroban-resurrect/react-hook'
-
-function App() {
-  return (
-    <SorobanResurrectProvider config={{ rpcUrl: 'https://soroban-testnet.stellar.org' }}>
-      <WithdrawButton />
-    </SorobanResurrectProvider>
-  )
-}
-
-function WithdrawButton() {
-  const { submitWithRestore, state, isProcessing } = useSorobanResurrectContext()
-  // useSorobanResurrectContext throws if called outside <SorobanResurrectProvider>
-  return (
-    <button onClick={() => submitWithRestore(tx, wallet)} disabled={isProcessing}>
-      {isProcessing ? state.message : 'Withdraw'}
-    </button>
-  )
-}
+```ts
+function estimateRestoreCost(transaction: Transaction): Promise<RestoreCostEstimate>;
 ```
 
-`useSorobanResurrectContext()` returns:
+### `RestoreCostEstimate`
 
-| Field                | Type                                       | Description                                 |
-| -------------------- | ------------------------------------------ | ------------------------------------------- |
-| `resurrect`          | `SorobanResurrect \| null`                 | Underlying SDK instance.                    |
-| `config`             | `SorobanResurrectConfig`                   | Config passed to the provider.              |
-| `state`              | `RestoreStateInfo`                         | Current workflow state snapshot.            |
-| `isProcessing`       | `boolean`                                  | `true` while a restore/submit is in flight. |
-| `submitWithRestore`  | `(tx, wallet) => Promise<ResurrectResult>` | Bound convenience wrapper.                  |
-| `detectArchivedKeys` | `(tx) => Promise<ArchivedLedgerEntry[]>`   | Bound convenience wrapper.                  |
-| `reset`              | `() => void`                               | Reset state back to `idle`.                 |
+| Field | Type | Description |
+| --- | --- | --- |
+| `minResourceFee` | `number` | Minimum resource fee for the restore, in stroops. |
+| `multiplier` | `number` | Fee multiplier applied to the restore resources. |
+| `estimatedFee` | `number` | Total estimated restore fee (`minResourceFee` scaled by `multiplier`), in stroops. |
+| `archivedKeysDetected` | `LedgerKey[]` | Footprint keys found to be archived and therefore needing a restore. |
+| `wouldNeedRestore` | `boolean` | `true` when at least one archived key was detected; `false` when no restore is required. |
 
-### `useSorobanResurrect`
+### Zero-fee behaviour (`wouldNeedRestore: false`)
 
-Source: [`useSorobanResurrect.ts`](../packages/react-hook/src/useSorobanResurrect.ts)
+When none of the transaction's footprint keys are archived, `wouldNeedRestore` is `false` and
+`estimatedFee` is `0` (with `archivedKeysDetected` empty). In that case no restore is needed and
+the transaction can be submitted as-is — you should not add the estimated fee to the user's
+cost, and you can skip the restore confirmation entirely.
 
-Standalone hook for components that don't sit under a
-`SorobanResurrectProvider`. Same return shape as `useSorobanResurrectContext()`
-(minus `config`), plus `resurrect: SorobanResurrect` (non-null).
+### Worked example: confirm the cost before signing
 
-```tsx
-import { useSorobanResurrect } from '@soroban-resurrect/react-hook'
+```ts
+import { estimateRestoreCost } from "@sdk/restore";
 
-function WithdrawButton() {
-  const { submitWithRestore, state, isProcessing } = useSorobanResurrect({
-    config: { rpcUrl: 'https://soroban-testnet.stellar.org' },
-  })
-  // ...
-}
-```
+const estimate = await estimateRestoreCost(tx);
 
-> Both `SorobanResurrectProvider` and `useSorobanResurrect` re-instantiate
-> the underlying `SorobanResurrect` (and reset state to `idle`) whenever
-> the `config` object changes by value.
-
----
-
-## Testing with an injected RPC client
-
-Source: [`RpcClient.ts`](../packages/sdk/src/RpcClient.ts)
-
-`SorobanResurrect.server` is `public readonly` and every internal caller
-(`SorobanResurrectExecutor`, `SorobanResurrectSimulator`) captures its own
-private reference to it at construction time — so **reassigning `sdk.server`
-after construction does nothing**, both because TypeScript's `readonly`
-rejects the assignment and because the internals wouldn't see it even if it
-compiled. The supported way to drive a deterministic workflow in a test is
-`config.rpcClient`, passed at construction: implement
-{@link ISorobanRpcClient} (six methods: `simulateTransaction`,
-`sendTransaction`, `getTransaction`, `getAccount`, `getLedgerEntries`,
-`getLatestLedger`) and the SDK uses it for every RPC call instead of
-constructing its own `rpc.Server` from `rpcUrl`.
-
-```typescript
-import { SorobanResurrect, type ISorobanRpcClient } from '@soroban-resurrect/sdk'
-
-// A minimal test double. TypeScript enforces every method is present —
-// omitting one is a compile error, not a runtime surprise partway through a test.
-const rpcClient: ISorobanRpcClient = {
-  simulateTransaction: vi.fn(),
-  sendTransaction: vi.fn(),
-  getTransaction: vi.fn(),
-  getAccount: vi.fn(),
-  getLedgerEntries: vi.fn(),
-  getLatestLedger: vi.fn(),
+if (estimate.wouldNeedRestore) {
+  // Show the extra cost to the user before they sign.
+  const feeXlm = estimate.estimatedFee / 10_000_000;
+  const confirmed = await ui.confirm(
+    `This transaction needs a restore of ${estimate.archivedKeysDetected.length} ` +
+      `archived key(s) and will cost an extra ${feeXlm} XLM. Continue?`,
+  );
+  if (!confirmed) return;
+} else {
+  // No archived keys: no restore, no extra fee.
+  console.log("No restore needed; submitting as-is.");
 }
 
-const resurrect = new SorobanResurrect({
-  rpcUrl: 'https://soroban-testnet.stellar.org', // still required; unused when rpcClient is set
-  rpcClient,
-})
+// Proceed to sign and submit only after the user has seen the cost.
+const signed = await signer.sign(tx);
+await submit(signed);
 ```
 
-### Restore-then-submit happy path
+See the [fee-model guide](./guide/fees.md) and the [TTL guides](./guide/ttl.md) for how restore
+fees fit into the overall fee model and TTL management.
 
-Drive the full `submitWithRestore` workflow deterministically by scripting
-`simulateTransaction` to first report a restore is needed, then succeed on
-the rebuilt original transaction:
+## Contract and account scanning
 
-```typescript
-const simulateTransaction = vi
-  .fn()
-  // 1st call: original tx simulation reports archived entries
-  .mockResolvedValueOnce(restoreNeededResponse)
-  // 2nd call: re-simulation of the rebuilt original tx succeeds
-  .mockResolvedValueOnce(successResponse)
+The scanning APIs answer "what in my contract or account is about to expire?" **without
+submitting a transaction**. They are read-only and safe to call from any client.
 
-const rpcClient: ISorobanRpcClient = {
-  simulateTransaction,
-  sendTransaction: vi.fn().mockResolvedValue({ status: 'PENDING', hash: 'abc' }),
-  getTransaction: vi.fn().mockResolvedValue({ status: 'SUCCESS' }),
-  getAccount: vi.fn().mockResolvedValue(new Account(publicKey, '1')),
-  getLedgerEntries: vi.fn(),
-  getLatestLedger: vi.fn(),
+### `getExpiringEntriesForContract`
+
+Scans a contract's entries and returns the ones whose TTL is at or below the configured
+threshold.
+
+```ts
+type ContractScanOptions = {
+  /** Ledger offset below which an entry is considered "expiring soon". */
+  expiringSoonLedgers?: number;
+  /** Instance entry to scan, if any. */
+  instance?: LedgerKey;
+  /** Wasm code entry to scan, if any. */
+  wasmCode?: LedgerKey;
+  /** Storage keys to scan. */
+  storageKeys?: LedgerKey[];
+};
+
+type ContractScanResult = {
+  instance?: ClassicEntryStatus;
+  wasmCode?: ClassicEntryStatus;
+  storage: ClassicEntryStatus[];
+};
+
+type ClassicEntryStatus = {
+  key: LedgerKey;
+  liveUntilLedger: number;
+  expiringSoon: boolean;
+};
+
+function getExpiringEntriesForContract(
+  contractId: string,
+  options?: ContractScanOptions,
+): Promise<ContractScanResult>;
+```
+
+> **Important limitation:** a contract's storage keys **cannot be enumerated** from the
+> ledger. You must supply the storage keys you care about via `options.storageKeys`.
+> Only the instance and wasm code entries can be discovered automatically. If you omit
+> `storageKeys`, the result's `storage` array will be empty.
+
+`DEFAULT_EXPIRING_SOON_LEDGERS` is the default threshold used when `expiringSoonLedgers`
+is not provided.
+
+### `getExpiringEntriesForAccount`
+
+Scans an account's presence and trustline entries. This is a **presence scan**, not a TTL
+scan: it reports whether the account and its trustlines exist, separately from any TTL
+information.
+
+```ts
+type AccountScanOptions = {
+  /** Trustline asset keys to check for presence. */
+  trustlines?: LedgerKey[];
+};
+
+function getExpiringEntriesForAccount(
+  accountId: string,
+  options?: AccountScanOptions,
+): Promise<ContractScanResult>;
+```
+
+### Worked example: instance, wasm code, and storage keys
+
+```ts
+import {
+  getExpiringEntriesForContract,
+  getExpiringEntriesForAccount,
+  DEFAULT_EXPIRING_SOON_LEDGERS,
+} from "@sdk/scanning";
+
+// Contract scan: instance + wasm code are discovered automatically, but storage
+// keys MUST be supplied by the caller.
+const contractResult = await getExpiringEntriesForContract(contractId, {
+  expiringSoonLedgers: DEFAULT_EXPIRING_SOON_LEDGERS,
+  instance: instanceKey,
+  wasmCode: wasmCodeKey,
+  storageKeys: [balanceKey, allowanceKey],
+});
+
+if (contractResult.instance?.expiringSoon) {
+  console.warn("contract instance is expiring soon");
+}
+for (const entry of contractResult.storage) {
+  if (entry.expiringSoon) {
+    console.warn("storage entry expiring soon", entry.key);
+  }
 }
 
-const resurrect = new SorobanResurrect({ rpcUrl: 'https://…', rpcClient })
-const result = await resurrect.submitWithRestore({ transaction: tx, wallet })
-
-expect(result.success).toBe(true)
-expect(result.restoreTxHash).toBeDefined()
-expect(simulateTransaction).toHaveBeenCalledTimes(2)
+// Account scan: presence of the account and its trustlines.
+const accountResult = await getExpiringEntriesForAccount(accountId, {
+  trustlines: [usdcTrustlineKey],
+});
 ```
 
-The same `rpcClient` object is reused by `queryLedgerTTL`, `getExpiringSoonEntries`,
-`sendTransaction`, and every other SDK method that talks to the network — one
-injected client is enough to control an entire test.
+### When to use scanning vs. `detectArchivedKeys`
+
+| API | Basis | Use when |
+| --- | --- | --- |
+| `getExpiringEntriesForContract` / `getExpiringEntriesForAccount` | Explicit keys you supply | You know which keys matter and want a transaction-free, read-only check. |
+| `detectArchivedKeys` | Transaction footprint | You have a transaction and want to know which of its footprint keys are archived. |
+
+Use the scanning APIs for proactive, transaction-free monitoring; use `detectArchivedKeys`
+when you already have a transaction and need to inspect its footprint.

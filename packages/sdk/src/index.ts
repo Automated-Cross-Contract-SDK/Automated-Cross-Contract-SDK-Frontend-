@@ -54,7 +54,7 @@ export type {
 } from './types.js'
 export type { WalletErrorCode } from './types.js'
 export { WalletError } from './types.js'
-export { ResurrectError } from './errors.js'
+export { ResurrectError, RestoreFeeExceededError } from './errors.js'
 
 // ---------------------------------------------------------------------------
 // RPC abstraction layer (dependency injection / testing — see RpcClient.ts)
@@ -132,6 +132,12 @@ export type { ParsableTransactionResponse } from './TransactionFailure.js'
 export type { LedgerEntryTTLInfo, TTLQueryResult, LedgerKeyEntryType } from './TTLHelpers.js'
 
 // ---------------------------------------------------------------------------
+// Proactive TTL watching (resurrect.watchTTL)
+// ---------------------------------------------------------------------------
+export { watchTTL } from './TTLWatch.js'
+export type { TTLWatchOptions, TTLWatchHandle } from './TTLWatch.js'
+
+// ---------------------------------------------------------------------------
 // Fee calculation (returned by SorobanResurrect.estimateRestoreCost)
 // ---------------------------------------------------------------------------
 export type { RestoreCostEstimate } from './feeCalculation.js'
@@ -196,43 +202,4 @@ export {
 export type { RestoreTxDiagnostics, EvaluateRestoreFootprintOptions } from './footprintGuard.js'
 
 // ---------------------------------------------------------------------------
-// Typed event emitter (used by SorobanResurrect.on / once / off)
-// ---------------------------------------------------------------------------
-export {
-  walletMaySupport,
-  walletDeclares,
-  assertWalletCapability,
-  walletMaxOperations,
-} from './walletCapabilities.js'
-export type { BooleanWalletCapability } from './walletCapabilities.js'
-
-export { TypedEventEmitter } from './EventEmitter.js'
-export {
-  ok,
-  err,
-  some,
-  none,
-  toResult,
-  toResultAsync,
-  fromNullable,
-  extractArchivedKeysSafe,
-  extractFootprintFromSuccessSafe,
-} from './result.js'
-export type { Result, Option } from './result.js'
-export { resolveConfig } from './SorobanResurrectConfig.js'
-export type { ResolvedConfig } from './SorobanResurrectConfig.js'
-export { SorobanResurrectStateManager } from './SorobanResurrectState.js'
-export { isProcessingState } from './stateUtils.js'
-export { SorobanResurrectSimulator } from './SorobanResurrectSimulation.js'
-export { SorobanResurrectExecutor } from './SorobanResurrectExecution.js'
-export {
-  queryLedgerTTL,
-  queryLedgerEntryTTL,
-  getExpiringSoonEntries,
-  getArchivedEntries,
-  getLedgerKeyEntryType,
-} from './TTLHelpers.js'
-export type { TransactionHistoryEntry, TransactionAttemptStatus } from './TransactionHistory.js'
-export { TransactionHistory } from './TransactionHistory.js'
-export type { ISorobanRpcClient } from './RpcClient.js'
-export type { TTLWatchOptions, TTLWatchHandle } from './TTLWatch.js'
+//

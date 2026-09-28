@@ -1,5 +1,5 @@
 import { Transaction } from '@stellar/stellar-sdk'
-import { ResurrectResult } from './types.js'
+import type { ResurrectResult } from './types.js'
 import { asHistoryEntryId, type HistoryEntryId } from './branded-types.js'
 
 /**

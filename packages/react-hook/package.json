@@ -26,10 +26,19 @@
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "react-native": "./dist/native.js",
   "exports": {
     ".": {
+      "react-native": {
+        "import": "./dist/native.js",
+        "types": "./dist/native.d.ts"
+      },
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./native": {
+      "import": "./dist/native.js",
+      "types": "./dist/native.d.ts"
     },
     "./standalone": {
       "import": "./dist/standalone.js",
