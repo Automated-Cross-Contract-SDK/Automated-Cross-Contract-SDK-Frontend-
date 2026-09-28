@@ -1,3 +1,4 @@
+import { ResurrectError, ResurrectErrorCode } from './errors.js'
 import type { WalletAdapter, WalletCapabilities } from './types.js'
 
 /**
@@ -37,9 +38,10 @@ export function walletDeclares(
 }
 
 /**
- * Throws a descriptive error when the wallet has explicitly opted out of a
- * capability the SDK is about to rely on. No-op when the capability is
- * supported or unknown.
+ * Throws a {@link ResurrectError} with code
+ * {@link ResurrectErrorCode.UNSUPPORTED_WALLET_CAPABILITY} when the wallet has
+ * explicitly opted out of a capability the SDK is about to rely on. No-op when
+ * the capability is supported or unknown.
  */
 export function assertWalletCapability(
   wallet: Pick<WalletAdapter, 'capabilities'>,
@@ -47,10 +49,12 @@ export function assertWalletCapability(
   context: string,
 ): void {
   if (wallet.capabilities?.[flag] === false) {
-    throw new Error(
+    throw new ResurrectError(
       `${context}: the connected wallet declares it does not support "${flag}" ` +
         `(capabilities.${flag} === false). Use a wallet that supports this feature ` +
         `or remove the code path that requires it.`,
+      ResurrectErrorCode.UNSUPPORTED_WALLET_CAPABILITY,
+      { capability: flag, context },
     )
   }
 }
