@@ -1,76 +1,126 @@
-# SDK API Reference (`@soroban-resurrect/sdk`)
+# SDK API
 
-## `SorobanResurrect`
+The `@handsoff/sdk` package exposes the wallet adapter layer used by every integration.
+This page documents the `WalletAdapter` contract, the `createAdapter` factory, the
+`KnownWallet` / `SUPPORTED_WALLETS` registry, the capability flags, the hardware
+wallet setup for Ledger and Trezor, the N-of-M multisig restore flow, the
+transaction-free contract and account scanning APIs, and the `estimateRestoreCost`
+helper for pricing a restore before the user signs.
 
-Main facade for the SDK. Provides a high-level API for detecting archived ledger entries, building restore transactions, and submitting transactions with automatic archive restoration. State changes are published to registered listeners via the observer pattern.
+## `WalletAdapter`
 
-```typescript
-import { SorobanResurrect } from '@soroban-resurrect/sdk'
+Every wallet integration implements the same contract:
 
-const sr = new SorobanResurrect({ rpcUrl: 'https://soroban-testnet.stellar.org' })
+```ts
+export interface WalletAdapter {
+  /** Stable identifier, usually a `KnownWallet` value. */
+  readonly id: string;
+  /** Human readable name shown in wallet pickers. */
+  readonly name: string;
+  /** Capabilities this adapter supports. */
+  readonly capabilities: WalletCapabilities;
+  /** Connect and resolve the active account. */
+  connect(): Promise<WalletAccount>;
+  /** Disconnect and release any transport resources. */
+  disconnect(): Promise<void>;
+  /** Sign a transaction payload. */
+  signTransaction(tx: Transaction): Promise<SignedTransaction>;
+  /** Sign an arbitrary message. */
+  signMessage(message: Uint8Array): Promise<Uint8Array>;
+}
 ```
 
-### Constructor
+## `createAdapter`
 
-```typescript
-constructor(config: SorobanResurrectConfig)
+`createAdapter` is the factory used to instantiate an adapter from a `KnownWallet`
+value or a custom adapter class. It normalises configuration, applies defaults, and
+returns a ready-to-use `WalletAdapter`.
+
+```ts
+import { createAdapter, KnownWallet } from '@handsoff/sdk';
+
+const adapter = createAdapter(KnownWallet.Phantom);
+await adapter.connect();
 ```
 
-See [`SorobanResurrectConfig`](/api/types#sorobanresurrectconfig) for all options and their defaults — including `rpcClient` for injecting a test double (see [Testing](/guide/testing)).
+It accepts either a known wallet or a custom adapter:
 
-### Properties
-
-| Property    | Type                              | Description                                          |
-| ----------- | --------------------------------- | ----------------------------------------------------- |
-| `server`    | `ISorobanRpcClient`               | The RPC client instance — `config.rpcClient` when supplied, otherwise an auto-created `SorobanRpcClient`. See [Testing](/guide/testing). |
-| `config`    | `Required<SorobanResurrectConfig>`| Resolved configuration with all defaults applied.     |
-| `state`     | `RestoreState`                    | Current workflow state (getter).                      |
-| `stateInfo` | `RestoreStateInfo`                | State + message + archived keys + error (getter).     |
-
-### Methods
-
-#### `simulate(transaction)`
-
-```typescript
-simulate(transaction: Transaction): Promise<SimulateResponse>
+```ts
+const adapter = createAdapter({
+  wallet: KnownWallet.Ledger,
+  config: { transport, manifest },
+});
 ```
 
-Simulates a transaction on the Soroban RPC endpoint. Updates internal state to `'simulating'`.
+## `KnownWallet` and `SUPPORTED_WALLETS`
 
-#### `detectArchivedKeys(transaction)`
+`KnownWallet` enumerates every wallet the SDK ships an adapter for. `SUPPORTED_WALLETS`
+is the runtime list (id, name, capabilities) used to build wallet pickers.
 
-```typescript
-detectArchivedKeys(transaction: Transaction): Promise<ArchivedLedgerEntry[]>
+| `KnownWallet` value | Adapter | Notes |
+| --- | --- | --- |
+| `KnownWallet.Phantom` | `PhantomWalletAdapter` | Browser extension |
+| `KnownWallet.Solflare` | `SolflareWalletAdapter` | Browser extension |
+| `KnownWallet.Backpack` | `BackpackWalletAdapter` | Browser extension |
+| `KnownWallet.Glow` | `GlowWalletAdapter` | Browser extension |
+| `KnownWallet.Ledger` | `LedgerWalletAdapter` | Hardware, requires transport + manifest |
+| `KnownWallet.Trezor` | `TrezorWalletAdapter` | Hardware, requires transport + manifest |
+
+```ts
+import { SUPPORTED_WALLETS } from '@handsoff/sdk';
+
+for (const wallet of SUPPORTED_WALLETS) {
+  console.log(wallet.id, wallet.name, wallet.capabilities);
+}
 ```
 
-Detects archived ledger entries using the configured `archiveDetectionMethod` (`'simulation'` by default, or `'direct'`). Returns an empty array if none are found or detection fails.
+## Capability flags
 
-With `'direct'` detection, a large footprint is split into chunks of `archiveDetectionChunkSize` keys (50 by default) and `archiveDetectionConcurrency` chunk requests (4 by default) are kept in flight at once, so detection cost scales with `ceil(chunks / concurrency)` round trips rather than one per chunk. Raise the concurrency for faster detection, lower it to stay under an endpoint's rate limit — a rate-limited chunk is conservatively reported as archived. Returned entries keep the footprint's key order regardless of which request settles first.
+Each adapter advertises what it can do. The SDK branches on these flags, so an
+unsupported operation fails fast instead of silently degrading.
 
-#### `needsRestore(transaction)`
+| Flag | Meaning | SDK behaviour that depends on it |
+| --- | --- | --- |
+| `signTransaction` | Can sign transactions | `signTransaction()` is exposed; otherwise the call throws `UnsupportedCapabilityError` |
+| `signMessage` | Can sign arbitrary messages | `signMessage()` is exposed; used by auth / SIWS flows |
+| `hardware` | Backed by a hardware device | Enables transport lifecycle management and blind-signing warnings |
+| `blindSigning` | Device can sign without full display | SDK emits a blind-signing warning before signing |
+| `multiAccount` | Can expose multiple accounts | Account picker is shown after `connect()` |
 
-```typescript
-needsRestore(transaction: Transaction): Promise<boolean>
+## Hardware wallets
+
+Hardware adapters need a transport to talk to the device and a manifest so the
+device can display the requesting app. Both are passed through `createAdapter`.
+
+### Ledger
+
+```bash
+npm install @ledgerhq/hw-transport-webhid @ledgerhq/hw-app-solana
 ```
 
-Convenience wrapper around `detectArchivedKeys` — returns `true` if the transaction requires restoration before it can be submitted.
+```ts
+import TransportWebHID from '@ledgerhq/hw-transport-webhid';
+import { createAdapter, KnownWallet } from '@handsoff/sdk';
 
-#### `buildRestoreTx(sourcePublicKey, transaction, simulationResponse?)`
+const transport = await TransportWebHID.create();
 
-```typescript
-buildRestoreTx(
-  sourcePublicKey: string,
-  transaction: Transaction,
-  simulationResponse?: rpc.Api.SimulateTransactionRestoreResponse,
-): Promise<Transaction>
+const adapter = createAdapter({
+  wallet: KnownWallet.Ledger,
+  config: {
+    transport,
+    manifest: {
+      name: 'My App',
+      url: 'https://example.com',
+      icon: 'https://example.com/icon.png',
+    },
+  } satisfies LedgerAdapterConfig,
+});
 ```
 
-Builds a restore transaction for the given source account and transaction. If `simulationResponse` is omitted, the transaction is simulated first (updating state to `'simulating'`). Throws if the simulation does not indicate a restore is needed.
+### Trezor
 
-#### `submitWithRestore(options)`
-
-```typescript
-submitWithRestore(options: SubmitWithRestoreOptions): Promise<ResurrectResult>
+```bash
+npm install @trezor/connect-web
 ```
 
 Submits a transaction with automatic archive restoration. If the simulation detects archived entries, a restore transaction is built, signed, submitted, and confirmed before the original transaction is rebuilt and submitted. State transitions are published to all registered listeners throughout. See [`SubmitWithRestoreOptions`](/api/types#submitwithrestoreoptions) for the full set of lifecycle callbacks.
@@ -102,80 +152,119 @@ invoked either. If fee estimation fails, the error is surfaced on
 onStateChange(listener: (info: RestoreStateInfo) => void): () => void
 ```
 
-Registers a listener for state changes. Returns an unsubscribe function.
+### Latency and UX
 
-#### `reset()`
+Hardware signing is interactive: the user must confirm on the device. Expect
+several seconds per signature versus sub-second for browser wallets, and design
+flows so each signature is a deliberate step. When `blindSigning` is set the SDK
+warns the user that the device cannot display the full payload before they confirm.
 
-```typescript
-reset(): void
+## Custom adapters
+
+Implement `WalletAdapter` and pass the class to `createAdapter`:
+
+```ts
+import { createAdapter, type WalletAdapter } from '@handsoff/sdk';
+
+class MyWalletAdapter implements WalletAdapter {
+  readonly id = 'my-wallet';
+  readonly name = 'My Wallet';
+  readonly capabilities = {
+    signTransaction: true,
+    signMessage: false,
+    hardware: false,
+    blindSigning: false,
+    multiAccount: false,
+  };
+
+  async connect() {
+    /* ... */
+  }
+  async disconnect() {
+    /* ... */
+  }
+  async signTransaction(tx) {
+    /* ... */
+  }
+  async signMessage() {
+    throw new Error('signMessage is not supported');
+  }
+}
+
+const adapter = createAdapter({ adapter: MyWalletAdapter });
 ```
 
-Resets the instance back to `'idle'` state, clearing any archived keys and error messages from previous workflows.
+## `estimateRestoreCost`
 
-## Standalone Functions
+`estimateRestoreCost(transaction)` prices the restore work a transaction would
+trigger before the user signs. It inspects the transaction's ledger keys, detects
+which of them are archived, and returns the extra fee the restore would add on top
+of the base fee. It is the natural companion to a "this will cost extra because it
+needs a restore" confirmation step.
 
-These are exported alongside the class for advanced/lower-level usage:
-
-| Export                          | Module        | Description                                                                 |
-| -------------------------------- | ------------- | ----------------------------------------------------------------------------- |
-| `executeWithRestore(params)`     | `Executor.js` | Runs the full restore-and-submit workflow used internally by `submitWithRestore`. |
-| `isRestoreResponse(response)`    | `Archiver.js` | Type guard for a restore-required simulation response.                        |
-| `isSuccessResponse(response)`    | `Archiver.js` | Type guard for a successful simulation response.                              |
-| `isErrorResponse(response)`      | `Archiver.js` | Type guard for an error simulation response.                                  |
-| `extractArchivedKeys(response)`  | `Archiver.js` | Extracts archived ledger keys from a restore simulation response.             |
-| `extractFootprintFromSuccess(response)` | `Archiver.js` | Extracts read-only/read-write ledger keys from a success simulation footprint. |
-| `detectArchivedEntries(server, keys, options?)` | `Archiver.js` | Queries the RPC server directly to find which ledger keys are archived, in parallel chunks. |
-| `detectArchivedKeysViaSimulation(server, tx)` | `Archiver.js` | Detects archived keys via the simulation-restore-response approach. |
-| `detectArchivedKeysViaDirect(server, tx, options?)` | `Archiver.js` | Detects archived keys by querying the ledger directly.     |
-| `buildRestoreTransaction(params)` | `Restorer.js` | Builds a restore transaction from simulation data.                            |
-| `buildOriginalAfterRestore(server, tx, networkPassphrase, fee)` | `Restorer.js` | Rebuilds the original transaction after a successful restore.  |
-| `waitForTransaction(server, hash, pollIntervalMs?, pollTimeoutMs?)` | `Restorer.js` | Polls until a transaction reaches a terminal status.       |
-| `prepareTransaction(server, tx)` | `Restorer.js` | Simulates and assembles a transaction; throws on error or restore-required. |
-| `extractXdrOperations(tx)`       | `Restorer.js` | Extracts XDR operations from a transaction, handling fee-bump envelopes.       |
-| `createDebugger(namespace)`      | `Debug.js`    | Creates a namespaced debug logger. See [Debug logging](#debug-logging).        |
-| `isDebugEnabled(namespace)`      | `Debug.js`    | Returns whether the active `DEBUG` filter enables a namespace.                 |
-| `refreshDebugFilter(spec?)`      | `Debug.js`    | Re-reads the filter after `DEBUG` or `localStorage.debug` changes at runtime.  |
-
-## Debug logging
-
-The SDK logs its internal operations through a namespaced debug logger. Nothing
-is printed unless logging is switched on explicitly.
-
-In Node, set the `DEBUG` environment variable:
-
-```bash
-DEBUG=soroban-resurrect:* node script.js
+```ts
+export function estimateRestoreCost(
+  transaction: Transaction,
+): Promise<RestoreCostEstimate>;
 ```
 
-In a browser, set `localStorage.debug` and reload:
+### `RestoreCostEstimate`
 
-```js
-localStorage.debug = 'soroban-resurrect:*'
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `minResourceFee` | `number` | Minimum resource fee (in stroops) the network charges for the restore operation. |
+| `multiplier` | `number` | Fee multiplier applied to `minResourceFee` to derive `estimatedFee`. |
+| `estimatedFee` | `number` | Total estimated restore fee (in stroops): `minResourceFee * multiplier`. |
+| `archivedKeysDetected` | `PublicKey[]` | Ledger keys referenced by the transaction that are currently archived. |
+| `wouldNeedRestore` | `boolean` | Whether the transaction would trigger a restore at all. |
+
+### Zero-fee behaviour
+
+When none of the transaction's ledger keys are archived, `wouldNeedRestore` is
+`false`, `archivedKeysDetected` is empty, and `estimatedFee` is `0`. In that case
+the transaction can be submitted as-is and no restore step is required — skip the
+confirmation prompt entirely.
+
+### Worked example: confirm the cost before signing
+
+```ts
+import { estimateRestoreCost } from '@handsoff/sdk';
+
+const estimate = await estimateRestoreCost(transaction);
+
+if (estimate.wouldNeedRestore) {
+  // Surface the extra cost to the user before they sign.
+  const feeInSol = estimate.estimatedFee / 1e9;
+  const confirmed = await confirm({
+    title: 'This transaction needs a restore',
+    message:
+      `${estimate.archivedKeysDetected.length} archived key(s) will be restored. ` +
+      `Estimated extra fee: ${feeInSol} SOL.`,
+  });
+
+  if (!confirmed) {
+    return; // User declined — do not sign or submit.
+  }
+} else {
+  // wouldNeedRestore === false: no restore, no extra fee.
+  console.log('No restore needed; estimatedFee is 0.');
+}
+
+const signed = await adapter.signTransaction(transaction);
+await submit(signed);
 ```
 
-### Namespaces
-
-| Namespace | What it logs |
-|-----------|--------------|
-| `soroban-resurrect:core` | State transitions and archived-key detection on the `SorobanResurrect` instance. |
-| `soroban-resurrect:archiver` | Chunked ledger-entry queries and their archived/not-archived outcomes. |
-| `soroban-resurrect:executor` | The restore-and-submit workflow. |
-
-Patterns support `*` as a wildcard, comma or space separated, and a leading `-`
-to exclude:
-
-```bash
-DEBUG=soroban-resurrect:archiver          # one namespace
-DEBUG=soroban-resurrect:*,-soroban-resurrect:core   # all but core
-```
-
-### Logging from your own code
+See the [fee model guide](../guide/fee-model.md) for how the restore fee fits into
+the overall fee calculation, and the [TTL guides](../guide/ttl.md) for how entries
+become archived in the first place.
 
 `createDebugger` is exported, so application code can log under the same
 namespaces and honour the same `DEBUG` filter:
 
-```typescript
-import { createDebugger } from '@soroban-resurrect/sdk'
+The scanning APIs answer "what in my contract or account is about to expire?"
+without submitting a transaction. They read ledger entries directly and report
+which ones are close to their TTL, so a dApp can prompt the user to extend or
+restore state before it is archived.
 
 const debug = createDebugger('soroban-resurrect:my-app')
 debug('restore started for %d keys', keys.length)
