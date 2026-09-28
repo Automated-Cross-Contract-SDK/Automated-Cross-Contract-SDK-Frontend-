@@ -34,6 +34,15 @@ export interface UseSorobanResurrectReturn {
   isSuccess: ComputedRef<boolean>
   /** Whether the last operation ended in an error. */
   isError: ComputedRef<boolean>
+  /**
+   * Archived ledger entries detected for the current workflow. Empty outside
+   * `restore_needed` and later states.
+   */
+  archivedKeys: ComputedRef<ArchivedLedgerEntry[]>
+  /** Result of the most recent `submitWithRestore` call, success or failure. */
+  lastResult: ReturnType<typeof ref<ResurrectResult | null>>
+  /** Estimated restore cost for the current workflow, when available. */
+  feeEstimate: ComputedRef<number | null>
   /** Submit a transaction with automatic archive restoration. */
   submitWithRestore: (transaction: Transaction, wallet: WalletAdapter) => Promise<ResurrectResult>
   /** Check if a transaction requires archive restoration. */
@@ -70,6 +79,7 @@ export function useSorobanResurrect(
 ): UseSorobanResurrectReturn {
   const resurrect = shallowRef<SorobanResurrect | null>(null)
   const state = ref<RestoreStateInfo>({ state: 'idle', message: '' })
+  const lastResult = ref<ResurrectResult | null>(null)
   let unsubscribeState: (() => void) | null = null
 
   // Watch config changes and reinitialize the SDK
@@ -84,6 +94,7 @@ export function useSorobanResurrect(
 
       resurrect.value = new SorobanResurrect(newConfig)
       state.value = { state: 'idle', message: '' }
+      lastResult.value = null
 
       unsubscribeState = resurrect.value.onStateChange((info: RestoreStateInfo) => {
         state.value = info
@@ -107,14 +118,50 @@ export function useSorobanResurrect(
   const isSuccess = computed(() => state.value.state === 'success')
   const isError = computed(() => state.value.state === 'error')
 
+  // `archivedKeys` is only meaningful once restoration is relevant, i.e. from
+  // `restore_needed` onward. Outside those states it stays empty.
+  const archivedKeys = computed<ArchivedLedgerEntry[]>(() => {
+    const info = state.value as RestoreStateInfo & {
+      archivedKeys?: ArchivedLedgerEntry[]
+    }
+    if (info.state === 'idle' || info.state === 'detecting') return []
+    return info.archivedKeys ?? []
+  })
+
+  // `feeEstimate` mirrors the SDK-provided estimate on the state snapshot when
+  // present, falling back to the last result's estimate.
+  const feeEstimate = computed<number | null>(() => {
+    const info = state.value as RestoreStateInfo & {
+      feeEstimate?: number
+      estimatedFee?: number
+    }
+    if (typeof info.feeEstimate === 'number') return info.feeEstimate
+    if (typeof info.estimatedFee === 'number') return info.estimatedFee
+    const result = lastResult.value as (ResurrectResult & {
+      feeEstimate?: number
+      estimatedFee?: number
+    }) | null
+    if (result && typeof result.feeEstimate === 'number') return result.feeEstimate
+    if (result && typeof result.estimatedFee === 'number') return result.estimatedFee
+    return null
+  })
+
   const submitWithRestore = async (
     transaction: Transaction,
     wallet: WalletAdapter,
   ): Promise<ResurrectResult> => {
     if (!resurrect.value) {
-      return { success: false, archivedKeysDetected: 0, error: 'Not initialized' }
+      const result: ResurrectResult = {
+        success: false,
+        archivedKeysDetected: 0,
+        error: 'Not initialized',
+      }
+      lastResult.value = result
+      return result
     }
-    return resurrect.value.submitWithRestore({ transaction, wallet })
+    const result = await resurrect.value.submitWithRestore({ transaction, wallet })
+    lastResult.value = result
+    return result
   }
 
   const detectArchivedKeys = async (transaction: Transaction): Promise<ArchivedLedgerEntry[]> => {
@@ -139,6 +186,9 @@ export function useSorobanResurrect(
     isIdle,
     isSuccess,
     isError,
+    archivedKeys,
+    lastResult,
+    feeEstimate,
     submitWithRestore,
     detectArchivedKeys,
     reset,
