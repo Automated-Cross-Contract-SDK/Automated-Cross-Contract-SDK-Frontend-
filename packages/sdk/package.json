@@ -48,7 +48,7 @@
     "@xstate/fsm": "2.0.1"
   },
   "devDependencies": {
-    "@vitest/coverage-v8": "^5.0.1",
+    "@vitest/coverage-v8": "^5.0.2",
     "fast-check": "^4.10.2",
     "tsup": "^8.5.1",
     "typescript": "^7.0.2",
