@@ -33,6 +33,9 @@ export type KnownWallet =
   | 'albedo'
   | 'lobstr'
   | 'xbull'
+  | 'rabet'
+  | 'walletconnect'
+  | 'walletkit'
   | 'ledger'
   | 'trezor'
 
@@ -42,6 +45,9 @@ export const SUPPORTED_WALLETS: readonly KnownWallet[] = [
   'albedo',
   'lobstr',
   'xbull',
+  'rabet',
+  'walletconnect',
+  'walletkit',
   'ledger',
   'trezor',
 ] as const
@@ -79,6 +85,21 @@ const REGISTRY: Record<KnownWallet, BrowserEntry | HardwareEntry> = {
     kind: 'browser',
     pkg: '@soroban-resurrect/adapter-xbull',
     exportName: 'XBullAdapter',
+  },
+  rabet: {
+    kind: 'browser',
+    pkg: '@soroban-resurrect/adapter-rabet',
+    exportName: 'RabetAdapter',
+  },
+  walletconnect: {
+    kind: 'browser',
+    pkg: '@soroban-resurrect/adapter-walletconnect',
+    exportName: 'WalletConnectAdapter',
+  },
+  walletkit: {
+    kind: 'browser',
+    pkg: '@soroban-resurrect/adapter-walletkit',
+    exportName: 'WalletKitAdapter',
   },
   ledger: {
     kind: 'hardware',

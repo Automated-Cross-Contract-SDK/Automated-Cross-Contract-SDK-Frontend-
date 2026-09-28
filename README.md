@@ -486,5 +486,5 @@ MIT
 
 ## Handsoff notes
 
-<!-- handsoff-issue-372 -->
-- #372: SDK: reset() leaves the standalone archived-key cache populated
+<!-- handsoff-issue-366 -->
+- #366: SDK: futurenet presets resolve to a passphrase the config validator rejects

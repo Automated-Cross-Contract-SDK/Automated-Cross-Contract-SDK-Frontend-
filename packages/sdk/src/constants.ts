@@ -123,3 +123,53 @@ export function resolveNetworkPassphrase(rpcUrl: string): string | undefined {
     return undefined
   }
 }
+
+/** Canonical Soroban network names supported by the SDK. */
+export type SorobanNetworkName = 'testnet' | 'mainnet' | 'futurenet'
+
+/**
+ * A named Soroban network preset.
+ *
+ * Bundles the RPC endpoint, the network passphrase used to sign transactions,
+ * and a human-readable label for display in UIs and logs.
+ */
+export interface SorobanNetworkPreset {
+  /** Canonical network name. */
+  name: SorobanNetworkName
+  /** Soroban RPC endpoint URL. */
+  rpcUrl: string
+  /** Network passphrase used when signing transactions. */
+  networkPassphrase: string
+  /** Human-readable label for display in UIs and logs. */
+  displayName: string
+}
+
+/**
+ * Built-in network presets for the Soroban Testnet, Mainnet, and Futurenet.
+ *
+ * @example
+ * ```ts
+ * import { NETWORK_PRESETS } from '@soroban-resurrect/sdk'
+ * const { rpcUrl, networkPassphrase } = NETWORK_PRESETS.testnet
+ * ```
+ */
+export const NETWORK_PRESETS: Record<SorobanNetworkName, SorobanNetworkPreset> = {
+  testnet: {
+    name: 'testnet',
+    rpcUrl: 'https://soroban-testnet.stellar.org',
+    networkPassphrase: 'Test SDF Network ; September 2015',
+    displayName: 'Soroban Testnet',
+  },
+  mainnet: {
+    name: 'mainnet',
+    rpcUrl: 'https://soroban-mainnet.stellar.org',
+    networkPassphrase: 'Public Global Stellar Network ; September 2015',
+    displayName: 'Soroban Mainnet',
+  },
+  futurenet: {
+    name: 'futurenet',
+    rpcUrl: 'https://futurenet.stellar.org',
+    networkPassphrase: 'Test SDF Future Network ; October 2022',
+    displayName: 'Soroban Futurenet',
+  },
+}

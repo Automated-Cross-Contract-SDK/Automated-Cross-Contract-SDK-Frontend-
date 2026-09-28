@@ -64,10 +64,12 @@ export type ResurrectErrorCode =
   | 'UNEXPECTED_SIMULATION_RESPONSE'
 
   /**
-   * The computed restore fee exceeded the configured
-   * `maxRestoreFeeStroops` cap. The transaction was not signed.
+   * The connected wallet declared that it does not support a required
+   * capability (e.g. `capabilities.feeBump === false` or
+   * `capabilities.signAuthEntry === false`). The caller should surface a
+   * "wallet not supported" message rather than a generic failure.
    */
-  | 'RESTORE_FEE_CAP_EXCEEDED'
+  | 'UNSUPPORTED_WALLET_CAPABILITY'
 
   /**
    * An unexpected JavaScript exception was thrown during the workflow.

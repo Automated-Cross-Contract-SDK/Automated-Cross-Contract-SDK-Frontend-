@@ -1,5 +1,6 @@
 import type { SorobanResurrectConfig } from './types.js'
-import { SorobanRpcClient, type ISorobanRpcClient } from './RpcClient.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
+import { SorobanRpcClient } from './RpcClient.js'
 import {
   DEFAULT_NETWORK_PASSPHRASE,
   POLL_INTERVAL_MS,
@@ -225,6 +226,13 @@ export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
     archiveDetectionMethod: config.archiveDetectionMethod ?? 'simulation',
     useSSE: config.useSSE ?? false,
     enableSimulationCache: config.enableSimulationCache ?? false,
+    rpcTimeoutMs: config.rpcTimeoutMs ?? RPC_TIMEOUT_MS,
+    rpcRetryCount: config.rpcRetryCount ?? RPC_RETRY_COUNT,
+    rpcRetryBackoffMs: config.rpcRetryBackoffMs ?? RPC_RETRY_BACKOFF_MS,
+    rpcCircuitBreakerThreshold: config.rpcCircuitBreakerThreshold ?? RPC_CIRCUIT_BREAKER_THRESHOLD,
+    rpcCircuitBreakerCooldownMs: config.rpcCircuitBreakerCooldownMs ?? RPC_CIRCUIT_BREAKER_COOLDOWN_MS,
+    ttlWatchIntervalMs: config.ttlWatchIntervalMs ?? TTL_WATCH_INTERVAL_MS,
+    ttlWatchThresholdLedgers: config.ttlWatchThresholdLedgers ?? TTL_WATCH_THRESHOLD_LEDGERS,
     rpcClient: server,
   }
 

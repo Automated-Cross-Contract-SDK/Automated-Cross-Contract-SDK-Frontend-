@@ -1,4 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
+import { readdirSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, resolve } from 'node:path'
 import {
   createAdapter,
   isKnownWallet,
@@ -20,21 +23,39 @@ const noopWalletModule = (exportName: string) => ({
 
 describe('createAdapter (#243)', () => {
   it('lists the supported wallets', () => {
-    expect(SUPPORTED_WALLETS).toEqual(['freighter', 'albedo', 'lobstr', 'xbull', 'ledger', 'trezor'])
+    expect(SUPPORTED_WALLETS).toEqual([
+      'freighter',
+      'albedo',
+      'lobstr',
+      'xbull',
+      'rabet',
+      'walletconnect',
+      'walletkit',
+      'ledger',
+      'trezor',
+    ])
     expect(isKnownWallet('Freighter')).toBe(true)
     expect(isKnownWallet('metamask')).toBe(false)
   })
 
   it('throws a helpful error listing supported names for an unknown wallet', async () => {
     await expect(createAdapter('metamask')).rejects.toThrow(
-      /unknown wallet "metamask".*freighter, albedo, lobstr, xbull, ledger, trezor/s,
+      /unknown wallet "metamask".*freighter, albedo, lobstr, xbull, rabet, walletconnect, walletkit, ledger, trezor/s,
     )
   })
 
-  it.each(['freighter', 'albedo', 'lobstr', 'xbull'] as const)(
+  it.each(['freighter', 'albedo', 'lobstr', 'xbull', 'rabet', 'walletconnect', 'walletkit'] as const)(
     'returns a working adapter for "%s" via lazy import',
     async (name) => {
-      const exportName = { freighter: 'FreighterAdapter', albedo: 'AlbedoAdapter', lobstr: 'LobstrAdapter', xbull: 'XBullAdapter' }[name]
+      const exportName = {
+        freighter: 'FreighterAdapter',
+        albedo: 'AlbedoAdapter',
+        lobstr: 'LobstrAdapter',
+        xbull: 'XBullAdapter',
+        rabet: 'RabetAdapter',
+        walletconnect: 'WalletConnectAdapter',
+        walletkit: 'WalletKitAdapter',
+      }[name]
       const importer: AdapterImporter = vi.fn().mockResolvedValue(noopWalletModule(exportName))
 
       const adapter = await createAdapter(name, { foo: 1 }, importer)
@@ -76,5 +97,18 @@ describe('createAdapter (#243)', () => {
       manifest: { email: 'dev@example.com', appUrl: 'https://example.com' },
     })
     expect((adapter as { type?: string }).type).toBe('trezor')
+  })
+
+  it('registers every packages/adapter-* directory (#381)', () => {
+    const packagesDir = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
+    const adapterDirs = readdirSync(packagesDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name.startsWith('adapter-'))
+      .map((entry) => entry.name.replace(/^adapter-/, ''))
+
+    expect(adapterDirs.length).toBeGreaterThan(0)
+    for (const name of adapterDirs) {
+      expect(SUPPORTED_WALLETS).toContain(name)
+      expect(isKnownWallet(name)).toBe(true)
+    }
   })
 })
