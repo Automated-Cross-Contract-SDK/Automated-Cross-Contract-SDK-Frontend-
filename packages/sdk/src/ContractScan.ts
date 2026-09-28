@@ -26,12 +26,7 @@ import type { ISorobanRpcClient } from './RpcClient.js'
 import type { ArchivedLedgerEntry } from './types.js'
 import { asXdrBase64, type XdrBase64 } from './branded-types.js'
 import { queryLedgerTTL, type LedgerEntryTTLInfo } from './TTLHelpers.js'
-
-/**
- * Default "expiring soon" window, in ledgers. ~17 280 ledgers ≈ 24 h at the
- * nominal 5 s ledger close time.
- */
-export const DEFAULT_EXPIRING_SOON_LEDGERS = 17_280
+import { DEFAULT_EXPIRING_SOON_LEDGERS } from './ttl.js'
 
 // ---------------------------------------------------------------------------
 // Contract scan
@@ -218,81 +213,6 @@ export interface AccountScanResult {
 function accountLedgerKey(accountId: string): xdr.LedgerKey {
   return xdr.LedgerKey.account(
     new xdr.LedgerKeyAccount({
-      accountId: xdr.PublicKey.publicKeyTypeEd25519(StrKey.decodeEd25519PublicKey(accountId)),
-    }),
-  )
-}
+      accountId: xdr.PublicKey.publi
 
-function trustlineLedgerKey(accountId: string, asset: Asset): xdr.LedgerKey {
-  return xdr.LedgerKey.trustline(
-    new xdr.LedgerKeyTrustLine({
-      accountId: xdr.PublicKey.publicKeyTypeEd25519(StrKey.decodeEd25519PublicKey(accountId)),
-      asset: asset.toTrustLineXDRObject(),
-    }),
-  )
-}
-
-/**
- * Account variant of {@link getExpiringEntriesForContract}: reports which
- * of an account's classic entries (the account itself and its trustlines)
- * are present on-chain. Classic entries have no TTL, so this is a presence
- * scan rather than a TTL scan.
- *
- * @param server    - Soroban RPC client.
- * @param accountId - Account id in StrKey (`G...`) form.
- * @param opts      - See {@link AccountScanOptions}.
- */
-export async function getExpiringEntriesForAccount(
-  server: ISorobanRpcClient,
-  accountId: string,
-  opts: AccountScanOptions = {},
-): Promise<AccountScanResult> {
-  if (!StrKey.isValidEd25519PublicKey(accountId)) {
-    throw new Error(`getExpiringEntriesForAccount: invalid account id "${accountId}"`)
-  }
-
-  const { trustlineAssets = [], includeAccount = true } = opts
-
-  const specs: Array<{ key: xdr.LedgerKey; kind: 'account' | 'trustline'; label: string }> = []
-  if (includeAccount) {
-    specs.push({ key: accountLedgerKey(accountId), kind: 'account', label: accountId })
-  }
-  for (const asset of trustlineAssets) {
-    if (asset.isNative()) continue
-    specs.push({
-      key: trustlineLedgerKey(accountId, asset),
-      kind: 'trustline',
-      label: `${asset.getCode()}:${asset.getIssuer()}`,
-    })
-  }
-
-  const queriedAt = Date.now()
-  const { sequence: currentLedger } = await server.getLatestLedger()
-
-  const found = new Set<string>()
-  const chunkSize = 50
-  for (let i = 0; i < specs.length; i += chunkSize) {
-    const chunk = specs.slice(i, i + chunkSize)
-    try {
-      const res = await server.getLedgerEntries(...chunk.map((s) => s.key))
-      for (const entry of res.entries ?? []) {
-        found.add(entry.key.toXDR('base64'))
-      }
-    } catch (err) {
-      console.warn('ContractScan: getLedgerEntries chunk failed, treating keys as missing:', err)
-    }
-  }
-
-  const entries: ClassicEntryStatus[] = specs.map((s) => {
-    const keyBase64 = asXdrBase64(s.key.toXDR('base64'))
-    return { keyBase64, kind: s.kind, label: s.label, exists: found.has(keyBase64) }
-  })
-
-  return {
-    accountId,
-    entries,
-    missing: entries.filter((e) => !e.exists),
-    currentLedger,
-    queriedAt,
-  }
-}
+/* … truncated 2525 chars — edit only what you need near the top … */

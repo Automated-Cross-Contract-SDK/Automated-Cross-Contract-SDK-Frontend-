@@ -9,7 +9,7 @@ import {
 } from '@stellar/stellar-sdk'
 import type { ISorobanRpcClient } from './RpcClient.js'
 import type { SorobanResurrectConfig, WalletAdapter, SorobanResurrectEvents } from './types.js'
-import type { TypedEventEmitter, WithIndexSignature } from './EventEmitter.js'
+import type { TypedEventEmitter } from './EventEmitter.js'
 import { getExpiringSoonEntries, type LedgerEntryTTLInfo } from './TTLHelpers.js'
 import { calculateRestoreFee } from './feeCalculation.js'
 import { isErrorResponse } from './Archiver.js'
@@ -146,7 +146,7 @@ async function buildRestoreTxForKeys(
 export function watchTTL(
   server: ISorobanRpcClient,
   config: Required<SorobanResurrectConfig>,
-  emitter: TypedEventEmitter<WithIndexSignature<SorobanResurrectEvents>>,
+  emitter: TypedEventEmitter<SorobanResurrectEvents>,
   keys: xdr.LedgerKey[],
   opts: TTLWatchOptions = {},
 ): TTLWatchHandle {

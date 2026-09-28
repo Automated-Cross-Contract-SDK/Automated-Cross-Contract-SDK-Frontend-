@@ -486,5 +486,5 @@ MIT
 
 ## Handsoff notes
 
-<!-- handsoff-issue-389 -->
-- #389: Hooks: no hook exposes retry, restoreKeys, or true batch submission
+<!-- handsoff-issue-366 -->
+- #366: SDK: futurenet presets resolve to a passphrase the config validator rejects

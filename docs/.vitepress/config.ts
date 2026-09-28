@@ -31,6 +31,8 @@ export default defineConfig({
           items: [
             { text: 'Getting Started', link: '/guide/getting-started' },
             { text: 'Tutorial: Common Use Cases', link: '/guide/tutorial' },
+            { text: 'Restore Fees and Limits', link: '/guide/restore-fees' },
+            { text: 'History Persistence', link: '/guide/history-persistence' },
             { text: 'Local Development', link: '/guide/local-development' },
             { text: 'Local Package Development', link: '/guide/local-package-development' },
           ],
@@ -65,6 +67,7 @@ export default defineConfig({
             { text: 'Next.js', link: '/integrations/nextjs' },
             { text: 'Vite', link: '/integrations/vite' },
             { text: 'Astro', link: '/integrations/astro' },
+            { text: 'Adapters and Wallets', link: '/integrations/adapters' },
           ],
         },
       ],
