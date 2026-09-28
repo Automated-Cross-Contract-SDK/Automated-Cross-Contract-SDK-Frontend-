@@ -486,5 +486,5 @@ MIT
 
 ## Handsoff notes
 
-<!-- handsoff-issue-394 -->
-- #394: Hooks: the config-change and teardown paths are untested in all three packages
+<!-- handsoff-issue-366 -->
+- #366: SDK: futurenet presets resolve to a passphrase the config validator rejects

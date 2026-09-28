@@ -75,6 +75,27 @@ submitWithRestore(options: SubmitWithRestoreOptions): Promise<ResurrectResult>
 
 Submits a transaction with automatic archive restoration. If the simulation detects archived entries, a restore transaction is built, signed, submitted, and confirmed before the original transaction is rebuilt and submitted. State transitions are published to all registered listeners throughout. See [`SubmitWithRestoreOptions`](/api/types#submitwithrestoreoptions) for the full set of lifecycle callbacks.
 
+##### Dry-run mode
+
+Pass `dryRun: true` to preview a restore without signing or submitting anything:
+
+```typescript
+const result = await sr.submitWithRestore({ transaction, wallet, dryRun: true })
+
+if (result.dryRun) {
+  console.log(result.dryRunResult?.archivedKeys)
+  console.log(result.dryRunResult?.estimatedRestoreFee)
+}
+```
+
+In dry-run mode the SDK runs archive detection plus fee estimation and returns
+`{ success: true, dryRun: true, dryRunResult }`. It performs **zero wallet calls**
+(no `signTransaction`, no `signAuthEntry`) and **zero submissions** (no
+`sendTransaction`), and it does not record anything to history. Because no wallet
+callbacks fire, none of the lifecycle callbacks in `SubmitWithRestoreOptions` are
+invoked either. If fee estimation fails, the error is surfaced on
+`dryRunResult.simulationError` rather than thrown.
+
 #### `onStateChange(listener)`
 
 ```typescript
@@ -150,67 +171,12 @@ DEBUG=soroban-resurrect:*,-soroban-resurrect:core   # all but core
 
 ### Logging from your own code
 
-`createDebugger` is exported, so application code can log under the same filter:
+`createDebugger` is exported, so application code can log under the same
+namespaces and honour the same `DEBUG` filter:
 
 ```typescript
 import { createDebugger } from '@soroban-resurrect/sdk'
 
-const debug = createDebugger('my-app')
-
-debug('submitting transaction %s', hash)
-// soroban-resurrect:my-app submitting transaction abc123 +4ms
+const debug = createDebugger('soroban-resurrect:my-app')
+debug('restore started for %d keys', keys.length)
 ```
-
-Guard expensive work with the `enabled` flag:
-
-```typescript
-if (debug.enabled) {
-  debug('footprint: %o', keys.map((k) => k.keyBase64))
-}
-```
-
-Output goes to `console.debug`. Note that most browser consoles hide
-`console.debug` behind a "Verbose" log level filter.
-
-| `createDebugger(scope)`          | `debug.js`    | Creates a namespaced debug logger for internal SDK operations.                |
-
-## Debug Logging
-
-The SDK logs its internal operations through namespaced loggers that stay silent
-unless a filter is set. Namespaces are prefixed with `soroban-resurrect`:
-`soroban-resurrect:resurrect` for lifecycle and state transitions, and
-`soroban-resurrect:archiver` for archive detection.
-
-In Node, set the `DEBUG` environment variable:
-
-```bash
-DEBUG=soroban-resurrect:* node ./scripts/restore.mjs
-```
-
-In the browser, set `localStorage.debug` and reload:
-
-```javascript
-localStorage.debug = 'soroban-resurrect:*'
-```
-
-The filter is a comma or space separated list of patterns. `*` matches any run
-of characters and a `-` prefix excludes a namespace:
-
-```bash
-DEBUG='soroban-resurrect:*,-soroban-resurrect:archiver' npm run dev:example
-```
-
-Filters are read once when the module loads, so change `DEBUG` before starting
-the process rather than during it. Output goes to `console.debug`, prefixed with
-an ISO timestamp and the namespace.
-
-Application code can create its own loggers under the same filter:
-
-```typescript
-import { createDebugger } from '@soroban-resurrect/sdk'
-
-const debug = createDebugger('my-dapp')
-debug('submitting transaction %s', tx.hash().toString('hex'))
-```
-
-For the full type definitions used throughout this API, see [Types](/api/types).

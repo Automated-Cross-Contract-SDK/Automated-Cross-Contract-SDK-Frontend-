@@ -1,4 +1,4 @@
-import { SorobanResurrectConfig } from './types.js'
+import type { SorobanResurrectConfig } from './types.js'
 import type { ISorobanRpcClient } from './RpcClient.js'
 import { SorobanRpcClient } from './RpcClient.js'
 import {
@@ -17,7 +17,6 @@ import {
   TTL_WATCH_THRESHOLD_LEDGERS,
 } from './constants.js'
 import { SimulationCache } from './SimulationCache.js'
-import { SorobanRpcClient, type ISorobanRpcClient } from './RpcClient.js'
 
 /**
  * Result of initialising the SDK configuration.
@@ -217,10 +216,23 @@ export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
     pollIntervalMs: config.pollIntervalMs ?? POLL_INTERVAL_MS,
     pollTimeoutMs: config.pollTimeoutMs ?? POLL_TIMEOUT_MS,
     restoreFeeMultiplier: config.restoreFeeMultiplier ?? RESTORE_FEE_MULTIPLIER,
+    rpcTimeoutMs: config.rpcTimeoutMs ?? RPC_TIMEOUT_MS,
+    rpcRetryCount: config.rpcRetryCount ?? RPC_RETRY_COUNT,
+    rpcRetryBackoffMs: config.rpcRetryBackoffMs ?? RPC_RETRY_BACKOFF_MS,
+    rpcCircuitBreakerThreshold: config.rpcCircuitBreakerThreshold ?? RPC_CIRCUIT_BREAKER_THRESHOLD,
+    rpcCircuitBreakerCooldownMs: config.rpcCircuitBreakerCooldownMs ?? RPC_CIRCUIT_BREAKER_COOLDOWN_MS,
+    ttlWatchIntervalMs: config.ttlWatchIntervalMs ?? TTL_WATCH_INTERVAL_MS,
+    ttlWatchThresholdLedgers: config.ttlWatchThresholdLedgers ?? TTL_WATCH_THRESHOLD_LEDGERS,
     archiveDetectionMethod: config.archiveDetectionMethod ?? 'simulation',
-    archiveDetectionFallback: config.archiveDetectionFallback ?? true,
-    enableSimulationCache: config.enableSimulationCache ?? false,
     useSSE: config.useSSE ?? false,
+    enableSimulationCache: config.enableSimulationCache ?? false,
+    rpcTimeoutMs: config.rpcTimeoutMs ?? RPC_TIMEOUT_MS,
+    rpcRetryCount: config.rpcRetryCount ?? RPC_RETRY_COUNT,
+    rpcRetryBackoffMs: config.rpcRetryBackoffMs ?? RPC_RETRY_BACKOFF_MS,
+    rpcCircuitBreakerThreshold: config.rpcCircuitBreakerThreshold ?? RPC_CIRCUIT_BREAKER_THRESHOLD,
+    rpcCircuitBreakerCooldownMs: config.rpcCircuitBreakerCooldownMs ?? RPC_CIRCUIT_BREAKER_COOLDOWN_MS,
+    ttlWatchIntervalMs: config.ttlWatchIntervalMs ?? TTL_WATCH_INTERVAL_MS,
+    ttlWatchThresholdLedgers: config.ttlWatchThresholdLedgers ?? TTL_WATCH_THRESHOLD_LEDGERS,
     rpcClient: server,
   }
 
