@@ -132,6 +132,12 @@ export type { ParsableTransactionResponse } from './TransactionFailure.js'
 export type { LedgerEntryTTLInfo, TTLQueryResult, LedgerKeyEntryType } from './TTLHelpers.js'
 
 // ---------------------------------------------------------------------------
+// Proactive TTL watching (resurrect.watchTTL)
+// ---------------------------------------------------------------------------
+export { watchTTL } from './TTLWatch.js'
+export type { TTLWatchOptions, TTLWatchHandle } from './TTLWatch.js'
+
+// ---------------------------------------------------------------------------
 // Fee calculation (returned by SorobanResurrect.estimateRestoreCost)
 // ---------------------------------------------------------------------------
 export type { RestoreCostEstimate } from './feeCalculation.js'
