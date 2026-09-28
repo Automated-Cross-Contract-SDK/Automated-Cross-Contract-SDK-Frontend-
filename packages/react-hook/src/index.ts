@@ -11,6 +11,8 @@ export { useSorobanResurrectSubmit } from './useSorobanResurrectSubmit.js'
 
 export { useRestoreWatcher } from './useRestoreWatcher.js'
 
+export { useRestoreEstimate } from './useRestoreEstimate.js'
+
 export { useSorobanResurrectNetwork } from './useSorobanResurrectNetwork.js'
 
 export type { SorobanResurrectProviderProps } from './SorobanResurrectContext.js'
@@ -32,6 +34,11 @@ export type {
   UseRestoreWatcherReturn,
   RestoreWatchStatus,
 } from './useRestoreWatcher.js'
+
+export type {
+  UseRestoreEstimateOptions,
+  UseRestoreEstimateReturn,
+} from './useRestoreEstimate.js'
 
 export type {
   UseSorobanResurrectNetworkOptions,
