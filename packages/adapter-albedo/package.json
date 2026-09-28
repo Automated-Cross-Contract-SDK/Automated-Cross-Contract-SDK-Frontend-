@@ -40,7 +40,7 @@
     "@soroban-resurrect/sdk": "^0.1.0"
   },
   "devDependencies": {
-    "@vitest/coverage-v8": "^5.0.1",
+    "@vitest/coverage-v8": "^5.0.2",
     "typescript": "^7.0.2",
     "vitest": "^5.0.1"
   }
