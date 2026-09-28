@@ -64,6 +64,14 @@ export type ResurrectErrorCode =
   | 'UNEXPECTED_SIMULATION_RESPONSE'
 
   /**
+   * The connected wallet declared that it does not support a required
+   * capability (e.g. `capabilities.feeBump === false` or
+   * `capabilities.signAuthEntry === false`). The caller should surface a
+   * "wallet not supported" message rather than a generic failure.
+   */
+  | 'UNSUPPORTED_WALLET_CAPABILITY'
+
+  /**
    * An unexpected JavaScript exception was thrown during the workflow.
    * Check `result.error` for the exception message.
    */
@@ -96,6 +104,44 @@ export class ResurrectError extends Error {
     // Maintains proper stack trace in V8 environments (Node.js / Chrome).
     if (Error.captureStackTrace) {
       Error.captureStackTrace(this, ResurrectError)
+    }
+  }
+}
+
+/**
+ * Thrown when a computed restore fee exceeds the configured
+ * `maxRestoreFeeStroops` cap. Carries both the computed fee and the cap so
+ * callers can surface or log the exact numbers without parsing the message.
+ *
+ * @example
+ * ```ts
+ * try {
+ *   await sr.buildRestoreTx(publicKey, tx)
+ * } catch (err) {
+ *   if (err instanceof RestoreFeeExceededError) {
+ *     console.error(`fee ${err.computedFeeStroops} > cap ${err.maxFeeStroops}`)
+ *   }
+ * }
+ * ```
+ */
+export class RestoreFeeExceededError extends ResurrectError {
+  /** The fee computed from the restore footprint, in stroops. */
+  readonly computedFeeStroops: number
+
+  /** The configured `maxRestoreFeeStroops` cap, in stroops. */
+  readonly maxFeeStroops: number
+
+  constructor(computedFeeStroops: number, maxFeeStroops: number) {
+    super(
+      'RESTORE_FEE_CAP_EXCEEDED',
+      `Computed restore fee ${computedFeeStroops} stroops exceeds the configured maxRestoreFeeStroops cap of ${maxFeeStroops} stroops`,
+    )
+    this.name = 'RestoreFeeExceededError'
+    this.computedFeeStroops = computedFeeStroops
+    this.maxFeeStroops = maxFeeStroops
+    // Maintains proper stack trace in V8 environments (Node.js / Chrome).
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, RestoreFeeExceededError)
     }
   }
 }

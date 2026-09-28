@@ -123,21 +123,33 @@ const adapter = createAdapter({
 npm install @trezor/connect-web
 ```
 
-```ts
-import TrezorConnect from '@trezor/connect-web';
-import { createAdapter, KnownWallet } from '@handsoff/sdk';
+Submits a transaction with automatic archive restoration. If the simulation detects archived entries, a restore transaction is built, signed, submitted, and confirmed before the original transaction is rebuilt and submitted. State transitions are published to all registered listeners throughout. See [`SubmitWithRestoreOptions`](/api/types#submitwithrestoreoptions) for the full set of lifecycle callbacks.
 
-await TrezorConnect.init({
-  manifest: {
-    email: 'dev@example.com',
-    appUrl: 'https://example.com',
-  },
-});
+##### Dry-run mode
 
-const adapter = createAdapter({
-  wallet: KnownWallet.Trezor,
-  config: { connect: TrezorConnect } satisfies TrezorAdapterConfig,
-});
+Pass `dryRun: true` to preview a restore without signing or submitting anything:
+
+```typescript
+const result = await sr.submitWithRestore({ transaction, wallet, dryRun: true })
+
+if (result.dryRun) {
+  console.log(result.dryRunResult?.archivedKeys)
+  console.log(result.dryRunResult?.estimatedRestoreFee)
+}
+```
+
+In dry-run mode the SDK runs archive detection plus fee estimation and returns
+`{ success: true, dryRun: true, dryRunResult }`. It performs **zero wallet calls**
+(no `signTransaction`, no `signAuthEntry`) and **zero submissions** (no
+`sendTransaction`), and it does not record anything to history. Because no wallet
+callbacks fire, none of the lifecycle callbacks in `SubmitWithRestoreOptions` are
+invoked either. If fee estimation fails, the error is surfaced on
+`dryRunResult.simulationError` rather than thrown.
+
+#### `onStateChange(listener)`
+
+```typescript
+onStateChange(listener: (info: RestoreStateInfo) => void): () => void
 ```
 
 ### Latency and UX
@@ -246,84 +258,14 @@ See the [fee model guide](../guide/fee-model.md) for how the restore fee fits in
 the overall fee calculation, and the [TTL guides](../guide/ttl.md) for how entries
 become archived in the first place.
 
-## Contract and account scanning
+`createDebugger` is exported, so application code can log under the same
+namespaces and honour the same `DEBUG` filter:
 
 The scanning APIs answer "what in my contract or account is about to expire?"
 without submitting a transaction. They read ledger entries directly and report
 which ones are close to their TTL, so a dApp can prompt the user to extend or
 restore state before it is archived.
 
-### `getExpiringEntriesForContract`
-
-Scans a contract's instance, wasm code, and storage entries for TTLs that fall
-within the expiring-soon window.
-
-> **Important:** a contract's storage keys **cannot be enumerated** on-chain. The
-> SDK has no way to discover which keys a contract wrote, so **you must supply the
-> storage keys yourself**. Instance and wasm code entries are discovered
-> automatically; storage entries are only scanned for the keys you pass in.
-
-```ts
-export interface ContractScanOptions {
-  /** Contract address to scan. */
-  contractId: PublicKey;
-  /** Storage keys to check. Required — keys cannot be enumerated on-chain. */
-  storageKeys: PublicKey[];
-  /** Ledger threshold (in ledgers) below which an entry is "expiring soon". */
-  expiringSoonLedgers?: number;
-}
-
-export interface ContractScanResult {
-  /** Instance entry status, if present. */
-  instance?: ClassicEntryStatus;
-  /** Wasm code entry status, if present. */
-  wasm?: ClassicEntryStatus;
-  /** Per-storage-key status, keyed by the supplied storage key. */
-  storage: ClassicEntryStatus[];
-}
-```
-
-`ClassicEntryStatus` describes a single entry's TTL state:
-
-```ts
-export interface ClassicEntryStatus {
-  /** The ledger entry key. */
-  key: PublicKey;
-  /** Current live-until ledger, or `null` if the entry does not exist. */
-  liveUntilLedger: number | null;
-  /** Ledgers remaining until expiry, or `null` if the entry does not exist. */
-  remainingLedgers: number | null;
-  /** Whether the entry is within the expiring-soon window. */
-  expiringSoon: boolean;
-}
-```
-
-`DEFAULT_EXPIRING_SOON_LEDGERS` is the default window used when
-`expiringSoonLedgers` is omitted. Pass a larger value to warn earlier, or a
-smaller value to only flag entries that are truly imminent.
-
-### Worked example: instance, wasm code, and storage keys
-
-```ts
-import {
-  getExpiringEntriesForContract,
-  DEFAULT_EXPIRING_SOON_LEDGERS,
-} from '@handsoff/sdk';
-
-const result = await getExpiringEntriesForContract({
-  contractId,
-  // Required: the SDK cannot enumerate a contract's storage keys for you.
-  storageKeys: [userKey, configKey, counterKey],
-  expiringSoonLedgers: DEFAULT_EXPIRING_SOON_LEDGERS,
-});
-
-if (result.instance?.expiringSoon) {
-  console.warn('Contract instance is expiring soon');
-}
-
-for (const entry of result.storage) {
-  if (entry.expiringSoon) {
-    console.warn(`Storage key ${entry.key} expires in ${entry.remainingLedgers} ledgers`);
-  }
-}
+const debug = createDebugger('soroban-resurrect:my-app')
+debug('restore started for %d keys', keys.length)
 ```

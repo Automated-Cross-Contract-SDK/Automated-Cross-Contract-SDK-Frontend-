@@ -18,6 +18,8 @@ interface SorobanResurrectConfig {
   pollIntervalMs?: number // default: 1000
   pollTimeoutMs?: number // default: 60000
   restoreFeeMultiplier?: number // default: 3 — see "Choosing restoreFeeMultiplier" below
+  maxRestoreFeeStroops?: FeeStroops | string // plain stroop strings are branded at the config boundary
+  maxSequenceRetries?: number // default: 3 — retries when a restore tx fails on sequence number
   archiveDetectionMethod?: 'simulation' | 'direct' // default: 'simulation'
   archiveDetectionChunkSize?: number // default: 50
   archiveDetectionConcurrency?: number // default: 4
@@ -31,6 +33,8 @@ interface SorobanResurrectConfig {
 | `pollIntervalMs`           | Polling interval in ms when waiting for transaction confirmation.              |
 | `pollTimeoutMs`             | Timeout in ms when waiting for transaction confirmation.                       |
 | `restoreFeeMultiplier`     | Multiplier applied to `minResourceFee` when building a restore transaction.    |
+| `maxRestoreFeeStroops`     | Upper bound on the restore fee. Accepts a branded `FeeStroops` or a plain numeric stroop string, which is branded at the config boundary. |
+| `maxSequenceRetries`       | Number of times a restore transaction is retried after a sequence-number failure. |
 | `archiveDetectionMethod`   | Method for detecting archived keys: `'simulation'` (default) or `'direct'`.    |
 | `archiveDetectionChunkSize` | Ledger keys per `getLedgerEntries` request during `'direct'` detection.       |
 | `archiveDetectionConcurrency` | Chunk requests kept in flight at once during `'direct'` detection.          |
