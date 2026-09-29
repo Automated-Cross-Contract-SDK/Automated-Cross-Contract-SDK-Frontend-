@@ -149,6 +149,18 @@ The project uses `typescript-eslint` with `eslint:recommended` and `@typescript-
 
 CI runs `npm run lint` and `npm run format` on every push. Both must pass.
 
+### Pre-commit hook
+
+Husky runs `lint-staged` on every commit (see `.lintstagedrc.mjs`):
+
+- staged `.ts`/`.tsx` files are linted and formatted, then `turbo run typecheck` runs
+  for each `packages/*` workspace that owns a staged file (cached by Turbo, so a
+  repeat run takes a few seconds);
+- commits that touch no TypeScript (docs, JSON) skip the typecheck entirely.
+
+In an emergency you can bypass the hook with `git commit --no-verify` — CI still
+runs the full lint and typecheck.
+
 ### File and naming conventions
 
 - **Files**: PascalCase for classes (`SorobanResurrect.ts`), camelCase for utilities (`constants.ts`).

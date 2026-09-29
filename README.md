@@ -48,6 +48,16 @@ Soroban-Resurrect solves the "archived ledger entry" problem for Soroban dApps. 
 
 ## Quick Start
 
+The fastest start is the scaffolder — a Vite + React app with the SDK, one
+wallet adapter, a restore button and a TTL warning already wired up:
+
+```bash
+npm create soroban-resurrect@latest my-app
+cd my-app && npm install && npm run dev
+```
+
+To add the SDK to an existing project instead:
+
 ```bash
 npm install @soroban-resurrect/sdk @stellar/stellar-sdk
 ```
@@ -487,4 +497,5 @@ MIT
 ## Handsoff notes
 
 <!-- handsoff-issue-366 -->
+
 - #366: SDK: futurenet presets resolve to a passphrase the config validator rejects
