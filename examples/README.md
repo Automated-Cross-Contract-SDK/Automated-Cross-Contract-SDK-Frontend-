@@ -24,3 +24,15 @@ npm run build:hook
 ```
 
 Then `cd` into any example directory and follow its README.
+
+Every example exposes the same scripts and ships a `.env.example`:
+
+| Script              | Purpose                               |
+| ------------------- | ------------------------------------- |
+| `npm run dev`       | Run locally (dev server / worker)     |
+| `npm run build`     | Production build                      |
+| `npm run typecheck` | Type-check against the workspace packages |
+
+All examples target **testnet** by default. CI runs `typecheck` for every
+example against the current `packages/*` so they cannot silently drift from
+the published API.

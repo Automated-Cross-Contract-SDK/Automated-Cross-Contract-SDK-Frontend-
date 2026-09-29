@@ -1,14 +1,12 @@
-# Vanilla JS Example
+# Basic Example
 
-Plain JavaScript usage of `@soroban-resurrect/sdk` — no framework, no React.
+Minimal Vite + React integration of `@soroban-resurrect/react-hook`.
 
 Demonstrates:
 
-- Constructing a `SorobanResurrect` instance directly
-- Subscribing to workflow state changes with `onStateChange`
-- Calling `submitWithRestore` with a hand-rolled `WalletAdapter` for the
-  Freighter browser extension
-- Rendering UI updates with plain DOM APIs
+- Wrapping the app in `SorobanResurrectProvider`
+- Consuming `useSorobanResurrectContext()` to submit a transaction with automatic restore
+- A network selector and progress / error display components
 
 ## Prerequisites
 
@@ -27,4 +25,4 @@ npm run build          # production build
 npm run typecheck      # type-check only
 ```
 
-Open the printed local URL and click "Connect Freighter Wallet" followed by "Submit Withdraw".
+Open the printed local URL, connect Freighter and submit the demo transaction.

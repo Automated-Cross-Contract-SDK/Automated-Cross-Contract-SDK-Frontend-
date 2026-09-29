@@ -8,6 +8,7 @@ import type {
   ArchivedLedgerEntry,
   ResurrectResult,
   SubmitWithRestoreOptions,
+  RestoreKeysOptions,
   SorobanResurrectEvents,
 } from './types.js'
 import type { ISorobanRpcClient } from './RpcClient.js'
@@ -553,6 +554,7 @@ export class SorobanResurrect {
    *
    * @param keys   - Ledger keys to restore.
    * @param wallet - Wallet adapter used for signing.
+   * @param opts   - Optional lifecycle callbacks (signing, submitted, confirmed).
    * @returns {@link ResurrectResult} with `restoreTxHash` on success.
    *
    * @example
@@ -561,8 +563,12 @@ export class SorobanResurrect {
    * const result = await resurrect.restoreKeys(expiring.map((e) => e.key), wallet)
    * ```
    */
-  async restoreKeys(keys: xdr.LedgerKey[], wallet: WalletAdapter): Promise<ResurrectResult> {
-    return this._executor.restoreKeys(keys, wallet)
+  async restoreKeys(
+    keys: xdr.LedgerKey[],
+    wallet: WalletAdapter,
+    opts?: RestoreKeysOptions,
+  ): Promise<ResurrectResult> {
+    return this._executor.restoreKeys(keys, wallet, opts)
   }
 
   // ---------------------------------------------------------------------------
