@@ -64,7 +64,10 @@ export class SorobanResurrectExecutor {
     this._simulator = simulator
     this._history = new TransactionHistory(config.networkPassphrase)
     this._historyPersistence = persistHistory
-      ? attachHistoryPersistence(this._history, persistHistory.storage, persistHistory.key)
+      ? attachHistoryPersistence(this._history, persistHistory.storage, persistHistory.key, {
+          mode: persistHistory.mode,
+          serializer: persistHistory.serializer,
+        })
       : null
   }
 

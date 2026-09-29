@@ -230,6 +230,22 @@ export class TransactionHistory {
   }
 
   /**
+   * Serialises history in redacted form (see {@link MinimalHistoryEntry}):
+   * never includes transaction XDR or results.
+   */
+  toMinimalJSON(): string {
+    const serialized: MinimalHistoryEntry[] = this.getAll().map((entry) => ({
+      id: entry.id,
+      timestamp: entry.timestamp,
+      status: entry.status,
+      attemptCount: entry.attemptCount,
+      lastAttemptAt: entry.lastAttemptAt,
+      transactionHash: entry.transaction.hash().toString('hex'),
+    }))
+    return JSON.stringify(serialized)
+  }
+
+  /**
    * Replaces the current entries with those decoded from a string produced by
    * {@link toJSON}. Malformed input is ignored (history stays empty). Requires
    * a `networkPassphrase` to have been passed to the constructor so stored XDR

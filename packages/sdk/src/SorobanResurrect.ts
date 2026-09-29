@@ -30,6 +30,7 @@ import {
 } from './TTLHelpers.js'
 import type { LedgerEntryTTLInfo, QueryLedgerTTLOptions, TTLQueryResult } from './TTLHelpers.js'
 import { NETWORK_PRESETS } from './constants.js'
+import { watchTTL, type TTLWatchHandle, type TTLWatchOptions } from './TTLWatch.js'
 import type { SorobanNetworkName } from './constants.js'
 
 /**
@@ -67,6 +68,7 @@ export class SorobanResurrect {
   private readonly _stateMgr: SorobanResurrectStateManager
   private readonly _simulator: SorobanResurrectSimulator
   private readonly _executor: SorobanResurrectExecutor
+  private readonly _ttlWatches = new Set<TTLWatchHandle>()
 
   // Last set of archived keys from a standalone detectArchivedKeys() call.
   // The FSM context already stores archivedKeys for the full submit workflow;
@@ -305,6 +307,36 @@ export class SorobanResurrect {
   /** Clears all recorded history entries. */
   clearHistory(): void {
     this._executor.clearHistory()
+  }
+
+  // ---------------------------------------------------------------------------
+  // TTL watching & lifecycle
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Starts a proactive TTL watch for `keys`. The handle is tracked by this
+   * instance so {@link dispose} stops it even if the caller loses it.
+   */
+  watchTTL(keys: xdr.LedgerKey[], opts: TTLWatchOptions = {}): TTLWatchHandle {
+    const handle = watchTTL(
+      this._server,
+      this._config as unknown as Required<SorobanResurrectConfig>,
+      this._stateMgr.emitter as never,
+      keys,
+      opts,
+    )
+    const stop = handle.stop.bind(handle)
+    handle.stop = () => {
+      this._ttlWatches.delete(handle)
+      stop()
+    }
+    this._ttlWatches.add(handle)
+    return handle
+  }
+
+  /** Stops every TTL watch started by this instance. Safe to call more than once. */
+  dispose(): void {
+    for (const handle of [...this._ttlWatches]) handle.stop()
   }
 
   // ---------------------------------------------------------------------------

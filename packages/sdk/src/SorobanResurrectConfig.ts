@@ -65,6 +65,11 @@ function validateBoolean(field: string, value: unknown): void {
   }
 }
 
+/** Default simulation-cache TTL (ms); matches `SimulationCache`'s built-in default. */
+export const SIMULATION_CACHE_TTL_MS = 30_000
+/** Default simulation-cache capacity; matches `SimulationCache`'s built-in default. */
+export const SIMULATION_CACHE_MAX_SIZE = 50
+
 /**
  * Validates the shape of the fields `resolveConfig` doesn't already default
  * or structurally guarantee — everything a caller could pass a nonsensical
@@ -114,6 +119,18 @@ export function validateConfigShape(config: SorobanResurrectConfig): void {
 
   if (config.enableSimulationCache !== undefined) {
     validateBoolean('enableSimulationCache', config.enableSimulationCache)
+  }
+
+  if (config.simulationCacheTtlMs !== undefined) {
+    validateNumber('simulationCacheTtlMs', config.simulationCacheTtlMs, 0, true)
+  }
+
+  if (config.simulationCacheMaxSize !== undefined) {
+    if (!Number.isInteger(config.simulationCacheMaxSize) || config.simulationCacheMaxSize < 1) {
+      throw new Error(
+        `Invalid simulationCacheMaxSize: ${JSON.stringify(config.simulationCacheMaxSize)}. Must be a positive integer.`,
+      )
+    }
   }
 }
 
@@ -170,7 +187,17 @@ export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
     )
   }
 
-  const simulationCache = config.enableSimulationCache ? new SimulationCache() : undefined
+  // A fresh cache is built on every resolve, so switchNetwork() never reuses
+  // stale entries. Keep the TTL short relative to the ledger close time
+  // (~5s): a replayed cached restore response can report "restore needed"
+  // after the entry was already restored (or miss a newly archived entry),
+  // which at worst causes a redundant restore or a failed submission.
+  const simulationCache = config.enableSimulationCache
+    ? new SimulationCache({
+        ttlMs: config.simulationCacheTtlMs ?? SIMULATION_CACHE_TTL_MS,
+        maxSize: config.simulationCacheMaxSize ?? SIMULATION_CACHE_MAX_SIZE,
+      })
+    : undefined
 
   const resolved: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & { rpcClient: ISorobanRpcClient } = {
     rpcUrl: config.rpcUrl,
@@ -188,6 +215,8 @@ export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
     archiveDetectionMethod: config.archiveDetectionMethod ?? 'simulation',
     useSSE: config.useSSE ?? false,
     enableSimulationCache: config.enableSimulationCache ?? false,
+    simulationCacheTtlMs: config.simulationCacheTtlMs ?? SIMULATION_CACHE_TTL_MS,
+    simulationCacheMaxSize: config.simulationCacheMaxSize ?? SIMULATION_CACHE_MAX_SIZE,
     rpcTimeoutMs: config.rpcTimeoutMs ?? RPC_TIMEOUT_MS,
     rpcRetryCount: config.rpcRetryCount ?? RPC_RETRY_COUNT,
     rpcRetryBackoffMs: config.rpcRetryBackoffMs ?? RPC_RETRY_BACKOFF_MS,
