@@ -52,3 +52,8 @@ import WithdrawWidget from '../components/WithdrawWidget'
 - Use `client:only="react"` (not `client:load`) for components using `SorobanResurrectProvider` — the SDK constructs an `rpc.Server` and reads wallet globals at render time, which don't exist during Astro's server-side pass.
 - Prefix env vars with `PUBLIC_` so Astro exposes them to `import.meta.env` in the browser bundle.
 - Without React, you can still use `@soroban-resurrect/sdk` directly inside a `<script>` tag or a framework-agnostic island — see [Getting Started](/guide/getting-started) for the plain SDK API.
+
+## Example app
+
+A complete, buildable reference implementation lives in
+[`examples/astro`](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/tree/main/examples/astro).

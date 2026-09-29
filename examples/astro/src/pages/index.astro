@@ -1,0 +1,16 @@
+---
+// Runs on the server at build time — no SDK, wallet or browser globals here.
+import RestoreIsland from '../components/RestoreIsland'
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Soroban-Resurrect + Astro</title>
+  </head>
+  <body>
+    <h1>Soroban-Resurrect + Astro</h1>
+    <!-- client:only skips SSR entirely: detection and restore run in the browser. -->
+    <RestoreIsland client:only="react" />
+  </body>
+</html>
