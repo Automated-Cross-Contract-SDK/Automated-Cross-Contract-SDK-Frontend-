@@ -61,20 +61,8 @@ export interface SerializedHistoryEntry {
   lastAttemptAt: number
 }
 
-/**
- * Redacted history record written in `minimal` persistence mode. Contains no
- * transaction XDR and no `ResurrectResult` — only ids, timestamps, status and
- * the transaction hash.
- */
-export interface MinimalHistoryEntry {
-  id: string
-  timestamp: number
-  status: TransactionAttemptStatus
-  attemptCount: number
-  lastAttemptAt: number
-  /** Hex hash of the transaction envelope. */
-  transactionHash: string
-}
+/** Default cap on retained history entries (see {@link TransactionHistory}). */
+export const DEFAULT_MAX_HISTORY_ENTRIES = 500
 
 export class TransactionHistory {
   private entries: Map<string, TransactionHistoryEntry> = new Map()
@@ -86,8 +74,26 @@ export class TransactionHistory {
    * @param networkPassphrase - Network passphrase used to rebuild `Transaction`
    *   objects from stored XDR during {@link loadJSON}. Required only when
    *   history persistence is enabled.
+   * @param maxHistoryEntries - Maximum retained entries. When exceeded, the
+   *   oldest settled (`success`/`failed`) entries are evicted; pending entries
+   *   are never evicted. `Infinity` disables the cap.
    */
-  constructor(private readonly networkPassphrase?: string) {}
+  constructor(
+    private readonly networkPassphrase?: string,
+    private readonly maxHistoryEntries: number = DEFAULT_MAX_HISTORY_ENTRIES,
+  ) {}
+
+  /** Evicts the oldest settled entries until the log fits `maxHistoryEntries`. */
+  private evict(): void {
+    let excess = this.entries.size - this.maxHistoryEntries
+    if (excess <= 0) return
+    for (const [id, entry] of this.entries) {
+      if (excess <= 0) break
+      if (entry.status === 'pending') continue
+      this.entries.delete(id)
+      excess--
+    }
+  }
 
   /**
    * Registers a listener invoked after every mutation (`add`, `update`,
@@ -126,6 +132,7 @@ export class TransactionHistory {
       lastAttemptAt: now,
     }
     this.entries.set(id, entry)
+    this.evict()
     this.emitChange()
     return id
   }
@@ -148,6 +155,7 @@ export class TransactionHistory {
     entry.status = result.success ? 'success' : 'failed'
     entry.lastAttemptAt = Date.now()
     this.entries.set(id, entry)
+    this.evict()
     this.emitChange()
   }
 
@@ -276,6 +284,7 @@ export class TransactionHistory {
         // Skip entries whose XDR can no longer be decoded.
       }
     }
+    this.evict()
     this.emitChange()
   }
 

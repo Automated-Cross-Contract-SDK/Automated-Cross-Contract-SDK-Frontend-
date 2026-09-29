@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
+    "dev": "react-native start",
+    "build": "react-native bundle --platform android --dev false --entry-file index.js --bundle-output dist/index.android.bundle",
+    "typecheck": "tsc --noEmit",
     "start": "react-native start",
     "android": "react-native run-android",
     "ios": "react-native run-ios"

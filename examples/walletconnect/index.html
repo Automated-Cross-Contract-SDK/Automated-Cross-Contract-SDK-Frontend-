@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Soroban-Resurrect – WalletConnect</title>
+  </head>
+  <body>
+    <div id="app" style="max-width: 600px; margin: 0 auto; padding: 24px; font-family: sans-serif">
+      <h2>Soroban-Resurrect – WalletConnect</h2>
+      <div id="session"></div>
+      <canvas id="qr" hidden></canvas>
+      <p><button id="connect">Pair wallet</button> <button id="disconnect" hidden>Disconnect</button></p>
+      <p><button id="withdraw" disabled>Detect &amp; submit withdraw</button></p>
+      <pre id="log" style="white-space: pre-wrap"></pre>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

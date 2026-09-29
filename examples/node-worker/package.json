@@ -1,0 +1,20 @@
+{
+  "name": "@soroban-resurrect/example-node-worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env src/worker.mjs",
+    "start": "node --env-file-if-exists=.env src/worker.mjs --once",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@soroban-resurrect/sdk": "^0.1.0",
+    "@stellar/stellar-sdk": "^12.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "typescript": "^7.0.2"
+  }
+}

@@ -73,7 +73,9 @@ npm run dev:example
 | `npm run build`                    | Build all packages                                                    |
 | `npm run build:sdk`                | Build only `@soroban-resurrect/sdk`                                   |
 | `npm run build:hook`               | Build only `@soroban-resurrect/react-hook`                            |
+| `npm run verify`                   | Pre-PR gate: typecheck, lint, format, test, build (all packages)      |
 | `npm test`                         | Run all unit tests                                                    |
+| `npx vitest run <path>`            | Run tests matching a path across all packages from the repo root      |
 | `npm run test:watch`               | Run tests in watch mode                                               |
 | `npm run typecheck`                | Type-check all packages without emitting                              |
 | `npm run lint`                     | Lint all TypeScript source files                                      |
@@ -147,6 +149,18 @@ The project uses `typescript-eslint` with `eslint:recommended` and `@typescript-
 
 CI runs `npm run lint` and `npm run format` on every push. Both must pass.
 
+### Pre-commit hook
+
+Husky runs `lint-staged` on every commit (see `.lintstagedrc.mjs`):
+
+- staged `.ts`/`.tsx` files are linted and formatted, then `turbo run typecheck` runs
+  for each `packages/*` workspace that owns a staged file (cached by Turbo, so a
+  repeat run takes a few seconds);
+- commits that touch no TypeScript (docs, JSON) skip the typecheck entirely.
+
+In an emergency you can bypass the hook with `git commit --no-verify` — CI still
+runs the full lint and typecheck.
+
 ### File and naming conventions
 
 - **Files**: PascalCase for classes (`SorobanResurrect.ts`), camelCase for utilities (`constants.ts`).
@@ -195,6 +209,16 @@ describe('myFunction', () => {
 ```
 
 ---
+
+### Bundle budgets
+
+CI runs `node scripts/check-bundle-budgets.mjs` after `npm run build`. It bundles every
+publishable entry point, compares its gzipped size to `scripts/bundle-budgets.json`, and
+fails naming any entry point over budget. It also checks that importing only
+`SorobanResurrect` tree-shakes away hardware-wallet and authorization code.
+
+To raise a budget deliberately, run `npm run build && node scripts/check-bundle-budgets.mjs --update`
+(which records current sizes with 10% headroom) and explain the increase in your PR.
 
 ## Commit Format
 
@@ -267,13 +291,12 @@ removed. Use the three-argument form instead.
    git checkout -b feat/your-feature-name
    ```
 2. **Make your changes** — keep PRs focused on a single concern.
-3. **Run the full quality gate locally:**
+3. **Run the full quality gate locally** — one command, mirroring CI:
    ```bash
-   npm run typecheck
-   npm run lint
-   npm run format
-   npm test
+   npm run verify
    ```
+   This runs typecheck, lint, format check, tests, and build for every package
+   through a single Turborepo `verify` task, printing logs only for failing tasks.
 4. **Ensure all checks pass** before pushing.
 
 ### Opening the PR
