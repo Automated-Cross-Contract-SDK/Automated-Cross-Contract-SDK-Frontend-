@@ -1,3 +1,4 @@
+ 
 name: Publish
 
 on:
@@ -22,21 +23,139 @@ jobs:
 
       - run: npm ci
 
+      - name: Verify internal dependencies are pinned to workspace versions
+        run: |
+          set -euo pipefail
+          node - <<'EOF'
+          const fs = require('fs');
+          const path = require('path');
+          const root = process.cwd();
+          const pkgGlobs = ['packages/sdk', 'packages/react-hook', 'packages/vue-hook', 'packages/svelte-hook'];
+          const internalNames = new Set();
+          const pkgs = {};
+          for (const dir of pkgGlobs) {
+            const p = path.join(root, dir, 'package.json');
+            if (!fs.existsSync(p)) continue;
+            const json = JSON.parse(fs.readFileSync(p, 'utf8'));
+            pkgs[dir] = json;
+            internalNames.add(json.name);
+          }
+          const failures = [];
+          for (const [dir, json] of Object.entries(pkgs)) {
+            for (const field of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
+              const deps = json[field] || {};
+              for (const [name, range] of Object.entries(deps)) {
+                if (!internalNames.has(name)) continue;
+                if (range !== pkgs[Object.keys(pkgs).find((d) => pkgs[d].name === name)]?.version) {
+                  failures.push(`${dir} ${field} ${name} -> ${range} (expected exact workspace version)`);
+                }
+              }
+            }
+          }
+          if (failures.length) {
+            console.error('Internal dependencies must be pinned to exact workspace versions:');
+            for (const f of failures) console.error('  - ' + f);
+            process.exit(1);
+          }
+          console.log('All internal dependencies are pinned to exact workspace versions.');
+          EOF
+
+      - name: Verify no sibling resolves from the registry
+        run: |
+          set -euo pipefail
+          node - <<'EOF'
+          const fs = require('fs');
+          const path = require('path');
+          const root = process.cwd();
+          const pkgGlobs = ['packages/sdk', 'packages/react-hook', 'packages/vue-hook', 'packages/svelte-hook'];
+          const internalNames = new Set();
+          for (const dir of pkgGlobs) {
+            const p = path.join(root, dir, 'package.json');
+            if (!fs.existsSync(p)) continue;
+            internalNames.add(JSON.parse(fs.readFileSync(p, 'utf8')).name);
+          }
+          const lockPath = path.join(root, 'package-lock.json');
+          if (!fs.existsSync(lockPath)) {
+            console.error('package-lock.json is required to verify workspace resolution.');
+            process.exit(1);
+          }
+          const lock = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+          const packages = lock.packages || {};
+          const offenders = [];
+          for (const [loc, meta] of Object.entries(packages)) {
+            if (!loc.startsWith('node_modules/')) continue;
+            const name = loc.slice('node_modules/'.length);
+            if (!internalNames.has(name)) continue;
+            if (meta.resolved && /^https?:\/\/registry\.npmjs\.org\//.test(meta.resolved)) {
+              offenders.push(`${loc} resolved from registry: ${meta.resolved}`);
+            }
+          }
+          if (offenders.length) {
+            console.error('Internal packages must resolve from the workspace, not the registry:');
+            for (const o of offenders) console.error('  - ' + o);
+            process.exit(1);
+          }
+          console.log('No internal package resolves a sibling from the registry.');
+          EOF
+
       - run: npm run build:sdk
       - run: npm run build:hook
 
-      - run: npm publish -w packages/sdk --provenance --access public
+      - name: Publish all packages atomically with provenance
+        run: |
+          set -euo pipefail
+          packages=(packages/sdk packages/react-hook packages/vue-hook packages/svelte-hook)
+          published=()
+          failed=""
+          for pkg in "${packages[@]}"; do
+            echo "::group::Publishing $pkg"
+            if npm publish -w "$pkg" --provenance --access public; then
+              published+=("$pkg")
+              echo "::endgroup::"
+            else
+              failed="$pkg"
+              echo "::endgroup::"
+              break
+            fi
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::Partial publish detected. Failed at $failed."
+            echo "::error::Already published: ${published[*]:-none}"
+            echo "::error::Recovery: see docs/RELEASE.md#recovering-from-a-partial-publish"
+            echo "## Partial publish detected" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Failed at: \`$failed\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Already published: ${published[*]:-none}" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Recovery: see \`docs/RELEASE.md#recovering-from-a-partial-publish\`." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "All packages published successfully with provenance attestations."
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - run: npm publish -w packages/react-hook --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - run: npm publish -w packages/vue-hook --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - run: npm publish -w packages/svelte-hook --provenance --access public
+      - name: Verify provenance attestations
+        run: |
+          set -euo pipefail
+          packages=(packages/sdk packages/react-hook packages/vue-hook packages/svelte-hook)
+          for pkg in "${packages[@]}"; do
+            name=$(node -p "require('./$pkg/package.json').name")
+            version=$(node -p "require('./$pkg/package.json').version")
+            echo "Verifying provenance for $name@$version"
+            npm view "$name@$version" --json | node -e' 
+              let data = "";
+              process.stdin.on("data", (c) => (data += c));
+              process.stdin.on("end", () => {
+                const info = JSON.parse(data);
+                const att = info.dist && info.dist.attestations;
+                if (!att) {
+                  console.error("Missing provenance attestations for " + info.name + "@" + info.version);
+                  process.exit(1);
+                }
+                console.log("Provenance present for " + info.name + "@" + info.version);
+              });
+            '
+          done
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

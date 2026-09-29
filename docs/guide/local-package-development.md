@@ -1,3 +1,4 @@
+
 # Local Package Development (npm link / yalc)
 
 When you change `@soroban-resurrect/sdk` or one of the framework hook packages,
@@ -5,6 +6,14 @@ you usually want a real consumer app to pick the change up before anything is
 published to npm. There are two ways to do that: `npm link`, which is built in,
 and [yalc](https://github.com/wclr/yalc), which is closer to what an actual
 install looks like.
+
+## Pinning workspace dependencies
+
+Internal cross-package dependencies (`@soroban-resurrect/sdk` and the hook
+packages) are pinned to exact workspace versions. Do not use `^` or `~` ranges
+for siblings. The release workflow runs a pre-publish check that fails if any
+package would resolve a sibling from the registry instead of the workspace, so
+keep the pinned versions in sync when you bump a package.
 
 ## Which one to use
 
@@ -45,8 +54,7 @@ cd packages/sdk
 yalc publish
 ```
 
-`yalc publish` respects the `files` field in `package.json`, so if a file is
-missing from the published output here, it would be missing from npm too.
+`yalc publish` respects the `files` field in `package.json`, so if a file is missing from the published output here, it would be missing from npm too.
 
 ### 2. Add it to the consumer
 
@@ -54,8 +62,7 @@ From the consumer app:
 
 ```bash
 cd ~/my-dapp
-yalc add @soroban-resurrect/sdk
-npm install
+yalc add @soroban-resurrect/sdk.npm install
 ```
 
 This writes a `file:.yalc/@soroban-resurrect/sdk` dependency and a `yalc.lock`.
@@ -64,12 +71,10 @@ Do not commit either.
 ### 3. Push updates after each change
 
 ```bash
-cd packages/sdk
-npm run build
+cd packages/sdk.npm run build
 yalc push
 ```
-
-`yalc push` republishes and updates every consumer that added the package, so
+ `yalc push` republishes and updates every consumer that added the package, so
 this is the command you repeat while iterating.
 
 ### 4. Clean up
@@ -95,8 +100,7 @@ npm link
 
 ```bash
 cd ~/my-dapp
-npm link @soroban-resurrect/sdk
-```
+npm link @soroban-resurrect/sdk.```
 
 The consumer's `node_modules/@soroban-resurrect/sdk` is now a symlink to your
 working copy, so a rebuild is visible immediately with no further commands.
@@ -105,8 +109,7 @@ working copy, so a rebuild is visible immediately with no further commands.
 
 ```bash
 cd ~/my-dapp
-npm unlink --no-save @soroban-resurrect/sdk
-npm install
+npm unlink --no-save @soroban-resurrect/sdk.npm install
 
 cd packages/sdk
 npm unlink -g
@@ -126,6 +129,18 @@ yalc add @soroban-resurrect/sdk @soroban-resurrect/react-hook
 npm install
 ```
 
+## Publishing with provenance
+
+Releases publish with `npm publish --provenance`, which attaches a signed
+attestation tying each tarball to the workflow run that produced it. The publish
+workflow enables this automatically; do not publish the eleven packages by hand.
+
+If a publish fails partway through, the release fails loudly. To recover, check
+which packages already landed with `npm view <pkg> versions`, then re-run the
+publish workflow for the remaining packages at the same version. Never bump
+versions to work around a partial publish — that leaves consumers with
+mismatched or unattributable artifacts.
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |
@@ -136,6 +151,7 @@ npm install
 | Two `@stellar/stellar-sdk` instances | Same cause as above. `stellar-sdk` is a peer dependency and must resolve to one copy. |
 | Vite does not reload the linked package | Linked packages sit outside the project root. Add `optimizeDeps: { exclude: ['@soroban-resurrect/sdk'] }` to the consumer's Vite config. |
 | A file is missing only under yalc | It is not covered by `files` in the package's `package.json`. It would be missing from the npm release too, so fix it there. |
+| A missing sibling resolves from the registry | The internal dependency is not pinned to an exact workspace version. Pin it and re-run the pre-publish check. |
 
 ## Do not commit link artifacts
 
