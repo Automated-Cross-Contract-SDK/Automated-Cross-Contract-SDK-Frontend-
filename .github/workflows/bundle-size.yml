@@ -17,7 +17,8 @@ jobs:
 
       - run: npm ci
 
-      - uses: andresz1/size-limit-action@v1
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          build_script: build
+      - run: npm run build
+
+      # Per-entry-point gzip budgets + tree-shaking fixture. Fails naming the
+      # offending entry point. See CONTRIBUTING.md "Bundle budgets".
+      - run: node scripts/check-bundle-budgets.mjs --summary "$GITHUB_STEP_SUMMARY"

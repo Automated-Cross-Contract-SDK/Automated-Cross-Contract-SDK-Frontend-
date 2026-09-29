@@ -21,8 +21,13 @@ import { SorobanResurrectExecutor } from './SorobanResurrectExecution.js'
 import { isRestoreResponse, extractArchivedKeys } from './Archiver.js'
 import { buildRestoreCostEstimate, type RestoreCostEstimate } from './feeCalculation.js'
 import type { TransactionHistoryEntry } from './TransactionHistory.js'
-import { queryLedgerTTL, queryLedgerEntryTTL, getExpiringSoonEntries } from './TTLHelpers.js'
-import type { LedgerEntryTTLInfo, TTLQueryResult } from './TTLHelpers.js'
+import {
+  queryLedgerTTL,
+  queryLedgerEntryTTL,
+  getExpiringSoonEntries,
+  invalidateLatestLedgerCache,
+} from './TTLHelpers.js'
+import type { LedgerEntryTTLInfo, QueryLedgerTTLOptions, TTLQueryResult } from './TTLHelpers.js'
 import { NETWORK_PRESETS } from './constants.js'
 import type { SorobanNetworkName } from './constants.js'
 
@@ -213,6 +218,7 @@ export class SorobanResurrect {
 
     const resolved = resolveConfig(overrideConfig)
 
+    invalidateLatestLedgerCache(this._server)
     this._server = resolved.server
     this._config = resolved.config
     this._simulator.rebind(resolved.server, resolved.config, resolved.simulationCache)
@@ -581,8 +587,16 @@ export class SorobanResurrect {
    * console.log(result.entries[0].ttlLedgers)
    * ```
    */
-  async queryLedgerTTL(keys: xdr.LedgerKey[]): Promise<TTLQueryResult> {
-    return queryLedgerTTL(this._server, keys)
+  async queryLedgerTTL(
+    keys: xdr.LedgerKey[],
+    opts: QueryLedgerTTLOptions = {},
+  ): Promise<TTLQueryResult> {
+    const cfg = this._config as { archiveDetectionChunkSize?: number; archiveDetectionConcurrency?: number }
+    return queryLedgerTTL(this._server, keys, {
+      chunkSize: cfg.archiveDetectionChunkSize,
+      concurrency: cfg.archiveDetectionConcurrency,
+      ...opts,
+    })
   }
 
   /**

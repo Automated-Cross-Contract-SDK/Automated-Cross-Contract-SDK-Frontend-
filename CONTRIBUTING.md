@@ -196,6 +196,16 @@ describe('myFunction', () => {
 
 ---
 
+### Bundle budgets
+
+CI runs `node scripts/check-bundle-budgets.mjs` after `npm run build`. It bundles every
+publishable entry point, compares its gzipped size to `scripts/bundle-budgets.json`, and
+fails naming any entry point over budget. It also checks that importing only
+`SorobanResurrect` tree-shakes away hardware-wallet and authorization code.
+
+To raise a budget deliberately, run `npm run build && node scripts/check-bundle-budgets.mjs --update`
+(which records current sizes with 10% headroom) and explain the increase in your PR.
+
 ## Commit Format
 
 This project follows the [Conventional Commits](https://www.conventionalcommits.org/) specification. Every commit message must match:
