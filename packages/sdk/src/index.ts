@@ -203,3 +203,10 @@ export type { RestoreTxDiagnostics, EvaluateRestoreFootprintOptions } from './fo
 
 // ---------------------------------------------------------------------------
 //
+export { parseMinimalHistory } from './HistoryPersistence.js'
+export type {
+  HistoryPersistenceMode,
+  HistorySerializer,
+  AttachHistoryPersistenceOptions,
+} from './HistoryPersistence.js'
+export type { MinimalHistoryEntry } from './TransactionHistory.js'

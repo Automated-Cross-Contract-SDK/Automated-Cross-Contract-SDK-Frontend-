@@ -18,14 +18,40 @@ import { extractXdrOperations } from './Restorer.js'
  * cache.set(myTx, sim)
  * ```
  */
+/** Memoized fingerprints per immutable `Transaction` instance (#424). */
+const fingerprintMemo = new WeakMap<Transaction, string>()
+
+/**
+ * Computes the cache fingerprint once per `Transaction` instance. Envelopes
+ * are immutable, so a rebuilt transaction (new instance) gets a fresh
+ * fingerprint. Pass the result to `get`/`set` to share it across a workflow
+ * step (e.g. detection and estimation).
+ */
+export function memoizedFingerprint(cache: SimulationCache, transaction: Transaction): string {
+  let fp = fingerprintMemo.get(transaction)
+  if (fp === undefined) {
+    fp = cache.fingerprint(transaction)
+    fingerprintMemo.set(transaction, fp)
+  }
+  return fp
+}
+
 export class SimulationCache {
   private readonly maxSize: number
   private readonly ttlMs: number
   private readonly store: Map<string, { response: SimulateResponse; timestamp: number }>
 
   constructor(opts?: { maxSize?: number; ttlMs?: number }) {
-    this.maxSize = opts?.maxSize ?? 50
-    this.ttlMs = opts?.ttlMs ?? 30_000
+    const maxSize = opts?.maxSize ?? 50
+    const ttlMs = opts?.ttlMs ?? 30_000
+    if (!Number.isInteger(maxSize) || maxSize < 1) {
+      throw new Error(`Invalid SimulationCache maxSize: ${maxSize}. Must be a positive integer.`)
+    }
+    if (!Number.isFinite(ttlMs) || ttlMs <= 0) {
+      throw new Error(`Invalid SimulationCache ttlMs: ${ttlMs}. Must be a positive number.`)
+    }
+    this.maxSize = maxSize
+    this.ttlMs = ttlMs
     this.store = new Map()
   }
 
@@ -42,6 +68,10 @@ export class SimulationCache {
    * **excludes the sequence number and absolute timestamp** so that the
    * same logical transaction rebuilt with a fresh sequence or built at a
    * different wall-clock time can hit the cache.
+   *
+   * Pure (no memoization) so it stays directly unit-testable; `get`/`set`
+   * use {@link memoizedFingerprint} so the envelope is walked at most once
+   * per transaction instance.
    */
   fingerprint(transaction: Transaction): string {
     // Extract operations from the XDR envelope so the fingerprint is
@@ -74,8 +104,8 @@ export class SimulationCache {
    * Retrieves a cached simulation response for the given transaction,
    * or `undefined` if not present or expired.
    */
-  get(transaction: Transaction): SimulateResponse | undefined {
-    const key = this.fingerprint(transaction)
+  get(transaction: Transaction, fingerprint?: string): SimulateResponse | undefined {
+    const key = fingerprint ?? memoizedFingerprint(this, transaction)
     const entry = this.store.get(key)
 
     if (!entry) return undefined
@@ -92,8 +122,8 @@ export class SimulationCache {
    * Stores a simulation response for the given transaction.
    * If the cache exceeds `maxSize`, the oldest entry is evicted (FIFO).
    */
-  set(transaction: Transaction, response: SimulateResponse): void {
-    const key = this.fingerprint(transaction)
+  set(transaction: Transaction, response: SimulateResponse, fingerprint?: string): void {
+    const key = fingerprint ?? memoizedFingerprint(this, transaction)
 
     if (this.store.size >= this.maxSize && !this.store.has(key)) {
       // Evict the oldest entry (FIFO — first key in insertion order)

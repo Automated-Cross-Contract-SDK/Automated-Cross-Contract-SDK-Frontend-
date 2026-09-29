@@ -61,6 +61,21 @@ export interface SerializedHistoryEntry {
   lastAttemptAt: number
 }
 
+/**
+ * Redacted history record written in `minimal` persistence mode. Contains no
+ * transaction XDR and no `ResurrectResult` — only ids, timestamps, status and
+ * the transaction hash.
+ */
+export interface MinimalHistoryEntry {
+  id: string
+  timestamp: number
+  status: TransactionAttemptStatus
+  attemptCount: number
+  lastAttemptAt: number
+  /** Hex hash of the transaction envelope. */
+  transactionHash: string
+}
+
 export class TransactionHistory {
   private entries: Map<string, TransactionHistoryEntry> = new Map()
 
@@ -202,6 +217,22 @@ export class TransactionHistory {
       status: entry.status,
       attemptCount: entry.attemptCount,
       lastAttemptAt: entry.lastAttemptAt,
+    }))
+    return JSON.stringify(serialized)
+  }
+
+  /**
+   * Serialises history in redacted form (see {@link MinimalHistoryEntry}):
+   * never includes transaction XDR or results.
+   */
+  toMinimalJSON(): string {
+    const serialized: MinimalHistoryEntry[] = this.getAll().map((entry) => ({
+      id: entry.id,
+      timestamp: entry.timestamp,
+      status: entry.status,
+      attemptCount: entry.attemptCount,
+      lastAttemptAt: entry.lastAttemptAt,
+      transactionHash: entry.transaction.hash().toString('hex'),
     }))
     return JSON.stringify(serialized)
   }

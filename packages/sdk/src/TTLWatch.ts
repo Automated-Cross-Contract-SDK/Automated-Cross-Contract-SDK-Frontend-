@@ -38,6 +38,10 @@ export interface TTLWatchOptions {
 export interface TTLWatchHandle {
   /** Stops the watch. Safe to call more than once. */
   stop(): void
+  /** `true` while a poll cycle is running. */
+  readonly inFlight: boolean
+  /** Epoch ms when the last poll cycle started, or `null` if none has run yet. */
+  readonly lastTickAt: number | null
 }
 
 /**
@@ -160,10 +164,18 @@ export function watchTTL(
 
   let stopped = false
   let inFlight = false
+  let rerunPending = false
+  let lastTickAt: number | null = null
 
   const tick = async (): Promise<void> => {
-    if (stopped || inFlight) return
+    if (stopped) return
+    if (inFlight) {
+      // Never overlap: defer this tick until the running poll finishes.
+      rerunPending = true
+      return
+    }
     inFlight = true
+    lastTickAt = Date.now()
     try {
       const expiring: LedgerEntryTTLInfo[] = await getExpiringSoonEntries(
         server,
@@ -211,12 +223,18 @@ export function watchTTL(
       opts.onError?.(message)
     } finally {
       inFlight = false
+      if (rerunPending && !stopped) {
+        rerunPending = false
+        void tick()
+      }
     }
   }
 
   const timer = setInterval(() => {
     void tick()
   }, intervalMs)
+  // Don't let the poller keep a Node process alive (#426).
+  ;(timer as { unref?: () => void }).unref?.()
 
   // Check once immediately so callers don't wait a full interval to learn
   // their entries are already expiring soon.
@@ -226,7 +244,14 @@ export function watchTTL(
     stop: () => {
       if (stopped) return
       stopped = true
+      rerunPending = false
       clearInterval(timer)
+    },
+    get inFlight() {
+      return inFlight
+    },
+    get lastTickAt() {
+      return lastTickAt
     },
   }
 }
