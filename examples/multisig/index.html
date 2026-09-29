@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Soroban-Resurrect — 2-of-3 multisig restore</title>
+  </head>
+  <body>
+    <h1>2-of-3 multisig restore</h1>
+    <label><input type="checkbox" id="mock" checked /> Mocked RPC (no network)</label>
+    <label><input type="checkbox" id="refuse" /> Signer "Carol" refuses</label>
+    <button id="run">Build → collect → submit</button>
+    <ul id="signers"></ul>
+    <p id="progress"></p>
+    <pre id="log"></pre>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
