@@ -6,6 +6,18 @@ else. For day-to-day development, run a private Soroban network locally with the
 closes, a funded root account, and full control over TTL and archival, which is
 exactly what you need when testing restoration flows.
 
+## Dev container / Codespaces
+
+The repo ships a `.devcontainer/devcontainer.json`, so a fresh Codespace or VS Code
+dev container starts ready to build:
+
+- Node 20 (satisfies `engines.node >= 18`) and npm `10.9.8` (the `packageManager` pin).
+- `npm ci` runs on post-create, so `npm run verify` works straight away.
+- Port `5173` (docs site, `npm run docs:dev`) and `8000` (local Soroban RPC) are forwarded.
+- Docker-in-Docker is enabled, so `docker compose up -d` below works inside the
+  container and the RPC is reachable at `http://localhost:8000/soroban/rpc`. If your
+  environment disallows nested Docker, run the compose network on the host instead.
+
 ## Prerequisites
 
 | Tool | Minimum version |

@@ -30,6 +30,12 @@
     "lint": {
       "inputs": ["src/**", "../../eslint.config.js"]
     },
+    "verify": {
+      "dependsOn": ["typecheck", "lint", "test", "build", "//#format"]
+    },
+    "//#format": {
+      "inputs": ["**/*.{ts,tsx,json,md}", "!**/node_modules/**", "!**/dist/**"]
+    },
     "clean": {
       "cache": false
     },
