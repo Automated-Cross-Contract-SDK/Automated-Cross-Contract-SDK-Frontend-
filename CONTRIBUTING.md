@@ -73,7 +73,9 @@ npm run dev:example
 | `npm run build`                    | Build all packages                                                    |
 | `npm run build:sdk`                | Build only `@soroban-resurrect/sdk`                                   |
 | `npm run build:hook`               | Build only `@soroban-resurrect/react-hook`                            |
+| `npm run verify`                   | Pre-PR gate: typecheck, lint, format, test, build (all packages)      |
 | `npm test`                         | Run all unit tests                                                    |
+| `npx vitest run <path>`            | Run tests matching a path across all packages from the repo root      |
 | `npm run test:watch`               | Run tests in watch mode                                               |
 | `npm run typecheck`                | Type-check all packages without emitting                              |
 | `npm run lint`                     | Lint all TypeScript source files                                      |
@@ -267,13 +269,12 @@ removed. Use the three-argument form instead.
    git checkout -b feat/your-feature-name
    ```
 2. **Make your changes** — keep PRs focused on a single concern.
-3. **Run the full quality gate locally:**
+3. **Run the full quality gate locally** — one command, mirroring CI:
    ```bash
-   npm run typecheck
-   npm run lint
-   npm run format
-   npm test
+   npm run verify
    ```
+   This runs typecheck, lint, format check, tests, and build for every package
+   through a single Turborepo `verify` task, printing logs only for failing tasks.
 4. **Ensure all checks pass** before pushing.
 
 ### Opening the PR
