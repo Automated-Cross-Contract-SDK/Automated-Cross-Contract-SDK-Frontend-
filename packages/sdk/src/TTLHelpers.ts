@@ -2,6 +2,46 @@ import { rpc, xdr } from '@stellar/stellar-sdk'
 import { ArchivedLedgerEntry } from './types.js'
 import type { ISorobanRpcClient } from './RpcClient.js'
 import { asXdrBase64, type XdrBase64 } from './branded-types.js'
+import { fetchLedgerEntriesChunked } from './ledgerChunks.js'
+
+/** Default window (ms) during which a fetched latest-ledger sequence is reused. */
+export const LATEST_LEDGER_CACHE_MS = 1000
+
+/** Options for {@link queryLedgerTTL}. */
+export interface QueryLedgerTTLOptions {
+  /** Known current ledger sequence; skips the `getLatestLedger` RPC call entirely. */
+  currentLedger?: number
+  /** Window (ms) to reuse a cached latest ledger (default {@link LATEST_LEDGER_CACHE_MS}; `0` disables). */
+  latestLedgerCacheMs?: number
+  /** Keys per `getLedgerEntries` request. */
+  chunkSize?: number
+  /** Maximum chunk requests in flight. */
+  concurrency?: number
+}
+
+const latestLedgerCache = new WeakMap<ISorobanRpcClient, { at: number; sequence: Promise<number> }>()
+
+/**
+ * Returns the latest ledger sequence, sharing one in-flight/cached request per
+ * client for `cacheMs` so concurrent TTL queries agree on "now".
+ */
+export function getCachedLatestLedger(
+  server: ISorobanRpcClient,
+  cacheMs: number = LATEST_LEDGER_CACHE_MS,
+): Promise<number> {
+  const now = Date.now()
+  const hit = latestLedgerCache.get(server)
+  if (hit && cacheMs > 0 && now - hit.at < cacheMs) return hit.sequence
+  const sequence = server.getLatestLedger().then((r) => r.sequence)
+  latestLedgerCache.set(server, { at: now, sequence })
+  sequence.catch(() => latestLedgerCache.delete(server))
+  return sequence
+}
+
+/** Drops the cached latest ledger for `server` (called by `switchNetwork()`). */
+export function invalidateLatestLedgerCache(server: ISorobanRpcClient): void {
+  latestLedgerCache.delete(server)
+}
 
 /**
  * Average ledger close time in seconds. Used for estimating time remaining
@@ -120,7 +160,9 @@ function makeLiveInfo(
 /**
  * Queries the current TTL information for one or more ledger keys.
  *
- * Fetches ledger entries in chunks of 50 to stay within RPC limits.
+ * Fetches ledger entries in chunks with bounded concurrency (see
+ * {@link fetchLedgerEntriesChunked}). The latest ledger is cached briefly per
+ * client, or skipped when `opts.currentLedger` is supplied.
  * Keys not found on-chain are treated as archived.
  *
  * Works identically for `LedgerKeyContractData` and `LedgerKeyContractCode`
@@ -135,11 +177,12 @@ function makeLiveInfo(
 export async function queryLedgerTTL(
   server: ISorobanRpcClient,
   keys: xdr.LedgerKey[],
+  opts: QueryLedgerTTLOptions = {},
 ): Promise<TTLQueryResult> {
   const queriedAt = Date.now()
 
-  const latestLedgerResponse = await server.getLatestLedger()
-  const currentLedger = latestLedgerResponse.sequence
+  const currentLedger =
+    opts.currentLedger ?? (await getCachedLatestLedger(server, opts.latestLedgerCacheMs))
 
   // Build a map from keyBase64 → LedgerEntryTTLInfo for fast lookup
   const infoMap = new Map<string, LedgerEntryTTLInfo>()
@@ -150,30 +193,19 @@ export async function queryLedgerTTL(
     infoMap.set(keyBase64, makeArchivedInfo(keyBase64, currentLedger, getLedgerKeyEntryType(key)))
   }
 
-  const chunkSize = 50
-  for (let i = 0; i < keys.length; i += chunkSize) {
-    const chunk = keys.slice(i, i + chunkSize)
-    try {
-      const result = await server.getLedgerEntries(...chunk)
-      if (result.entries) {
-        for (const entry of result.entries) {
-          const keyBase64 = asXdrBase64(entry.key.toXDR('base64'))
-          const liveUntilLedger = entry.liveUntilLedgerSeq ?? 0
-          infoMap.set(
-            keyBase64,
-            makeLiveInfo(
-              keyBase64,
-              liveUntilLedger,
-              currentLedger,
-              getLedgerKeyEntryType(entry.key),
-            ),
-          )
-        }
-      }
-    } catch (err) {
+  const found = await fetchLedgerEntriesChunked(server, keys, {
+    chunkSize: opts.chunkSize,
+    concurrency: opts.concurrency,
+    onChunkError: (err) =>
       // On network error the pre-populated archived entries remain in the map.
-      console.warn('TTLHelpers: getLedgerEntries chunk failed, treating keys as archived:', err)
-    }
+      console.warn('TTLHelpers: getLedgerEntries chunk failed, treating keys as archived:', err),
+  })
+  for (const entry of found) {
+    const keyBase64 = asXdrBase64(entry.key.toXDR('base64'))
+    infoMap.set(
+      keyBase64,
+      makeLiveInfo(keyBase64, entry.liveUntilLedgerSeq ?? 0, currentLedger, getLedgerKeyEntryType(entry.key)),
+    )
   }
 
   // Preserve original key order

@@ -129,7 +129,19 @@ export type { ParsableTransactionResponse } from './TransactionFailure.js'
 // ---------------------------------------------------------------------------
 // TTL / ledger entry helpers (returned by SorobanResurrect.queryLedgerTTL etc.)
 // ---------------------------------------------------------------------------
-export type { LedgerEntryTTLInfo, TTLQueryResult, LedgerKeyEntryType } from './TTLHelpers.js'
+export type {
+  LedgerEntryTTLInfo,
+  TTLQueryResult,
+  LedgerKeyEntryType,
+  QueryLedgerTTLOptions,
+} from './TTLHelpers.js'
+export {
+  getCachedLatestLedger,
+  invalidateLatestLedgerCache,
+  LATEST_LEDGER_CACHE_MS,
+} from './TTLHelpers.js'
+export { fetchLedgerEntriesChunked } from './ledgerChunks.js'
+export type { ChunkedFetchOptions } from './ledgerChunks.js'
 
 // ---------------------------------------------------------------------------
 // Proactive TTL watching (resurrect.watchTTL)
@@ -163,6 +175,7 @@ export {
 // Transaction history (returned by SorobanResurrect.history / getHistory)
 // ---------------------------------------------------------------------------
 export type { TransactionHistoryEntry, TransactionAttemptStatus } from './TransactionHistory.js'
+export { DEFAULT_MAX_HISTORY_ENTRIES } from './TransactionHistory.js'
 
 // ---------------------------------------------------------------------------
 // Hardware wallet adapters
