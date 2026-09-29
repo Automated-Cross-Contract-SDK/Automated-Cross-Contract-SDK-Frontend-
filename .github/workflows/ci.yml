@@ -108,6 +108,25 @@ jobs:
       - name: Build (all packages via Turbo)
         run: npm run build
 
+  examples:
+    name: examples typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build packages the examples depend on
+        run: npm run build
+
+      - name: Typecheck every example against the workspace packages
+        run: npm run typecheck:examples
+
   cross-platform:
     name: ${{ matrix.package }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

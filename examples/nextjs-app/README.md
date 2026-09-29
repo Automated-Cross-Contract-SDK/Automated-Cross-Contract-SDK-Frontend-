@@ -17,6 +17,16 @@ Demonstrates:
 - Reading configuration from environment variables, with the public RPC URL
   (`NEXT_PUBLIC_*`) kept separate from the server-only one (`SOROBAN_*`)
 
+## Prerequisites
+
+- Node.js 18+
+- The repo packages built: `npm install && npm run build` from the repo root
+- A Freighter-compatible browser wallet with a funded testnet account
+
+**Network:** testnet by default; see `.env.example` for the public (`NEXT_PUBLIC_*`) and server-only (`SOROBAN_*`) variables.
+
+Scripts: `npm run dev`, `npm run build`, `npm run typecheck`. Copy `.env.example` to `.env.local` to override defaults.
+
 ## How it works
 
 `app/page.tsx` is a Server Component. It reads `?account=<public key>` from the
