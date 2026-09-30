@@ -6,7 +6,7 @@
   "description": "Automated Cross-Contract State Restoration SDK & Wallet Middleware for Soroban",
   "license": "MIT",
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "packageManager": "npm@10.9.8",
   "type": "module",
@@ -26,7 +26,7 @@
     "typecheck": "turbo run typecheck --filter=\"./packages/*\"",
     "typecheck:examples": "npm run typecheck --workspace=examples",
     "lint": "turbo run lint --filter=\"./packages/*\"",
-    "lint:fix": "eslint --fix \"packages/*/src/**/*.{ts,tsx}\" \"examples/*/src/**/*.{ts,tsx}\"",
+    "lint:fix": "eslint --fix \"packages/*/src/**/*{ts,tsx}\" \"examples/*/src/**/*.{ts,tsx}\"",
     "format": "prettier --check \"**/*.{ts,tsx,json,md}\" --ignore-path .gitignore",
     "format:fix": "prettier --write \"**/*.{ts,tsx,json,md}\" --ignore-path .gitignore",
     "test": "turbo run test --filter=\"./packages/*\"",
@@ -38,7 +38,12 @@
     "benchmark:imports": "node scripts/benchmark-imports.mjs",
     "benchmark:imports:update": "node scripts/benchmark-imports.mjs --update",
     "clean": "turbo run clean --filter=\"./packages/*\"",
-    "prepare": "husky"
+    "prepare": "husky",
+    "verify:pins": "node scripts/verify-workspace-pins.mjs",
+    "verify:packaging": "node scripts/verify-packaging.mjs",
+    "publish:packages": "node scripts/publish-packages.mjs --provenance",
+    "release": "npm run verify:pins && npm run build && npm run verify:packaging && node scripts/publish-packages.mjs --provenance",
+    "release:recover": "node scripts/publish-packages.mjs --provenance --resume"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -55,5 +60,9 @@
   "overrides": {
     "undici": "^7.29.0",
     "nanoid": "^3.3.18"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }
