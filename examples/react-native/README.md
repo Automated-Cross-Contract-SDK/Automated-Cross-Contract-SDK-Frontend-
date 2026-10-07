@@ -17,6 +17,15 @@ Demonstrates:
   keeps working after an app kill. `await sdk.ready` before reading persisted
   history. Requires `@react-native-async-storage/async-storage`.
 
+## Prerequisites
+
+- Node.js 18+ and the React Native toolchain (Xcode and/or Android Studio)
+- The repo packages built: `npm install && npm run build` from the repo root
+
+**Network:** testnet. Bare React Native has no `.env` loader — `.env.example` lists the values hard-coded at the top of `App.tsx`.
+
+Scripts: `npm run dev` (Metro), `npm run build` (release Android bundle into `dist/`), `npm run typecheck`.
+
 ## Setup
 
 This example expects a standard bare React Native project setup (Xcode /

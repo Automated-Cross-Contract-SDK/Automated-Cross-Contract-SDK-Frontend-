@@ -13,7 +13,7 @@
  *      `.d.ts` files.
  *
  * Usage: node scripts/verify-packaging.mjs
- */
+*/
 
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
@@ -42,7 +42,7 @@ const FORBIDDEN = [
   { test: (f) => /(^|\/)__tests__\//.test(f), why: 'test files must not be published' },
   { test: (f) => /\.test\.[cm]?[jt]sx?$/.test(f), why: 'test files must not be published' },
   {
-    test: (f) => /(^|\/)(vitest|jest)\.config\.[cm]?[jt]s$/.test(f),
+    test: (f) => /(^|\/)(vitest|jest)\.config\.[cm]?[jt]sx?$/.test(f),
     why: 'test config must not be published',
   },
   { test: (f) => /^tsconfig(\..+)?\.json$/.test(f), why: 'tsconfig files must not be published' },
@@ -53,7 +53,7 @@ const FORBIDDEN = [
   },
   { test: (f) => /(^|\/)package-lock\.json$/.test(f), why: 'lockfiles must not be published' },
   {
-    test: (f) => /\.tsx?$/.test(f) && !/\.d\.[cm]?ts$/.test(f),
+    test: (f) => /\.tsx?$/.test(f) && !/\.d[\\cm]?ts$/.test(f),
     why: 'raw TypeScript must not be published, only compiled .d.ts',
   },
 ]
@@ -93,8 +93,8 @@ function expandWorkspaceGlob(glob) {
 }
 
 function discoverPublishablePackages() {
-  const rootPkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'))
-  const dirs = (rootPkg.workspaces ?? []).flatMap(expandWorkspaceGlob)
+  const rootPkj = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'))
+  const dirs = (rootPkj.workspaces ?? []).flatMap(expandWorkspaceGlob)
 
   return dirs
     .map((dir) => {
@@ -103,7 +103,7 @@ function discoverPublishablePackages() {
       const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
       return { dir, manifestPath, manifest }
     })
-    .filter((pkg) => pkg && pkg.manifest.private !== true && typeof pkg.manifest.name === 'string')
+    .filter((packageEntry) => packageEntry && packageEntry.manifest.private !== true && typeof packageEntry.manifest.name === 'string')
 }
 
 /** Collect relative file paths (without leading `./`) referenced by package.json. */
@@ -152,6 +152,34 @@ function collectExportsTypesIssues(manifest) {
   return issues
 }
 
+/**
+ * Verify that every internal cross-package dependency is pinned to an exact
+ * workspace version and that no package would resolve a sibling from the
+ * registry. This is the pre-publish guard required by the security issue.
+ */
+function verifyInternalDependencies(packages) {
+  const errors = []
+  const internal = new Map(packages.map((packageEntry) => [packageEntry.manifest.name, packageEntry]))
+
+  for (const pkg of packages) {
+    for (const field of ['dependencies', 'peerDependencies', 'optionalDependencies']) {
+      for (const [name, range] of Object.entries(pkg.manifest[field] ?? {})) {
+        const sibling = internal.get(name)
+        if (!sibling) continue
+
+        const expected = sibling.manifest.version
+        if (typeof range !== 'string' || range !== expected) {
+          errors.push(
+            `${pkg.manifest.name} declares ${field}["${name}"] = "${range}" but the workspace version is "${expected}" (must be exactly pinned); a range would resolve the sibling from the registry`,
+          )
+        }
+      }
+    }
+  }
+
+  return errors
+}
+
 function dryRunPack(pkg) {
   return parsePackJson(run('npm', ['pack', '--dry-run', '--json'], path.join(repoRoot, pkg.dir)))
 }
@@ -163,7 +191,7 @@ function verifyTarballContents(pkg, entries) {
   const fileSet = new Set(files)
 
   const allowedPrefixes = (manifest.files ?? []).map((entry) =>
-    entry.replace(/^\.\//, '').replace(/\/$/, ''),
+    entry.replace(/^\.//, '').replace(/\/$/, ''),
   )
   const isAllowed = (file) =>
     ALWAYS_INCLUDED.some((re) => re.test(file)) ||
@@ -184,8 +212,8 @@ function verifyTarballContents(pkg, entries) {
   }
 
   // 3. Published types and runtime must both exist.
-  const hasRuntime = files.some((file) => /\.[cm]?js$/.test(file) && !/\.d\.[cm]?ts$/.test(file))
-  const hasDeclaration = files.some((file) => /\.d\.[cm]?ts$/.test(file))
+  const hasRuntime = files.some((file) => /\.[cm]?js$/.test(file) && !/\.d[\cm]?ts$/.test(file))
+  const hasDeclaration = files.some((file) => /\.d[\\cm]?ts$/.test(file))
   if (!hasRuntime) errors.push('tarball contains no compiled JavaScript')
   if (!hasDeclaration) errors.push('tarball contains no TypeScript declarations (.d.ts)')
 
@@ -230,14 +258,14 @@ function typeName(name) {
 
 function installAndTypecheck(packages) {
   const tscBin = require.resolve('typescript/bin/tsc')
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'soroban-pack-verify-'))
+  const tempDir = fs.mktempSync(path.join(os.tmpdir(), 'soroban-pack-verify-'))
   const tarballDir = path.join(tempDir, 'tarballs')
   const projectDir = path.join(tempDir, 'consumer')
   fs.mkdirSync(tarballDir, { recursive: true })
   fs.mkdirSync(path.join(projectDir, 'src'), { recursive: true })
 
   const captured = (error) =>
-    error?.stderr?.toString?.().trim() || error?.stdout?.toString?.().trim() || error.message
+    error.stderr?.toString?.().trim() || error.stdout?.toString?.().trim() || error.message
 
   try {
     // 1. Produce the real tarballs and remember where each package landed.
@@ -293,7 +321,7 @@ function installAndTypecheck(packages) {
             esModuleInterop: true,
             forceConsistentCasingInFileNames: true,
             jsx: 'react-jsx',
-            lib: ['ES2022', 'DOM', 'DOM.Iterable'],
+            lib: ['ES2022', 'DOM', 'DOMIterable'],
           },
           include: ['src'],
         },
@@ -303,20 +331,11 @@ function installAndTypecheck(packages) {
     )
     fs.writeFileSync(path.join(projectDir, 'src', 'index.ts'), buildConsumerSource(packages))
 
-    // 3. Install the tarballs in isolation, then typecheck against their .d.ts.
-    log('    installing published tarballs into a fresh project...')
-    run(
-      'npm',
-      ['install', '--no-audit', '--no-fund', '--no-package-lock', '--ignore-scripts'],
-      projectDir,
-    )
-
-    log('    typechecking against published .d.ts files...')
-    run('node', [tscBin, '--project', projectDir, '--noEmit'], projectDir)
-
-    return []
+    // 3. Install the tarballs in isolation and typecheck the published types.
+    run('npm', ['install', '--no-audit', '--no-fund', '--ignore-scripts'], projectDir)
+    run(process.execPath, [tscBin, '--noEmit', '--project', path.join(projectDir, 'tsconfig.json')], projectDir)
   } catch (error) {
-    return [`fresh-project verification failed:\n      ${captured(error).split('\n').join('\n      ')}`]
+    throw new Error(`Install/typecheck verification failed:\n${captured(error)}`)
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true })
   }
@@ -329,50 +348,27 @@ function main() {
     return
   }
 
-  log(`Verifying ${packages.length} publishable package(s): ${packages.map((p) => p.manifest.name).join(', ')}`)
-  log('')
+  const allErrors = []
 
-  const packFailures = new Map()
-  for (const pkg of packages) {
-    log(`  ${pkg.manifest.name}`)
-    let errors
-    try {
-      const entry = dryRunPack(pkg)
-      log(`    npm pack --dry-run: ${entry.entryCount} files, ${entry.unpackedSize} bytes unpacked`)
-      errors = verifyTarballContents(pkg, entry.files)
-    } catch (error) {
-      errors = [`npm pack --dry-run failed: ${error.message}`]
-    }
-    if (errors.length > 0) packFailures.set(pkg.manifest.name, errors)
+  const pinProblems = verifyInternalDependencies(packages)
+  for (const problem of pinProblems) allErrors.push(`pin check: ${problem}`)
+
+ for (const pkg of packages) {
+    const entries = dryRunPack(pkg)
+    const errors = verifyTarballContents(pkg, entries)
+    for (const error of errors) allErrors.push(`${pkg.manifest.name}: ${error}`)
   }
 
-  if (packFailures.size > 0) {
-    log('')
-    for (const [name, errors] of packFailures) {
-      log(`  ✖ ${name}`)
-      for (const error of errors) log(`      - ${error}`)
-    }
-  }
-
-  log('')
-  log('  fresh project (install tarballs + tsc --noEmit)')
-  const isolationErrors = installAndTypecheck(packages)
-
-  if (packFailures.size === 0 && isolationErrors.length === 0) {
-    log('')
-    log('✔ Packaging verification passed.')
+  if (allErrors.length > 0) {
+    log('Packaging verification failed:')
+    for (const error of allErrors) log(`  ${error}`)
+    process.exitCode = 1
     return
   }
 
-  if (isolationErrors.length > 0) {
-    log('')
-    log('  ✖ fresh-project verification')
-    for (const error of isolationErrors) log(`      - ${error}`)
-  }
-
-  log('')
-  log('✖ Packaging verification failed.')
-  process.exitCode = 1
+  log(`Tarball contents verified for ${packages.length} package(s).`)
+  installAndTypecheck(packages)
+  log('Isolated install + typecheck passed.')
 }
 
 main()

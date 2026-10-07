@@ -8,6 +8,7 @@ import type {
   ArchivedLedgerEntry,
   ResurrectResult,
   SubmitWithRestoreOptions,
+  RestoreKeysOptions,
   SorobanResurrectEvents,
 } from './types.js'
 import type { ISorobanRpcClient } from './RpcClient.js'
@@ -21,9 +22,15 @@ import { SorobanResurrectExecutor } from './SorobanResurrectExecution.js'
 import { isRestoreResponse, extractArchivedKeys } from './Archiver.js'
 import { buildRestoreCostEstimate, type RestoreCostEstimate } from './feeCalculation.js'
 import type { TransactionHistoryEntry } from './TransactionHistory.js'
-import { queryLedgerTTL, queryLedgerEntryTTL, getExpiringSoonEntries } from './TTLHelpers.js'
-import type { LedgerEntryTTLInfo, TTLQueryResult } from './TTLHelpers.js'
+import {
+  queryLedgerTTL,
+  queryLedgerEntryTTL,
+  getExpiringSoonEntries,
+  invalidateLatestLedgerCache,
+} from './TTLHelpers.js'
+import type { LedgerEntryTTLInfo, QueryLedgerTTLOptions, TTLQueryResult } from './TTLHelpers.js'
 import { NETWORK_PRESETS } from './constants.js'
+import { watchTTL, type TTLWatchHandle, type TTLWatchOptions } from './TTLWatch.js'
 import type { SorobanNetworkName } from './constants.js'
 
 /**
@@ -61,6 +68,7 @@ export class SorobanResurrect {
   private readonly _stateMgr: SorobanResurrectStateManager
   private readonly _simulator: SorobanResurrectSimulator
   private readonly _executor: SorobanResurrectExecutor
+  private readonly _ttlWatches = new Set<TTLWatchHandle>()
 
   // Last set of archived keys from a standalone detectArchivedKeys() call.
   // The FSM context already stores archivedKeys for the full submit workflow;
@@ -213,6 +221,7 @@ export class SorobanResurrect {
 
     const resolved = resolveConfig(overrideConfig)
 
+    invalidateLatestLedgerCache(this._server)
     this._server = resolved.server
     this._config = resolved.config
     this._simulator.rebind(resolved.server, resolved.config, resolved.simulationCache)
@@ -298,6 +307,36 @@ export class SorobanResurrect {
   /** Clears all recorded history entries. */
   clearHistory(): void {
     this._executor.clearHistory()
+  }
+
+  // ---------------------------------------------------------------------------
+  // TTL watching & lifecycle
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Starts a proactive TTL watch for `keys`. The handle is tracked by this
+   * instance so {@link dispose} stops it even if the caller loses it.
+   */
+  watchTTL(keys: xdr.LedgerKey[], opts: TTLWatchOptions = {}): TTLWatchHandle {
+    const handle = watchTTL(
+      this._server,
+      this._config as unknown as Required<SorobanResurrectConfig>,
+      this._stateMgr.emitter as never,
+      keys,
+      opts,
+    )
+    const stop = handle.stop.bind(handle)
+    handle.stop = () => {
+      this._ttlWatches.delete(handle)
+      stop()
+    }
+    this._ttlWatches.add(handle)
+    return handle
+  }
+
+  /** Stops every TTL watch started by this instance. Safe to call more than once. */
+  dispose(): void {
+    for (const handle of [...this._ttlWatches]) handle.stop()
   }
 
   // ---------------------------------------------------------------------------
@@ -553,6 +592,7 @@ export class SorobanResurrect {
    *
    * @param keys   - Ledger keys to restore.
    * @param wallet - Wallet adapter used for signing.
+   * @param opts   - Optional lifecycle callbacks (signing, submitted, confirmed).
    * @returns {@link ResurrectResult} with `restoreTxHash` on success.
    *
    * @example
@@ -561,8 +601,12 @@ export class SorobanResurrect {
    * const result = await resurrect.restoreKeys(expiring.map((e) => e.key), wallet)
    * ```
    */
-  async restoreKeys(keys: xdr.LedgerKey[], wallet: WalletAdapter): Promise<ResurrectResult> {
-    return this._executor.restoreKeys(keys, wallet)
+  async restoreKeys(
+    keys: xdr.LedgerKey[],
+    wallet: WalletAdapter,
+    opts?: RestoreKeysOptions,
+  ): Promise<ResurrectResult> {
+    return this._executor.restoreKeys(keys, wallet, opts)
   }
 
   // ---------------------------------------------------------------------------
@@ -581,8 +625,16 @@ export class SorobanResurrect {
    * console.log(result.entries[0].ttlLedgers)
    * ```
    */
-  async queryLedgerTTL(keys: xdr.LedgerKey[]): Promise<TTLQueryResult> {
-    return queryLedgerTTL(this._server, keys)
+  async queryLedgerTTL(
+    keys: xdr.LedgerKey[],
+    opts: QueryLedgerTTLOptions = {},
+  ): Promise<TTLQueryResult> {
+    const cfg = this._config as { archiveDetectionChunkSize?: number; archiveDetectionConcurrency?: number }
+    return queryLedgerTTL(this._server, keys, {
+      chunkSize: cfg.archiveDetectionChunkSize,
+      concurrency: cfg.archiveDetectionConcurrency,
+      ...opts,
+    })
   }
 
   /**

@@ -2,8 +2,8 @@ import React, { useCallback, useState } from 'react'
 import { SorobanResurrectProvider, useSorobanResurrectContext } from '@soroban-resurrect/react-hook'
 import { TransactionBuilder, Operation, Networks, nativeToScVal, xdr } from '@stellar/stellar-sdk'
 
-const RPC_URL = 'https://soroban-testnet.stellar.org'
-const NETWORK_PASSPHRASE = Networks.TESTNET
+const RPC_URL: string = import.meta.env.VITE_RPC_URL || 'https://soroban-testnet.stellar.org'
+const NETWORK_PASSPHRASE: string = import.meta.env.VITE_NETWORK_PASSPHRASE || Networks.TESTNET
 
 // A single SorobanResurrect instance (one RPC connection, one restore
 // workflow state machine) is shared across every contract interaction below

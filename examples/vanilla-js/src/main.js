@@ -2,9 +2,10 @@
 import { SorobanResurrect } from '@soroban-resurrect/sdk'
 import { TransactionBuilder, Operation, Networks, nativeToScVal } from '@stellar/stellar-sdk'
 
-const RPC_URL = 'https://soroban-testnet.stellar.org'
-const NETWORK_PASSPHRASE = Networks.TESTNET
-const CONTRACT_ID = 'CCJZ5DGASBWQXR5G4GXEJM2Q4FI5L3QJ6TQ3QFJTQH7GJ6KJ3J2Q2K2Q'
+const RPC_URL = import.meta.env.VITE_RPC_URL || 'https://soroban-testnet.stellar.org'
+const NETWORK_PASSPHRASE = import.meta.env.VITE_NETWORK_PASSPHRASE || Networks.TESTNET
+const CONTRACT_ID =
+  import.meta.env.VITE_CONTRACT_ID || 'CCJZ5DGASBWQXR5G4GXEJM2Q4FI5L3QJ6TQ3QFJTQH7GJ6KJ3J2Q2K2Q'
 
 // The SDK instance is the single entry point: it owns the RPC connection,
 // exposes detectArchivedKeys()/submitWithRestore(), and broadcasts workflow

@@ -44,14 +44,15 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@stellar/stellar-sdk": "^12.0.0",
-    "@xstate/fsm": "2.0.1"
+    "@stellar/stellar-sdk": "12.3.0",
+    "@xstate/fsm": "2.0.1",
+    "@soroban-resurrect/core": "0.1.0"
   },
   "devDependencies": {
-    "@vitest/coverage-v8": "^5.0.2",
-    "fast-check": "^4.10.2",
-    "tsup": "^8.5.1",
-    "typescript": "^7.0.2",
-    "vitest": "^5.0.1"
+    "@vitest/coverage-v8": "5.0.2",
+    "fast-check": "4.10.2",
+    "tsup": "8.5.1",
+    "typescript": "7.0.2",
+    "vitest": "5.0.1"
   }
 }

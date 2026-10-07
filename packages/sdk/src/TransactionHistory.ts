@@ -61,6 +61,9 @@ export interface SerializedHistoryEntry {
   lastAttemptAt: number
 }
 
+/** Default cap on retained history entries (see {@link TransactionHistory}). */
+export const DEFAULT_MAX_HISTORY_ENTRIES = 500
+
 export class TransactionHistory {
   private entries: Map<string, TransactionHistoryEntry> = new Map()
 
@@ -71,8 +74,26 @@ export class TransactionHistory {
    * @param networkPassphrase - Network passphrase used to rebuild `Transaction`
    *   objects from stored XDR during {@link loadJSON}. Required only when
    *   history persistence is enabled.
+   * @param maxHistoryEntries - Maximum retained entries. When exceeded, the
+   *   oldest settled (`success`/`failed`) entries are evicted; pending entries
+   *   are never evicted. `Infinity` disables the cap.
    */
-  constructor(private readonly networkPassphrase?: string) {}
+  constructor(
+    private readonly networkPassphrase?: string,
+    private readonly maxHistoryEntries: number = DEFAULT_MAX_HISTORY_ENTRIES,
+  ) {}
+
+  /** Evicts the oldest settled entries until the log fits `maxHistoryEntries`. */
+  private evict(): void {
+    let excess = this.entries.size - this.maxHistoryEntries
+    if (excess <= 0) return
+    for (const [id, entry] of this.entries) {
+      if (excess <= 0) break
+      if (entry.status === 'pending') continue
+      this.entries.delete(id)
+      excess--
+    }
+  }
 
   /**
    * Registers a listener invoked after every mutation (`add`, `update`,
@@ -111,6 +132,7 @@ export class TransactionHistory {
       lastAttemptAt: now,
     }
     this.entries.set(id, entry)
+    this.evict()
     this.emitChange()
     return id
   }
@@ -133,6 +155,7 @@ export class TransactionHistory {
     entry.status = result.success ? 'success' : 'failed'
     entry.lastAttemptAt = Date.now()
     this.entries.set(id, entry)
+    this.evict()
     this.emitChange()
   }
 
@@ -207,6 +230,22 @@ export class TransactionHistory {
   }
 
   /**
+   * Serialises history in redacted form (see {@link MinimalHistoryEntry}):
+   * never includes transaction XDR or results.
+   */
+  toMinimalJSON(): string {
+    const serialized: MinimalHistoryEntry[] = this.getAll().map((entry) => ({
+      id: entry.id,
+      timestamp: entry.timestamp,
+      status: entry.status,
+      attemptCount: entry.attemptCount,
+      lastAttemptAt: entry.lastAttemptAt,
+      transactionHash: entry.transaction.hash().toString('hex'),
+    }))
+    return JSON.stringify(serialized)
+  }
+
+  /**
    * Replaces the current entries with those decoded from a string produced by
    * {@link toJSON}. Malformed input is ignored (history stays empty). Requires
    * a `networkPassphrase` to have been passed to the constructor so stored XDR
@@ -245,6 +284,7 @@ export class TransactionHistory {
         // Skip entries whose XDR can no longer be decoded.
       }
     }
+    this.evict()
     this.emitChange()
   }
 
