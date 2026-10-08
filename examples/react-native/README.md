@@ -40,3 +40,30 @@ npm run android        # or: npm run ios
 Metro's default resolver already understands npm workspaces, so it resolves
 `@soroban-resurrect/sdk` and `@soroban-resurrect/react-hook` straight from
 the monorepo's `packages/*` sources.
+
+## TTL watch-and-extend (`ttlWatchExample.tsx`)
+
+`ttlWatchExample.tsx` shows the proactive flow on mobile: it polls
+`getExpiringSoonEntries()` for a set of ledger keys, shows a warning banner
+once any entry drops below the threshold (~24 h), and extends the entries via
+`restoreKeys()` only when the user taps **Extend now**.
+
+Polling is tied to `AppState`: it stops when the app goes to the background
+(where iOS/Android suspend JS timers anyway) and restarts — with an immediate
+poll — when the app returns to the foreground. The component uses only React
+Native APIs; it never touches `window` or `document`.
+
+Render it with your wallet adapter and the keys to watch:
+
+```tsx
+<TTLWatchExample wallet={wallet} keys={[positionKey]} />
+```
+
+### Required polyfills
+
+`@stellar/stellar-sdk` needs Node globals that React Native lacks. Load these
+in `index.js` **before** any SDK import (already done in this example):
+
+- `react-native-get-random-values` — `crypto.getRandomValues` for key generation
+- `buffer` — assign `global.Buffer = Buffer`
+- `react-native-url-polyfill/auto` — spec-compliant `URL` for the RPC client (if your RN version's `URL` is incomplete)

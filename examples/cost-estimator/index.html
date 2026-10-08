@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Soroban-Resurrect — restore cost estimator</title>
+  </head>
+  <body>
+    <h1>What will this cost me?</h1>
+    <p id="config"></p>
+    <select id="mode">
+      <option value="live">Live (testnet + Freighter)</option>
+      <option value="mock-restore">Mock: needs a restore</option>
+      <option value="mock-none">Mock: no restore needed</option>
+    </select>
+    <button id="estimate">Estimate</button>
+    <div id="result"></div>
+    <button id="sign" hidden>Looks good — sign &amp; submit</button>
+    <pre id="log"></pre>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

@@ -9,9 +9,12 @@ self-contained — see its own `README.md` for setup instructions.
 | [`basic`](./basic)                     | Minimal Vite + React integration using `SorobanResurrectProvider` and `useSorobanResurrectContext`.                                                                                |
 | [`vanilla-js`](./vanilla-js)           | Plain JavaScript usage of `@soroban-resurrect/sdk` directly — no framework.                                                                                                        |
 | [`nextjs-app`](./nextjs-app)           | Next.js App Router integration: server-side `needsRestore()` detection in a Server Component, with the provider and restore flow isolated behind a single `'use client'` boundary. |
-| [`react-native`](./react-native)       | React Native mobile integration, including the Node polyfills the SDK needs on-device.                                                                                             |
+| [`react-native`](./react-native)       | React Native mobile integration, including the Node polyfills the SDK needs on-device and an `AppState`-aware TTL watch-and-extend flow.                                           |
 | [`multi-contract`](./multi-contract)   | Interacting with multiple independent contracts through one shared `SorobanResurrectProvider`.                                                                                     |
 | [`hardware-ledger`](./hardware-ledger) | Ledger hardware wallet: connect via `createLedgerAdapter`, detect archived keys and restore with on-device confirmation; includes a mocked transport for running without a device. |
+| [`multisig`](./multisig)               | 2-of-3 multisig restore with `MultiSigWalletAdapter`: build, collect signatures with per-signer progress, submit.                                                                  |
+| [`cost-estimator`](./cost-estimator)   | Pre-signature cost confirmation with `estimateRestoreCost()`.                                                                                                                      |
+| [`astro`](./astro)                     | Astro integration: detection and restore in a `client:only` React island.                                                                                                          |
 
 All examples are npm workspaces, so `@soroban-resurrect/sdk` and
 `@soroban-resurrect/react-hook` resolve to this repo's `packages/*` sources.
