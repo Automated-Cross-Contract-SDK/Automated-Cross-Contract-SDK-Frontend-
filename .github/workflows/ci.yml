@@ -181,7 +181,7 @@ jobs:
       - run: npx --yes playwright@1.55.0 install --with-deps chromium
       - run: npx --yes playwright@1.55.0 test
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: wallet-e2e-report
           path: |
