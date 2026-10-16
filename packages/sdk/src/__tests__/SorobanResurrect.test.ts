@@ -121,6 +121,7 @@ describe('SorobanResurrect', () => {
         success: false,
         archivedKeysDetected: 0,
         error: 'something went wrong',
+        errorCode: 'UNKNOWN_ERROR',
       })
 
       const result = await resurrect.submitWithRestore({

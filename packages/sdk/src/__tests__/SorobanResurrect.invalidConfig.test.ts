@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { SorobanResurrect } from '../SorobanResurrect.js'
 import type { SorobanResurrectConfig, WalletAdapter } from '../types.js'
+import { InvalidInputError, ResurrectErrorCode } from '../errors.js'
 
 describe('SorobanResurrect — invalid config handling', () => {
   it('throws when constructed with an empty RPC URL', () => {
@@ -72,5 +73,25 @@ describe('SorobanResurrect — invalid config handling', () => {
         restoreFeeMultiplier: 0.5,
       }),
     ).toThrow('config.restoreFeeMultiplier must be a finite number greater than or equal to 1')
+  })
+
+  it('throws a typed INVALID_INPUT error for invalid configuration', () => {
+    try {
+      new SorobanResurrect({ rpcUrl: '' } as SorobanResurrectConfig)
+      throw new Error('expected constructor to reject the invalid URL')
+    } catch (error) {
+      expect(error).toBeInstanceOf(InvalidInputError)
+      expect((error as InvalidInputError).code).toBe(ResurrectErrorCode.INVALID_INPUT)
+    }
+  })
+
+  it('rejects incomplete injected runtime primitives with INVALID_INPUT', () => {
+    expect(
+      () =>
+        new SorobanResurrect({
+          rpcUrl: 'https://soroban-testnet.stellar.org',
+          runtime: { now: () => 1 } as never,
+        }),
+    ).toThrow(InvalidInputError)
   })
 })

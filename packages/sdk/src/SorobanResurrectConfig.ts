@@ -1,4 +1,4 @@
-import type { SorobanResurrectConfig } from './types.js'
+import type { ResolvedSorobanResurrectConfig, SorobanResurrectConfig } from './types.js'
 import type { ISorobanRpcClient } from './RpcClient.js'
 import { SorobanRpcClient } from './RpcClient.js'
 import {
@@ -14,14 +14,16 @@ import {
   KNOWN_NETWORK_PASSPHRASES,
   resolveNetworkPassphrase,
   TTL_WATCH_INTERVAL_MS,
-  TTL_WATCH_THRESHOLD_LEDGERS,
+  TTL_WATCH_THRESHOLD,
 } from './constants.js'
 import { SimulationCache } from './SimulationCache.js'
+import { InvalidInputError } from './errors.js'
+import { SYSTEM_RUNTIME } from './runtime.js'
 
 /**
  * Result of initialising the SDK configuration.
  *
- * Contains the fully resolved `Required<SorobanResurrectConfig>`, the
+ * Contains the resolved SDK configuration, the
  * constructed RPC client, and an optional `SimulationCache` instance
  * (present only when `enableSimulationCache` is `true`).
  */
@@ -33,7 +35,7 @@ export interface ResolvedConfig {
    */
   server: ISorobanRpcClient
   /** Resolved configuration with all optional fields filled in. */
-  config: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & { rpcClient: ISorobanRpcClient }
+  config: ResolvedSorobanResurrectConfig
   /**
    * Cache for simulation responses. Only present when
    * `config.enableSimulationCache` is `true`; `undefined` otherwise.
@@ -50,8 +52,8 @@ const ARCHIVE_DETECTION_METHODS = ['simulation', 'direct'] as const
 function validateNumber(field: string, value: unknown, minimum: number, exclusive: boolean): void {
   const valid = typeof value === 'number' && Number.isFinite(value) && (exclusive ? value > minimum : value >= minimum)
   if (!valid) {
-    throw new Error(
-      `Invalid ${field}: ${JSON.stringify(value)}. Must be a finite number ${exclusive ? '>' : '>='} ${minimum}.`,
+    throw new InvalidInputError(
+      `config.${field} must be a finite number ${exclusive ? 'greater than' : 'greater than or equal to'} ${minimum} (received ${JSON.stringify(value)})`,
     )
   }
 }
@@ -61,7 +63,7 @@ function validateNumber(field: string, value: unknown, minimum: number, exclusiv
  */
 function validateBoolean(field: string, value: unknown): void {
   if (typeof value !== 'boolean') {
-    throw new Error(`Invalid ${field}: ${JSON.stringify(value)}. Must be a boolean.`)
+    throw new InvalidInputError(`config.${field} must be a boolean (received ${JSON.stringify(value)})`)
   }
 }
 
@@ -83,12 +85,12 @@ export const SIMULATION_CACHE_MAX_SIZE = 50
  */
 export function validateConfigShape(config: SorobanResurrectConfig): void {
   if (typeof config.rpcUrl !== 'string' || config.rpcUrl.length === 0) {
-    throw new Error(`Invalid rpcUrl: ${JSON.stringify(config.rpcUrl)}. Must be a non-empty string.`)
+    throw new InvalidInputError('config.rpcUrl must be a non-empty string')
   }
   try {
     new URL(config.rpcUrl)
   } catch {
-    throw new Error(`Invalid rpcUrl: ${JSON.stringify(config.rpcUrl)}. Must be a valid URL.`)
+    throw new InvalidInputError('config.rpcUrl must be a valid URL')
   }
 
   if (config.pollIntervalMs !== undefined) {
@@ -107,7 +109,7 @@ export function validateConfigShape(config: SorobanResurrectConfig): void {
     config.archiveDetectionMethod !== undefined &&
     !ARCHIVE_DETECTION_METHODS.includes(config.archiveDetectionMethod)
   ) {
-    throw new Error(
+    throw new InvalidInputError(
       `Invalid archiveDetectionMethod: ${JSON.stringify(config.archiveDetectionMethod)}. ` +
         `Must be one of: ${ARCHIVE_DETECTION_METHODS.map((m) => `"${m}"`).join(', ')}.`,
     )
@@ -127,9 +129,34 @@ export function validateConfigShape(config: SorobanResurrectConfig): void {
 
   if (config.simulationCacheMaxSize !== undefined) {
     if (!Number.isInteger(config.simulationCacheMaxSize) || config.simulationCacheMaxSize < 1) {
-      throw new Error(
+      throw new InvalidInputError(
         `Invalid simulationCacheMaxSize: ${JSON.stringify(config.simulationCacheMaxSize)}. Must be a positive integer.`,
       )
+    }
+  }
+
+  if (config.ttlWatchIntervalMs !== undefined) {
+    validateNumber('ttlWatchIntervalMs', config.ttlWatchIntervalMs, 0, true)
+  }
+
+  if (config.ttlWatchThreshold !== undefined) {
+    validateNumber('ttlWatchThreshold', config.ttlWatchThreshold, 0, false)
+  }
+
+  if (config.ttlWatchThresholdLedgers !== undefined) {
+    validateNumber('ttlWatchThresholdLedgers', config.ttlWatchThresholdLedgers, 0, false)
+  }
+
+  if (config.ttlWatchAutoExtend !== undefined) {
+    validateBoolean('ttlWatchAutoExtend', config.ttlWatchAutoExtend)
+  }
+
+  if (config.runtime !== undefined) {
+    const methods = ['now', 'random', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] as const
+    for (const method of methods) {
+      if (typeof config.runtime?.[method] !== 'function') {
+        throw new InvalidInputError(`config.runtime.${method} must be a function`)
+      }
     }
   }
 }
@@ -172,6 +199,7 @@ export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
   validateConfigShape(config)
 
   const server = config.rpcClient ?? new SorobanRpcClient(config.rpcUrl)
+  const runtime = config.runtime ?? SYSTEM_RUNTIME
 
   const networkPassphrase =
     config.networkPassphrase ??
@@ -180,7 +208,7 @@ export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
 
   if (!KNOWN_NETWORK_PASSPHRASES.includes(networkPassphrase)) {
     const knownNetworks = KNOWN_NETWORK_PASSPHRASES.map((p) => `"${p}"`).join(', ')
-    throw new Error(
+    throw new InvalidInputError(
       `Invalid network passphrase: "${networkPassphrase}". ` +
         `Must be one of: ${knownNetworks}. ` +
         `A typo in the passphrase will cause cryptic transaction failures.`,
@@ -196,22 +224,16 @@ export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
     ? new SimulationCache({
         ttlMs: config.simulationCacheTtlMs ?? SIMULATION_CACHE_TTL_MS,
         maxSize: config.simulationCacheMaxSize ?? SIMULATION_CACHE_MAX_SIZE,
+        runtime,
       })
     : undefined
 
-  const resolved: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & { rpcClient: ISorobanRpcClient } = {
+  const resolved: ResolvedSorobanResurrectConfig = {
     rpcUrl: config.rpcUrl,
     networkPassphrase,
     pollIntervalMs: config.pollIntervalMs ?? POLL_INTERVAL_MS,
     pollTimeoutMs: config.pollTimeoutMs ?? POLL_TIMEOUT_MS,
     restoreFeeMultiplier: config.restoreFeeMultiplier ?? RESTORE_FEE_MULTIPLIER,
-    rpcTimeoutMs: config.rpcTimeoutMs ?? RPC_TIMEOUT_MS,
-    rpcRetryCount: config.rpcRetryCount ?? RPC_RETRY_COUNT,
-    rpcRetryBackoffMs: config.rpcRetryBackoffMs ?? RPC_RETRY_BACKOFF_MS,
-    rpcCircuitBreakerThreshold: config.rpcCircuitBreakerThreshold ?? RPC_CIRCUIT_BREAKER_THRESHOLD,
-    rpcCircuitBreakerCooldownMs: config.rpcCircuitBreakerCooldownMs ?? RPC_CIRCUIT_BREAKER_COOLDOWN_MS,
-    ttlWatchIntervalMs: config.ttlWatchIntervalMs ?? TTL_WATCH_INTERVAL_MS,
-    ttlWatchThresholdLedgers: config.ttlWatchThresholdLedgers ?? TTL_WATCH_THRESHOLD_LEDGERS,
     archiveDetectionMethod: config.archiveDetectionMethod ?? 'simulation',
     useSSE: config.useSSE ?? false,
     enableSimulationCache: config.enableSimulationCache ?? false,
@@ -223,7 +245,10 @@ export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
     rpcCircuitBreakerThreshold: config.rpcCircuitBreakerThreshold ?? RPC_CIRCUIT_BREAKER_THRESHOLD,
     rpcCircuitBreakerCooldownMs: config.rpcCircuitBreakerCooldownMs ?? RPC_CIRCUIT_BREAKER_COOLDOWN_MS,
     ttlWatchIntervalMs: config.ttlWatchIntervalMs ?? TTL_WATCH_INTERVAL_MS,
-    ttlWatchThresholdLedgers: config.ttlWatchThresholdLedgers ?? TTL_WATCH_THRESHOLD_LEDGERS,
+    ttlWatchThreshold:
+      config.ttlWatchThreshold ?? config.ttlWatchThresholdLedgers ?? TTL_WATCH_THRESHOLD,
+    ttlWatchAutoExtend: config.ttlWatchAutoExtend ?? false,
+    runtime,
     rpcClient: server,
   }
 

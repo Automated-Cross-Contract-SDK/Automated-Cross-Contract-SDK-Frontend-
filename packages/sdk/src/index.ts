@@ -23,6 +23,8 @@ export type { SorobanNetworkName, SorobanNetworkPreset } from './SorobanResurrec
 // ---------------------------------------------------------------------------
 export type {
   SorobanResurrectConfig,
+  ResolvedSorobanResurrectConfig,
+  SdkRuntime,
   WalletAdapter,
   WalletCapabilities,
   FeeBumpSponsor,
@@ -51,10 +53,23 @@ export type {
   TrezorAdapterConfig,
   // Error types
   ResurrectErrorCode,
+  ResurrectFailure,
+  ResurrectSuccess,
 } from './types.js'
 export type { WalletErrorCode } from './types.js'
 export { WalletError } from './types.js'
-export { ResurrectError, RestoreFeeExceededError } from './errors.js'
+export {
+  ResurrectErrorCode,
+  getResurrectErrorCode,
+  ResurrectError,
+  RestoreFeeExceededError,
+  NetworkError,
+  SimulationError,
+  SigningError,
+  RestoreError,
+  ResurrectTimeoutError,
+  InvalidInputError,
+} from './errors.js'
 
 // ---------------------------------------------------------------------------
 // RPC abstraction layer (dependency injection / testing — see RpcClient.ts)

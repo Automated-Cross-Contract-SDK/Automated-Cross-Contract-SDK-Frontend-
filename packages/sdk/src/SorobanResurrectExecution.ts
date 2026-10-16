@@ -2,6 +2,7 @@ import { rpc, Transaction, TransactionBuilder } from '@stellar/stellar-sdk'
 import {
   ArchivedLedgerEntry,
   ResurrectResult,
+  ResolvedSorobanResurrectConfig,
   RestoreKeysOptions,
   SubmitWithRestoreOptions,
   WalletAdapter,
@@ -13,6 +14,7 @@ import {
   buildBatchRestoreTransaction,
   buildOriginalAfterRestore,
   waitForTransaction,
+  waitForTransactionSSE,
 } from './Restorer.js'
 import { isRestoreResponse } from './Archiver.js'
 import { TransactionHistory, TransactionHistoryEntry } from './TransactionHistory.js'
@@ -22,6 +24,12 @@ import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
 import { SorobanResurrectSimulator } from './SorobanResurrectSimulation.js'
 import type { ISorobanRpcClient } from './RpcClient.js'
 import { asTxHash, asHistoryEntryId } from './branded-types.js'
+import {
+  getResurrectErrorCode,
+  ResurrectErrorCode,
+  RestoreError,
+  wrapSigningError,
+} from './errors.js'
 
 /**
  * Handles all transaction execution concerns for a `SorobanResurrect` instance:
@@ -39,7 +47,7 @@ import { asTxHash, asHistoryEntryId } from './branded-types.js'
  */
 export class SorobanResurrectExecutor {
   private _server: ISorobanRpcClient
-  private _config: Required<SorobanResurrectConfig>
+  private _config: ResolvedSorobanResurrectConfig
   private readonly _stateMgr: SorobanResurrectStateManager
   private readonly _simulator: SorobanResurrectSimulator
   private readonly _history: TransactionHistory
@@ -53,7 +61,7 @@ export class SorobanResurrectExecutor {
    */
   constructor(
     server: ISorobanRpcClient,
-    config: Required<SorobanResurrectConfig>,
+    config: ResolvedSorobanResurrectConfig,
     stateMgr: SorobanResurrectStateManager,
     simulator: SorobanResurrectSimulator,
     persistHistory?: HistoryPersistenceOptions,
@@ -83,7 +91,7 @@ export class SorobanResurrectExecutor {
    * Re-binds this executor to a new RPC client / config in place, keeping
    * history and the state manager intact. Used by `SorobanResurrect.switchNetwork`.
    */
-  rebind(server: ISorobanRpcClient, config: Required<SorobanResurrectConfig>): void {
+  rebind(server: ISorobanRpcClient, config: ResolvedSorobanResurrectConfig): void {
     this._server = server
     this._config = config
   }
@@ -196,9 +204,9 @@ export class SorobanResurrectExecutor {
 
       stateMgr.setState('signing_restore', 'Awaiting wallet signature for restore transaction...')
       opts?.onSigningRestore?.()
-      const signedXdr = await wallet.signTransaction(asXdrBase64(restoreTx.toXDR()), {
-        networkPassphrase,
-      })
+      const signedXdr = await wrapSigningError(() =>
+        wallet.signTransaction(asXdrBase64(restoreTx.toXDR()), { networkPassphrase }),
+      )
 
       const signedTx = TransactionBuilder.fromXDR(signedXdr, networkPassphrase)
       if (!(signedTx instanceof Transaction)) {
@@ -214,16 +222,23 @@ export class SorobanResurrectExecutor {
 
       stateMgr.setState('confirming_restore', 'Waiting for restore confirmation...')
       const status = this._config.useSSE
-        ? await waitForTransactionSSE(this._server, restoreHash, this._config.pollTimeoutMs)
+        ? await waitForTransactionSSE(
+            this._server,
+            restoreHash,
+            this._config.pollTimeoutMs,
+            this._config.rpcUrl,
+            this._config.runtime,
+          )
         : await waitForTransaction(
             this._server,
             restoreHash,
             this._config.pollIntervalMs,
             this._config.pollTimeoutMs,
+            this._config.runtime,
           )
 
       if (status.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
-        throw new Error('Restore transaction failed')
+        throw new RestoreError('Restore transaction failed')
       }
 
       emitter.emit('restoreConfirmed', restoreHash)
@@ -247,6 +262,7 @@ export class SorobanResurrectExecutor {
         success: false,
         archivedKeysDetected: keys.length,
         error: message,
+        errorCode: getResurrectErrorCode(err),
         historyId,
       }
       if (historyId) {
@@ -514,7 +530,12 @@ export class SorobanResurrectExecutor {
     const isConnected = await wallet.isConnected()
     if (!isConnected) {
       const error = 'Wallet is not connected'
-      return items.map(() => ({ success: false, archivedKeysDetected: 0, error }))
+      return items.map(() => ({
+        success: false,
+        archivedKeysDetected: 0,
+        error,
+        errorCode: ResurrectErrorCode.WALLET_NOT_CONNECTED,
+      }))
     }
     const publicKey = await wallet.getPublicKey()
 
@@ -553,9 +574,9 @@ export class SorobanResurrectExecutor {
         'signing_restore',
         'Awaiting wallet signature for batch restore transaction...',
       )
-      const signedXdr = await wallet.signTransaction(asXdrBase64(restoreTx.toXDR()), {
-        networkPassphrase,
-      })
+      const signedXdr = await wrapSigningError(() =>
+        wallet.signTransaction(asXdrBase64(restoreTx.toXDR()), { networkPassphrase }),
+      )
       const signedTx = TransactionBuilder.fromXDR(signedXdr, networkPassphrase)
       if (!(signedTx instanceof Transaction)) {
         throw new Error('Failed to parse signed batch restore transaction')
@@ -567,9 +588,15 @@ export class SorobanResurrectExecutor {
       emitter.emit('restoreSubmitted', restoreHash)
 
       stateMgr.setState('confirming_restore', 'Waiting for batch restore confirmation...')
-      const status = await waitForTransaction(this._server, restoreHash, pollInterval, pollTimeout)
+      const status = await waitForTransaction(
+        this._server,
+        restoreHash,
+        pollInterval,
+        pollTimeout,
+        this._config.runtime,
+      )
       if (status.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
-        throw new Error('Batch restore transaction failed')
+        throw new RestoreError('Batch restore transaction failed')
       }
       emitter.emit('restoreConfirmed', restoreHash)
       stateMgr.setState(
@@ -584,6 +611,7 @@ export class SorobanResurrectExecutor {
         success: false,
         archivedKeysDetected: archivedKeysByTx[i]?.length ?? 0,
         error: message,
+        errorCode: getResurrectErrorCode(err),
       }))
     }
 
@@ -598,9 +626,9 @@ export class SorobanResurrectExecutor {
           item.transaction.fee,
         )
         item.onSigningOriginal?.()
-        const signedXdr = await item.wallet.signTransaction(asXdrBase64(preparedTx.toXDR()), {
-          networkPassphrase,
-        })
+        const signedXdr = await wrapSigningError(() =>
+          item.wallet.signTransaction(asXdrBase64(preparedTx.toXDR()), { networkPassphrase }),
+        )
         const signedTx = TransactionBuilder.fromXDR(signedXdr, networkPassphrase)
         if (!(signedTx instanceof Transaction)) {
           throw new Error('Failed to parse signed transaction')
@@ -626,6 +654,7 @@ export class SorobanResurrectExecutor {
           restoreTxHash: restoreHash,
           archivedKeysDetected: archivedKeysByTx[i]?.length ?? 0,
           error: message,
+          errorCode: getResurrectErrorCode(err),
         })
       }
     }

@@ -69,6 +69,19 @@ import {
   RPC_CIRCUIT_BREAKER_THRESHOLD,
   RPC_CIRCUIT_BREAKER_COOLDOWN_MS,
 } from './constants.js'
+import {
+  NetworkError,
+  ResurrectError,
+  ResurrectErrorCode,
+} from './errors.js'
+
+function withNetworkError<T>(request: Promise<T>): Promise<T> {
+  return request.catch((error: unknown) => {
+    if (error instanceof ResurrectError) throw error
+    const message = error instanceof Error ? error.message : String(error)
+    throw new NetworkError(message, error)
+  })
+}
 
 // ---------------------------------------------------------------------------
 // Interface
@@ -199,29 +212,29 @@ export class SorobanRpcClient implements ISorobanRpcClient {
   }
 
   simulateTransaction(transaction: Transaction): Promise<rpc.Api.SimulateTransactionResponse> {
-    return this.ensureServer().simulateTransaction(transaction)
+    return withNetworkError(this.ensureServer().simulateTransaction(transaction))
   }
 
   sendTransaction(
     transaction: Transaction | import('@stellar/stellar-sdk').FeeBumpTransaction,
   ): Promise<rpc.Api.SendTransactionResponse> {
-    return this.ensureServer().sendTransaction(transaction)
+    return withNetworkError(this.ensureServer().sendTransaction(transaction))
   }
 
   getTransaction(hash: string): Promise<rpc.Api.GetTransactionResponse> {
-    return this.ensureServer().getTransaction(hash)
+    return withNetworkError(this.ensureServer().getTransaction(hash))
   }
 
   getAccount(publicKey: string): Promise<Account> {
-    return this.ensureServer().getAccount(publicKey)
+    return withNetworkError(this.ensureServer().getAccount(publicKey))
   }
 
   getLedgerEntries(...keys: xdr.LedgerKey[]): Promise<rpc.Api.GetLedgerEntriesResponse> {
-    return this.ensureServer().getLedgerEntries(...keys)
+    return withNetworkError(this.ensureServer().getLedgerEntries(...keys))
   }
 
   getLatestLedger(): Promise<rpc.Api.GetLatestLedgerResponse> {
-    return this.ensureServer().getLatestLedger()
+    return withNetworkError(this.ensureServer().getLatestLedger())
   }
 }
 
@@ -284,6 +297,8 @@ const DEFAULT_RESILIENCE: ResolvedRpcResilienceOptions = {
 
 /** Thrown when an RPC call exceeds its configured `timeoutMs`. */
 export class RpcTimeoutError extends Error {
+  readonly code = ResurrectErrorCode.RPC_TIMEOUT
+
   constructor(timeoutMs: number) {
     super(`RPC call timed out after ${timeoutMs}ms`)
     this.name = 'RpcTimeoutError'
@@ -291,9 +306,12 @@ export class RpcTimeoutError extends Error {
 }
 
 /** Thrown when the circuit breaker is open and calls are failing fast. */
-export class RpcCircuitOpenError extends Error {
+export class RpcCircuitOpenError extends ResurrectError {
   constructor(retryAfterMs: number) {
-    super(`RPC circuit breaker is open; retry after ${retryAfterMs}ms`)
+    super(
+      ResurrectErrorCode.NETWORK_ERROR,
+      `RPC circuit breaker is open; retry after ${retryAfterMs}ms`,
+    )
     this.name = 'RpcCircuitOpenError'
   }
 }
