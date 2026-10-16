@@ -204,6 +204,14 @@ export interface WalletCapabilities {
   maxOperations?: number
 }
 
+/** Account or connection state reported by a wallet adapter subscription. */
+export type WalletAdapterEvent =
+  | { type: 'accountChanged'; publicKey: StellarPublicKey | null }
+  | { type: 'connectionChanged'; connected: boolean }
+
+/** Listener cleanup function returned by {@link WalletAdapter.subscribe}. */
+export type WalletAdapterUnsubscribe = () => void
+
 /**
  * Wallet interface that wraps browser or extension wallets (e.g. Freighter).
  *
@@ -222,6 +230,12 @@ export interface WalletCapabilities {
 export interface WalletAdapter {
   /** Returns whether the wallet is connected. */
   isConnected(): Promise<boolean>
+  /**
+   * Optional interactive connection step for wallets that require user
+   * approval before exposing an account. Return the selected public key when
+   * available; hardware adapters may return `void` and expose it separately.
+   */
+  connect?(): Promise<StellarPublicKey | void>
   /** Returns the connected wallet's public key. */
   getPublicKey(): Promise<StellarPublicKey>
   /** Requests the wallet to sign a transaction XDR string. */
@@ -229,6 +243,11 @@ export interface WalletAdapter {
     tx: XdrBase64,
     opts?: { networkPassphrase?: NetworkPassphrase | string; network?: string },
   ): Promise<XdrBase64>
+  /**
+   * Subscribe to wallet account or connection changes when the provider
+   * supports them. The returned cleanup function must be idempotent.
+   */
+  subscribe?(listener: (event: WalletAdapterEvent) => void): WalletAdapterUnsubscribe
   /**
    * Optional feature-detection flags. When present, the SDK uses them to choose
    * between the CAP-0046 auth-entry path, the fee-bump path, and their

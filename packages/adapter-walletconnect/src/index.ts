@@ -1,5 +1,5 @@
-import type { WalletAdapter, WalletCapabilities } from '@soroban-resurrect/sdk'
-import { asStellarPublicKey, asXdrBase64 } from '@soroban-resurrect/sdk'
+import type { WalletAdapter, WalletAdapterEvent, WalletCapabilities } from '@soroban-resurrect/sdk'
+import { WalletError, asStellarPublicKey, asXdrBase64 } from '@soroban-resurrect/sdk'
 
 /**
  * WalletConnect v2 JSON-RPC methods used by Stellar wallets.
@@ -33,6 +33,8 @@ export interface WalletConnectSignClientLike {
     chainId: string
     request: { method: string; params: unknown }
   }): Promise<T>
+  on?(event: string, listener: (payload: unknown) => void): void
+  off?(event: string, listener: (payload: unknown) => void): void
 }
 
 /** Minimal shape of a WalletConnect session namespace entry. */
@@ -49,13 +51,22 @@ export interface WalletConnectSessionLike {
 }
 
 /** Normalizes an unknown thrown value into an `Error` with a `WalletConnect:` prefix. */
-function toWalletConnectError(err: unknown): Error {
-  if (err instanceof Error) return new Error(`WalletConnect: ${err.message}`)
-  if (typeof err === 'string') return new Error(`WalletConnect: ${err}`)
-  if (err && typeof err === 'object' && 'message' in err) {
-    return new Error(`WalletConnect: ${String((err as { message: unknown }).message)}`)
-  }
-  return new Error('WalletConnect: unknown error')
+function toWalletConnectError(err: unknown): WalletError {
+  const message =
+    err instanceof Error
+      ? err.message
+      : typeof err === 'string'
+        ? err
+        : err && typeof err === 'object' && 'message' in err
+          ? String(err.message)
+          : 'unknown error'
+  const lower = message.toLowerCase()
+  const code = /reject|declin|cancel|denied/.test(lower)
+    ? 'USER_REJECTED'
+    : /network|chain/.test(lower)
+      ? 'NETWORK_MISMATCH'
+      : 'UNKNOWN'
+  return new WalletError(code, `WalletConnect: ${message}`, err)
 }
 
 /** Maps a Stellar network passphrase to its CAIP-2 chain id. Defaults to testnet. */
@@ -74,6 +85,10 @@ export function parseStellarAccount(account: string): { chainId: string; address
     throw new Error(`WalletConnect: malformed Stellar account "${account}"`)
   }
   return { chainId: `${parts[0]}:${parts[1]}`, address: parts.slice(2).join(':') }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object'
 }
 
 /**
@@ -148,7 +163,38 @@ export class WalletConnectAdapter implements WalletAdapter {
   private readonly session: WalletConnectSessionLike
   private readonly namespace: string
   private readonly chainId: string
-  private readonly address: string
+  private namespaces: WalletConnectSessionLike['namespaces']
+  private readonly listeners = new Set<(event: WalletAdapterEvent) => void>()
+  private listening = false
+  private readonly handleSessionUpdate = (payload: unknown): void => {
+    if (!isRecord(payload) || payload.topic !== this.session.topic || !isRecord(payload.params)) {
+      return
+    }
+    const namespaces = payload.params.namespaces
+    if (!isRecord(namespaces)) return
+
+    const previousAddress = this.getCurrentAddress()
+    this.namespaces = namespaces as WalletConnectSessionLike['namespaces']
+    const nextAddress = this.getCurrentAddress()
+    if (previousAddress !== nextAddress) {
+      this.emit({
+        type: 'accountChanged',
+        publicKey: nextAddress ? asStellarPublicKey(nextAddress) : null,
+      })
+      if (Boolean(previousAddress) !== Boolean(nextAddress)) {
+        this.emit({ type: 'connectionChanged', connected: Boolean(nextAddress) })
+      }
+    }
+  }
+  private readonly handleSessionDelete = (payload: unknown): void => {
+    if (!isRecord(payload) || payload.topic !== this.session.topic) return
+    const wasConnected = Boolean(this.getCurrentAddress())
+    this.namespaces = {}
+    if (wasConnected) {
+      this.emit({ type: 'accountChanged', publicKey: null })
+      this.emit({ type: 'connectionChanged', connected: false })
+    }
+  }
 
   constructor(options: WalletConnectAdapterOptions) {
     const { client, session, networkPassphrase } = options
@@ -160,8 +206,9 @@ export class WalletConnectAdapter implements WalletAdapter {
     this.session = session
     this.namespace = options.namespace ?? 'stellar'
     this.chainId = passphraseToChainId(networkPassphrase)
+    this.namespaces = session.namespaces
 
-    const ns = session.namespaces[this.namespace]
+    const ns = this.namespaces[this.namespace]
     if (!ns || ns.accounts.length === 0) {
       throw new Error(
         `WalletConnectAdapter: session has no "${this.namespace}" namespace accounts.`,
@@ -171,17 +218,13 @@ export class WalletConnectAdapter implements WalletAdapter {
     // Network passphrase verification: the session must include an account on
     // the CAIP-2 chain the dApp expects, otherwise signatures would be for the
     // wrong network.
-    const match = ns.accounts
-      .map(parseStellarAccount)
-      .find((acc) => acc.chainId === this.chainId)
+    const match = ns.accounts.map(parseStellarAccount).find((acc) => acc.chainId === this.chainId)
     if (!match) {
       throw new Error(
         `WalletConnectAdapter: session does not grant a Stellar account on ` +
           `"${this.chainId}" (network passphrase mismatch). Granted: ${ns.accounts.join(', ')}`,
       )
     }
-    this.address = match.address
-
     if (!ns.methods.includes(STELLAR_WC_METHODS.signXDR)) {
       throw new Error(
         `WalletConnectAdapter: session does not grant the "${STELLAR_WC_METHODS.signXDR}" method.`,
@@ -190,18 +233,88 @@ export class WalletConnectAdapter implements WalletAdapter {
   }
 
   async isConnected(): Promise<boolean> {
-    return Boolean(this.session.topic && this.address)
+    return Boolean(this.session.topic && this.getCurrentAddress())
   }
 
   async getPublicKey() {
-    return asStellarPublicKey(this.address)
+    return this.connect()
   }
 
-  async signTransaction(
-    tx: string,
-    _opts?: { networkPassphrase?: string; network?: string },
-  ) {
+  async connect() {
+    const address = this.getCurrentAddress()
+    if (!address) {
+      throw new WalletError(
+        'NOT_CONNECTED',
+        `WalletConnectAdapter: session no longer grants an account on "${this.chainId}".`,
+      )
+    }
+    return asStellarPublicKey(address)
+  }
+
+  async getNetwork(): Promise<string> {
+    const accounts = this.namespaces[this.namespace]?.accounts ?? []
+    const activeAccount = accounts
+      .map(parseStellarAccount)
+      .find(
+        ({ chainId }) =>
+          chainId === STELLAR_WC_CHAINS.public || chainId === STELLAR_WC_CHAINS.testnet,
+      )
+    if (activeAccount?.chainId === STELLAR_WC_CHAINS.public) return PASSPHRASE.public
+    if (activeAccount?.chainId === STELLAR_WC_CHAINS.testnet) return PASSPHRASE.testnet
+    if (accounts.length > 0) {
+      throw new WalletError(
+        'NETWORK_MISMATCH',
+        `WalletConnect: session no longer grants an account on a supported Stellar network.`,
+      )
+    }
+    throw new WalletError('NOT_CONNECTED', 'WalletConnect: session no longer grants an account.')
+  }
+
+  private getCurrentAddress(): string | undefined {
+    const ns = this.namespaces[this.namespace]
+    if (!ns) return undefined
+    return ns.accounts.map(parseStellarAccount).find((account) => account.chainId === this.chainId)
+      ?.address
+  }
+
+  subscribe(listener: (event: WalletAdapterEvent) => void): () => void {
+    if (!this.client.on || !this.client.off) {
+      throw new Error(
+        'WalletConnectAdapter: the supplied client does not support session event subscriptions.',
+      )
+    }
+    this.listeners.add(listener)
+    if (!this.listening) {
+      this.client.on('session_update', this.handleSessionUpdate)
+      this.client.on('session_delete', this.handleSessionDelete)
+      this.listening = true
+    }
+
+    let subscribed = true
+    return () => {
+      if (!subscribed) return
+      subscribed = false
+      this.listeners.delete(listener)
+      if (this.listeners.size === 0 && this.listening) {
+        this.client.off?.('session_update', this.handleSessionUpdate)
+        this.client.off?.('session_delete', this.handleSessionDelete)
+        this.listening = false
+      }
+    }
+  }
+
+  private emit(event: WalletAdapterEvent): void {
+    for (const listener of Array.from(this.listeners)) {
+      listener(event)
+    }
+  }
+
+  async signTransaction(tx: string, _opts?: { networkPassphrase?: string; network?: string }) {
     try {
+      if (!this.getCurrentAddress()) {
+        throw new Error(`session no longer grants an account on "${this.chainId}"`)
+      }
+
       const result = await this.client.request<{ signedXDR: string }>({
         topic: this.session.topic,
         chainId: this.chainId,

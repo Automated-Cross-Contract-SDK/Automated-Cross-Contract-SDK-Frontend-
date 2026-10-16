@@ -24,6 +24,8 @@ export type { SorobanNetworkName, SorobanNetworkPreset } from './SorobanResurrec
 export type {
   SorobanResurrectConfig,
   WalletAdapter,
+  WalletAdapterEvent,
+  WalletAdapterUnsubscribe,
   WalletCapabilities,
   FeeBumpSponsor,
   FeeBumpConfig,
