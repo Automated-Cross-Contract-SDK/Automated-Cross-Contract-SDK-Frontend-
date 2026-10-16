@@ -88,11 +88,40 @@ async function validateWalletNetwork(
   }
 }
 
+async function getWalletPublicKey(
+  wallet: WalletAdapter,
+): Promise<Awaited<ReturnType<WalletAdapter['getPublicKey']>> | undefined> {
+  if (await wallet.isConnected()) {
+    return wallet.getPublicKey()
+  }
+  if (!wallet.connect) {
+    return undefined
+  }
+  return (await wallet.connect()) ?? wallet.getPublicKey()
+}
+
+async function connectWalletIfNeeded(wallet: WalletAdapter): Promise<boolean> {
+  if (await wallet.isConnected()) {
+    return true
+  }
+  if (!wallet.connect) {
+    return false
+  }
+  await wallet.connect()
+  return true
+}
+
 function walletErrorMessage(error: unknown): string {
   if (error instanceof WalletError && error.code === 'USER_REJECTED') {
     return 'Signature request declined'
   }
   return error instanceof Error ? error.message : String(error)
+}
+
+function walletResultErrorCode(error: unknown): ResurrectErrorCode {
+  return error instanceof WalletError && error.code === 'NETWORK_MISMATCH'
+    ? 'NETWORK_MISMATCH'
+    : 'UNKNOWN_ERROR'
 }
 
 /**
@@ -274,8 +303,8 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       const archivedKeys = extractArchivedKeys(simResponse)
       debug('executeWithRestore: restore required for %d entries', archivedKeys.length)
 
-      const isConnected = await wallet.isConnected()
-      if (!isConnected) {
+      const publicKey = await getWalletPublicKey(wallet)
+      if (!publicKey) {
         const err = 'Wallet is not connected'
         onRestoreFailed?.(err)
         return {
@@ -286,7 +315,6 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
         }
       }
 
-      const publicKey = await wallet.getPublicKey()
       const account = await server.getAccount(publicKey)
 
       const restoreTx = await buildRestoreTransaction({
@@ -464,7 +492,12 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
   } catch (err) {
     const message = walletErrorMessage(err)
     onRestoreFailed?.(message)
-    return { success: false, archivedKeysDetected: 0, error: message, errorCode: 'UNKNOWN_ERROR' }
+    return {
+      success: false,
+      archivedKeysDetected: 0,
+      error: message,
+      errorCode: walletResultErrorCode(err),
+    }
   }
 }
 
@@ -484,7 +517,7 @@ export async function sendTransaction(
   const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
 
   try {
-    const isConnected = await wallet.isConnected()
+    const isConnected = await connectWalletIfNeeded(wallet)
     if (!isConnected) {
       return {
         success: false,
@@ -522,7 +555,7 @@ export async function sendTransaction(
       success: false,
       archivedKeysDetected: 0,
       error: message,
-      errorCode: 'UNKNOWN_ERROR' as const,
+      errorCode: walletResultErrorCode(err),
     }
   }
 }
@@ -621,12 +654,12 @@ export async function restoreKeys(params: RestoreKeysParams): Promise<ResurrectR
   }
 
   try {
-    const isConnected = await wallet.isConnected()
-    if (!isConnected) {
+    await validateWalletNetwork(wallet, networkPassphrase)
+    const publicKey = await getWalletPublicKey(wallet)
+    if (!publicKey) {
       return { success: false, archivedKeysDetected: keys.length, error: 'Wallet is not connected' }
     }
 
-    const publicKey = await wallet.getPublicKey()
     const account = await server.getAccount(publicKey)
 
     // A placeholder-fee restoreFootprint tx over exactly these keys, built
@@ -702,6 +735,11 @@ export async function restoreKeys(params: RestoreKeysParams): Promise<ResurrectR
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    return { success: false, archivedKeysDetected: keys.length, error: message }
+    return {
+      success: false,
+      archivedKeysDetected: keys.length,
+      error: message,
+      errorCode: walletResultErrorCode(err),
+    }
   }
 }
