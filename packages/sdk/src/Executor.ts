@@ -43,6 +43,7 @@ import {
 } from './constants.js'
 import { asTxHash, asXdrBase64, type TxHash, type XdrBase64 } from './branded-types.js'
 import { parseTransactionFailure } from './TransactionFailure.js'
+import { withPhaseTimeout } from './phaseTimeout.js'
 
 /** Parameters for the full restore-and-submit execution flow. */
 export interface ExecuteParams {
@@ -110,6 +111,8 @@ async function signAndMaybeFeeBump(params: {
   feeBumpConfig?: FeeBumpConfig
   networkPassphrase: string
   server: ISorobanRpcClient
+  signingTimeoutMs: number
+  submissionTimeoutMs: number
   onSigning?: () => void
   onSigningFeeBump?: () => void
   onSubmitting?: () => void
@@ -120,6 +123,8 @@ async function signAndMaybeFeeBump(params: {
     feeBumpConfig,
     networkPassphrase,
     server,
+    signingTimeoutMs,
+    submissionTimeoutMs,
     onSigning,
     onSigningFeeBump,
     onSubmitting,
@@ -132,7 +137,11 @@ async function signAndMaybeFeeBump(params: {
   }
 
   onSigning?.()
-  const signedXdr = await wallet.signTransaction(asXdrBase64(tx.toXDR()), { networkPassphrase })
+  const signedXdr = await withPhaseTimeout(
+    wallet.signTransaction(asXdrBase64(tx.toXDR()), { networkPassphrase }),
+    signingTimeoutMs,
+    'Wallet signing',
+  )
 
   // If no fee-bump, submit directly
   if (!feeBumpConfig) {
@@ -141,21 +150,33 @@ async function signAndMaybeFeeBump(params: {
       throw new Error('Failed to parse signed transaction')
     }
     onSubmitting?.()
-    const result = await server.sendTransaction(signedTx)
+    const result = await withPhaseTimeout(
+      server.sendTransaction(signedTx),
+      submissionTimeoutMs,
+      'Original transaction submission',
+    )
     return { hash: asTxHash(result.hash) }
   }
 
   // Fee-bump flow: wrap the signed inner tx in a fee-bump
   onSigningFeeBump?.()
-  const feeBumpXdr = await buildFeeBumpTransaction(
-    signedXdr,
-    feeBumpConfig.sponsor,
-    networkPassphrase,
-    feeBumpConfig.feeBumpFee,
+  const feeBumpXdr = await withPhaseTimeout(
+    buildFeeBumpTransaction(
+      signedXdr,
+      feeBumpConfig.sponsor,
+      networkPassphrase,
+      feeBumpConfig.feeBumpFee,
+    ),
+    signingTimeoutMs,
+    'Fee-bump sponsor signing',
   )
 
   onSubmitting?.()
-  const result = await submitFeeBumpTransaction(server, feeBumpXdr, networkPassphrase)
+  const result = await withPhaseTimeout(
+    submitFeeBumpTransaction(server, feeBumpXdr, networkPassphrase),
+    submissionTimeoutMs,
+    'Original transaction submission',
+  )
   return { hash: asTxHash(result.hash) }
 }
 
@@ -259,10 +280,19 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
     .simulationCache
   const pollInterval = config.pollIntervalMs ?? POLL_INTERVAL_MS
   const pollTimeout = config.pollTimeoutMs ?? POLL_TIMEOUT_MS
+  const simulationTimeout = config.simulationTimeoutMs ?? config.rpcTimeoutMs ?? 30_000
+  const signingTimeout = config.walletSigningTimeoutMs ?? 120_000
+  const restoreConfirmationTimeout = config.restoreConfirmationTimeoutMs ?? pollTimeout
+  const originalSubmissionTimeout =
+    config.originalSubmissionTimeoutMs ?? config.rpcTimeoutMs ?? 30_000
 
   try {
     await validateWalletNetwork(wallet, networkPassphrase)
-    const simResponse = await simulateWithCache(server, originalTx, simulationCache)
+    const simResponse = await withPhaseTimeout(
+      simulateWithCache(server, originalTx, simulationCache),
+      simulationTimeout,
+      'Transaction simulation',
+    )
 
     if (isErrorResponse(simResponse)) {
       const err = `Simulation error: ${simResponse.error}`
@@ -302,9 +332,11 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       onRestoreNeeded?.(archivedKeys)
 
       onSigningRestore?.()
-      const signedRestoreXdr = await wallet.signTransaction(asXdrBase64(restoreTx.toXDR()), {
-        networkPassphrase,
-      })
+      const signedRestoreXdr = await withPhaseTimeout(
+        wallet.signTransaction(asXdrBase64(restoreTx.toXDR()), { networkPassphrase }),
+        signingTimeout,
+        'Wallet signing',
+      )
 
       const signedRestoreTx = TransactionBuilder.fromXDR(signedRestoreXdr, networkPassphrase)
       if (!(signedRestoreTx instanceof Transaction)) {
@@ -323,7 +355,11 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       const restoreHash = asTxHash(restoreResult.hash)
       onRestoreSubmitted?.(restoreHash)
 
-      const restoreStatus = await waitForTransaction(server, restoreHash, pollInterval, pollTimeout)
+      const restoreStatus = await withPhaseTimeout(
+        waitForTransaction(server, restoreHash, pollInterval, restoreConfirmationTimeout),
+        restoreConfirmationTimeout,
+        'Restore confirmation',
+      )
 
       if (restoreStatus.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
         const err = 'Restore transaction failed'
@@ -359,9 +395,11 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
         )
 
         onSigningOriginal?.()
-        const signedOriginalXdr = await wallet.signTransaction(asXdrBase64(preparedTx.toXDR()), {
-          networkPassphrase,
-        })
+        const signedOriginalXdr = await withPhaseTimeout(
+          wallet.signTransaction(asXdrBase64(preparedTx.toXDR()), { networkPassphrase }),
+          signingTimeout,
+          'Wallet signing',
+        )
 
         const signedOriginalTx = TransactionBuilder.fromXDR(signedOriginalXdr, networkPassphrase)
         if (!(signedOriginalTx instanceof Transaction)) {
@@ -376,7 +414,11 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
           }
         }
 
-        originalResult = await server.sendTransaction(signedOriginalTx)
+        originalResult = await withPhaseTimeout(
+          server.sendTransaction(signedOriginalTx),
+          originalSubmissionTimeout,
+          'Original transaction submission',
+        )
 
         if (!isTxBadSeqError(originalResult) || sequenceRetries >= maxSequenceRetries) {
           break
@@ -395,9 +437,6 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
           error: err,
           sequenceRetries,
         }
-
-        originalHash = asTxHash(originalResult.hash)
-        break
       }
 
       const originalHash = asTxHash(originalResult!.hash)
@@ -409,16 +448,6 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
         restoreTxHash: restoreHash,
         archivedKeysDetected: archivedKeys.length,
         sequenceRetries,
-      }
-
-      const originalResult = await server.sendTransaction(signedOriginalTx)
-      onOriginalSubmitted?.(originalResult.hash)
-
-      return {
-        success: true,
-        originalTxHash: originalResult.hash,
-        restoreTxHash: restoreResult.hash,
-        archivedKeysDetected: archivedKeys.length,
       }
     }
 
@@ -441,6 +470,8 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
         feeBumpConfig,
         networkPassphrase,
         server,
+        signingTimeoutMs: signingTimeout,
+        submissionTimeoutMs: originalSubmissionTimeout,
         onSigning: onSigningOriginal,
         onSigningFeeBump,
       })
@@ -508,9 +539,13 @@ export async function sendTransaction(
     }
 
     await validateWalletNetwork(wallet, networkPassphrase)
-    const signedXdr = await wallet.signTransaction(asXdrBase64(transaction.toXDR()), {
-      networkPassphrase,
-    })
+    const signingTimeout = config.walletSigningTimeoutMs ?? 120_000
+    const submissionTimeout = config.originalSubmissionTimeoutMs ?? config.rpcTimeoutMs ?? 30_000
+    const signedXdr = await withPhaseTimeout(
+      wallet.signTransaction(asXdrBase64(transaction.toXDR()), { networkPassphrase }),
+      signingTimeout,
+      'Wallet signing',
+    )
 
     const signedTx = TransactionBuilder.fromXDR(signedXdr, networkPassphrase)
     if (!(signedTx instanceof Transaction)) {
@@ -522,7 +557,11 @@ export async function sendTransaction(
       }
     }
 
-    const result = await server.sendTransaction(signedTx)
+    const result = await withPhaseTimeout(
+      server.sendTransaction(signedTx),
+      submissionTimeout,
+      'Original transaction submission',
+    )
 
     return {
       success: true,

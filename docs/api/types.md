@@ -17,6 +17,10 @@ interface SorobanResurrectConfig {
   networkPassphrase?: string // default: resolved from rpcUrl, else Testnet
   pollIntervalMs?: number // default: 1000
   pollTimeoutMs?: number // default: 60000
+  simulationTimeoutMs?: number // default: rpcTimeoutMs
+  walletSigningTimeoutMs?: number // default: 120000
+  restoreConfirmationTimeoutMs?: number // default: pollTimeoutMs
+  originalSubmissionTimeoutMs?: number // default: rpcTimeoutMs
   restoreFeeMultiplier?: number // default: 3 — see "Choosing restoreFeeMultiplier" below
   maxRestoreFeeStroops?: FeeStroops | string // plain stroop strings are branded at the config boundary
   maxSequenceRetries?: number // default: 3 — retries when a restore tx fails on sequence number
@@ -32,12 +36,58 @@ interface SorobanResurrectConfig {
 | `networkPassphrase`        | Network passphrase (defaults to Testnet).                                      |
 | `pollIntervalMs`           | Polling interval in ms when waiting for transaction confirmation.              |
 | `pollTimeoutMs`             | Timeout in ms when waiting for transaction confirmation.                       |
+| `simulationTimeoutMs`      | Maximum time in ms for simulation; defaults to `rpcTimeoutMs` (30 seconds unless configured). |
+| `walletSigningTimeoutMs`   | Maximum time in ms for each wallet signature; defaults to 120 seconds.         |
+| `restoreConfirmationTimeoutMs` | Maximum time in ms to wait for restore confirmation; defaults to `pollTimeoutMs`. |
+| `originalSubmissionTimeoutMs` | Maximum time in ms to submit the original transaction; defaults to `rpcTimeoutMs` (30 seconds unless configured). |
 | `restoreFeeMultiplier`     | Multiplier applied to `minResourceFee` when building a restore transaction.    |
 | `maxRestoreFeeStroops`     | Upper bound on the restore fee. Accepts a branded `FeeStroops` or a plain numeric stroop string, which is branded at the config boundary. |
 | `maxSequenceRetries`       | Number of times a restore transaction is retried after a sequence-number failure. |
 | `archiveDetectionMethod`   | Method for detecting archived keys: `'simulation'` (default) or `'direct'`.    |
 | `archiveDetectionChunkSize` | Ledger keys per `getLedgerEntries` request during `'direct'` detection.       |
 | `archiveDetectionConcurrency` | Chunk requests kept in flight at once during `'direct'` detection.          |
+
+These phase timeouts are independent. Existing callers can omit them to use
+their documented defaults; set one or more explicitly when the application
+needs tighter bounds for a particular step. A timeout stops waiting for the
+operation but does not cancel a wallet prompt or RPC request already in flight.
+
+## `ArchivedLedgerEntry`
+
+An archived ledger key returned by detection and restore helpers. The public
+representation contains its XDR ledger key, the ledger-entry classification,
+and TTL metadata when the lookup provided it; it never contains wallet signing
+material or other secrets.
+
+```typescript
+interface ArchivedLedgerEntry {
+  key: xdr.LedgerKey
+  keyBase64: XdrBase64
+  entryType?: 'contractData' | 'contractCode' | 'other'
+  liveUntilLedger?: number
+  currentLedger?: number
+  ttlLedgers?: number
+}
+```
+
+The SDK populates `entryType` for detected keys. TTL metadata is optional
+because simulation-only detection may not perform a separate ledger query.
+
+## `LedgerEntryTTLInfo`
+
+One result from `queryLedgerTTL`, `queryLedgerEntryTTL`, or a contract scan.
+
+| Field | Meaning |
+| --- | --- |
+| `status` | `'live'` when the ledger returned a TTL, otherwise `'unavailable'`. |
+| `unavailableReason` | `'missing'`, `'expired'`, `'unsupported'`, `'rpc_error'`, or `'ttl_unavailable'`. |
+| `isArchived` | `true` only for confirmed missing or expired entries; RPC failures and unsupported keys are never treated as archived. |
+| `liveUntilLedger` / `ttlLedgers` | Expiration sequence and remaining ledgers when available. |
+| `entryType` | `'contractData'`, `'contractCode'`, or `'other'`. |
+
+Chunk failures are also returned in `failedChunks` and summarized by `hasErrors`.
+This lets callers distinguish a confirmed missing key from an RPC failure without
+guessing from a zero TTL.
 
 ## `SorobanResurrectNetwork`
 

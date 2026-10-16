@@ -48,7 +48,10 @@ const ARCHIVE_DETECTION_METHODS = ['simulation', 'direct'] as const
  * not a finite number or falls outside the allowed range.
  */
 function validateNumber(field: string, value: unknown, minimum: number, exclusive: boolean): void {
-  const valid = typeof value === 'number' && Number.isFinite(value) && (exclusive ? value > minimum : value >= minimum)
+  const valid =
+    typeof value === 'number' &&
+    Number.isFinite(value) &&
+    (exclusive ? value > minimum : value >= minimum)
   if (!valid) {
     throw new Error(
       `Invalid ${field}: ${JSON.stringify(value)}. Must be a finite number ${exclusive ? '>' : '>='} ${minimum}.`,
@@ -97,6 +100,17 @@ export function validateConfigShape(config: SorobanResurrectConfig): void {
 
   if (config.pollTimeoutMs !== undefined) {
     validateNumber('pollTimeoutMs', config.pollTimeoutMs, 0, true)
+  }
+
+  for (const field of [
+    'simulationTimeoutMs',
+    'walletSigningTimeoutMs',
+    'restoreConfirmationTimeoutMs',
+    'originalSubmissionTimeoutMs',
+  ] as const) {
+    if (config[field] !== undefined) {
+      validateNumber(field, config[field], 0, true)
+    }
   }
 
   if (config.restoreFeeMultiplier !== undefined) {
@@ -199,17 +213,24 @@ export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
       })
     : undefined
 
-  const resolved: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & { rpcClient: ISorobanRpcClient } = {
+  const resolved: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & {
+    rpcClient: ISorobanRpcClient
+  } = {
     rpcUrl: config.rpcUrl,
     networkPassphrase,
     pollIntervalMs: config.pollIntervalMs ?? POLL_INTERVAL_MS,
     pollTimeoutMs: config.pollTimeoutMs ?? POLL_TIMEOUT_MS,
+    simulationTimeoutMs: config.simulationTimeoutMs ?? RPC_TIMEOUT_MS,
+    walletSigningTimeoutMs: config.walletSigningTimeoutMs ?? 120_000,
+    restoreConfirmationTimeoutMs: config.restoreConfirmationTimeoutMs ?? POLL_TIMEOUT_MS,
+    originalSubmissionTimeoutMs: config.originalSubmissionTimeoutMs ?? RPC_TIMEOUT_MS,
     restoreFeeMultiplier: config.restoreFeeMultiplier ?? RESTORE_FEE_MULTIPLIER,
     rpcTimeoutMs: config.rpcTimeoutMs ?? RPC_TIMEOUT_MS,
     rpcRetryCount: config.rpcRetryCount ?? RPC_RETRY_COUNT,
     rpcRetryBackoffMs: config.rpcRetryBackoffMs ?? RPC_RETRY_BACKOFF_MS,
     rpcCircuitBreakerThreshold: config.rpcCircuitBreakerThreshold ?? RPC_CIRCUIT_BREAKER_THRESHOLD,
-    rpcCircuitBreakerCooldownMs: config.rpcCircuitBreakerCooldownMs ?? RPC_CIRCUIT_BREAKER_COOLDOWN_MS,
+    rpcCircuitBreakerCooldownMs:
+      config.rpcCircuitBreakerCooldownMs ?? RPC_CIRCUIT_BREAKER_COOLDOWN_MS,
     ttlWatchIntervalMs: config.ttlWatchIntervalMs ?? TTL_WATCH_INTERVAL_MS,
     ttlWatchThresholdLedgers: config.ttlWatchThresholdLedgers ?? TTL_WATCH_THRESHOLD_LEDGERS,
     archiveDetectionMethod: config.archiveDetectionMethod ?? 'simulation',
@@ -221,7 +242,8 @@ export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
     rpcRetryCount: config.rpcRetryCount ?? RPC_RETRY_COUNT,
     rpcRetryBackoffMs: config.rpcRetryBackoffMs ?? RPC_RETRY_BACKOFF_MS,
     rpcCircuitBreakerThreshold: config.rpcCircuitBreakerThreshold ?? RPC_CIRCUIT_BREAKER_THRESHOLD,
-    rpcCircuitBreakerCooldownMs: config.rpcCircuitBreakerCooldownMs ?? RPC_CIRCUIT_BREAKER_COOLDOWN_MS,
+    rpcCircuitBreakerCooldownMs:
+      config.rpcCircuitBreakerCooldownMs ?? RPC_CIRCUIT_BREAKER_COOLDOWN_MS,
     ttlWatchIntervalMs: config.ttlWatchIntervalMs ?? TTL_WATCH_INTERVAL_MS,
     ttlWatchThresholdLedgers: config.ttlWatchThresholdLedgers ?? TTL_WATCH_THRESHOLD_LEDGERS,
     rpcClient: server,
