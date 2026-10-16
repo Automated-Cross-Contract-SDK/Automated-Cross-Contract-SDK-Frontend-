@@ -6,7 +6,13 @@ import {
   signTransaction as freighterSignTransaction,
   signAuthEntry as freighterSignAuthEntry,
 } from '@stellar/freighter-api'
-import { WalletError, type WalletAdapter, type WalletCapabilities } from '@soroban-resurrect/sdk'
+import { xdr } from '@stellar/stellar-sdk'
+import {
+  WalletError,
+  type WalletAdapter,
+  type WalletCapabilities,
+  type WalletErrorCode,
+} from '@soroban-resurrect/sdk'
 import { asStellarPublicKey, asXdrBase64 } from '@soroban-resurrect/sdk'
 
 /**
@@ -34,35 +40,68 @@ export class FreighterAdapter implements WalletAdapter {
   }
 
   async getPublicKey() {
-    const access = await requestAccess()
-    if ('error' in access && access.error) {
-      throw new WalletError('NOT_CONNECTED', `Freighter: ${access.error}`, access.error)
+    try {
+      const access = await requestAccess()
+      if ('error' in access && access.error) {
+        throw normalizeError(access.error, 'NOT_CONNECTED')
+      }
+      if (typeof access.address !== 'string' || access.address.length === 0) {
+        throw new WalletError('NOT_CONNECTED', 'Freighter: no account was selected')
+      }
+      return asStellarPublicKey(access.address)
+    } catch (error) {
+      if (error instanceof WalletError) throw error
+      throw normalizeError(error, 'NOT_CONNECTED')
     }
-    return asStellarPublicKey(access.address)
   }
 
   async signTransaction(tx: string, opts?: { networkPassphrase?: string; network?: string }) {
-    const address = await getAddress()
-    if ('error' in address && address.error) {
-      throw new WalletError('NOT_CONNECTED', `Freighter: ${address.error}`, address.error)
+    try {
+      const address = await getAddress()
+      if ('error' in address && address.error) {
+        throw normalizeError(address.error, 'NOT_CONNECTED')
+      }
+      if (typeof address.address !== 'string' || address.address.length === 0) {
+        throw new WalletError('NOT_CONNECTED', 'Freighter: no account is connected')
+      }
+
+      const result = await freighterSignTransaction(tx, {
+        networkPassphrase: opts?.networkPassphrase,
+        address: address.address,
+      })
+
+      if ('error' in result && result.error) {
+        throw normalizeError(result.error)
+      }
+      if (typeof result.signedTxXdr !== 'string' || result.signedTxXdr.length === 0) {
+        throw new WalletError('UNKNOWN', 'Freighter: wallet returned no signed transaction XDR')
+      }
+
+      try {
+        xdr.TransactionEnvelope.fromXDR(result.signedTxXdr, 'base64')
+      } catch (error) {
+        throw new WalletError(
+          'UNKNOWN',
+          'Freighter: wallet returned invalid signed transaction XDR',
+          error,
+        )
+      }
+      return asXdrBase64(result.signedTxXdr)
+    } catch (error) {
+      if (error instanceof WalletError) throw error
+      throw normalizeError(error)
     }
-
-    const result = await freighterSignTransaction(tx, {
-      networkPassphrase: opts?.networkPassphrase,
-      address: address.address,
-    })
-
-    if ('error' in result && result.error) {
-      throw normalizeError(result.error)
-    }
-
-    return asXdrBase64(result.signedTxXdr)
   }
 
   async getNetwork(): Promise<string> {
-    const result = await getNetwork()
-    if ('error' in result && result.error) throw normalizeError(result.error)
-    return result.networkPassphrase
+    try {
+      const result = await getNetwork()
+      if ('error' in result && result.error) throw normalizeError(result.error)
+      return result.networkPassphrase
+    } catch (error) {
+      if (error instanceof WalletError) throw error
+      throw normalizeError(error)
+    }
   }
 
   async signAuthEntry(
@@ -83,13 +122,21 @@ export class FreighterAdapter implements WalletAdapter {
   }
 }
 
-function normalizeError(error: unknown): WalletError {
-  const message = error instanceof Error ? error.message : String(error)
+function normalizeError(error: unknown, fallback: WalletErrorCode = 'UNKNOWN'): WalletError {
+  if (error instanceof WalletError) return error
+  const message =
+    error instanceof Error
+      ? error.message
+      : error && typeof error === 'object' && 'message' in error
+        ? String(error.message)
+        : String(error)
   const lower = message.toLowerCase()
   const code = /reject|declin|cancel|denied/.test(lower)
     ? 'USER_REJECTED'
     : /network/.test(lower)
       ? 'NETWORK_MISMATCH'
-      : 'UNKNOWN'
+      : /not installed|unavailable|not connected|no account|access/.test(lower)
+        ? 'NOT_CONNECTED'
+        : fallback
   return new WalletError(code, `Freighter: ${message}`, error)
 }

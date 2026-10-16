@@ -1,6 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { WalletAdapter } from '@soroban-resurrect/sdk'
 import {
+  Account,
+  Asset,
+  Keypair,
+  Networks,
+  Operation,
+  TransactionBuilder,
+} from '@stellar/stellar-sdk'
+import {
   isConnected as freighterIsConnected,
   requestAccess,
   getAddress,
@@ -21,7 +29,21 @@ const mockGetAddress = vi.mocked(getAddress)
 const mockSignTransaction = vi.mocked(freighterSignTransaction)
 
 const ADDRESS = 'GABC00000000000000000000000000000000000000000000000FREIGHTER'
-const SIGNED_XDR = 'AAAAfreighter++signed//xdr=='
+const TEST_ACCOUNT = Keypair.random()
+const SIGNED_XDR = new TransactionBuilder(
+  new Account(TEST_ACCOUNT.publicKey(), '0'),
+  { fee: '100', networkPassphrase: Networks.TESTNET },
+)
+  .addOperation(
+    Operation.payment({
+      destination: TEST_ACCOUNT.publicKey(),
+      asset: Asset.native(),
+      amount: '1',
+    }),
+  )
+  .setTimeout(30)
+  .build()
+  .toXDR()
 
 describe('FreighterAdapter', () => {
   beforeEach(() => {
@@ -62,7 +84,19 @@ describe('FreighterAdapter', () => {
   it('getPublicKey throws when access is denied', async () => {
     mockRequestAccess.mockResolvedValueOnce({ error: 'User declined access' } as never)
     const adapter = new FreighterAdapter()
-    await expect(adapter.getPublicKey()).rejects.toThrow('Freighter: User declined access')
+    await expect(adapter.getPublicKey()).rejects.toMatchObject({
+      code: 'USER_REJECTED',
+      message: 'Freighter: User declined access',
+    })
+  })
+
+  it('maps connection errors to structured wallet errors', async () => {
+    mockRequestAccess.mockResolvedValueOnce({ error: 'Freighter is not installed' } as never)
+    const adapter = new FreighterAdapter()
+    await expect(adapter.getPublicKey()).rejects.toMatchObject({
+      code: 'NOT_CONNECTED',
+      message: 'Freighter: Freighter is not installed',
+    })
   })
 
   it('signTransaction returns base64 XDR and forwards passphrase + address', async () => {
@@ -81,8 +115,18 @@ describe('FreighterAdapter', () => {
   it('signTransaction throws when the wallet rejects signing', async () => {
     mockSignTransaction.mockResolvedValueOnce({ error: 'User declined to sign' } as never)
     const adapter = new FreighterAdapter()
-    await expect(adapter.signTransaction('AAAAtx')).rejects.toThrow(
-      'Freighter: User declined to sign',
-    )
+    await expect(adapter.signTransaction('AAAAtx')).rejects.toMatchObject({
+      code: 'USER_REJECTED',
+      message: 'Freighter: User declined to sign',
+    })
+  })
+
+  it('rejects signing results that are not valid transaction envelope XDR', async () => {
+    mockSignTransaction.mockResolvedValueOnce({ signedTxXdr: 'not-xdr' } as never)
+    const adapter = new FreighterAdapter()
+    await expect(adapter.signTransaction('AAAAtx')).rejects.toMatchObject({
+      code: 'UNKNOWN',
+      message: 'Freighter: wallet returned invalid signed transaction XDR',
+    })
   })
 })
