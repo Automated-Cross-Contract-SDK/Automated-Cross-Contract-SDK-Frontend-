@@ -67,6 +67,72 @@ describe('SorobanResurrect', () => {
     })
   })
 
+  describe('switchNetwork', () => {
+    it('creates a new RPC client when changing the URL from an injected client', () => {
+      const injectedClient = {
+        simulateTransaction: vi.fn(),
+        getAccount: vi.fn(),
+        sendTransaction: vi.fn(),
+        getTransaction: vi.fn(),
+        getLedgerEntries: vi.fn(),
+      }
+      const instance = new SorobanResurrect({
+        ...testConfig,
+        rpcClient: injectedClient as never,
+      })
+
+      instance.switchNetwork({
+        rpcUrl: 'https://soroban-mainnet.stellar.org',
+        networkPassphrase: Networks.PUBLIC,
+      })
+
+      expect(instance.server).not.toBe(injectedClient)
+      expect(instance.config.rpcUrl).toBe('https://soroban-mainnet.stellar.org')
+      expect(instance.config.rpcClient).toBe(instance.server)
+    })
+
+    it('rejects switching during a workflow', async () => {
+      let resolveSimulation!: (value: never) => void
+      vi.spyOn(resurrect.server, 'simulateTransaction').mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveSimulation = resolve
+          }) as never,
+      )
+
+      const detection = resurrect.detectArchivedKeys(makeSampleTx())
+      expect(resurrect.state).toBe('simulating')
+      expect(() => resurrect.switchNetwork('mainnet')).toThrow(
+        'Cannot switch networks while an SDK operation or TTL watch cycle is in progress',
+      )
+
+      resolveSimulation({} as never)
+      await detection
+    })
+
+    it('keeps a workflow bound to its endpoint until it settles', async () => {
+      let finishWorkflow!: (value: never) => void
+      vi.mocked(executeWithRestore).mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finishWorkflow = resolve
+          }),
+      )
+
+      const workflow = resurrect.submitWithRestore({
+        transaction: makeSampleTx(),
+        wallet: makeWallet(),
+      })
+      expect(() => resurrect.switchNetwork('mainnet')).toThrow(
+        'Cannot switch networks while an SDK operation or TTL watch cycle is in progress',
+      )
+
+      finishWorkflow({ success: false, archivedKeysDetected: 0 } as never)
+      await workflow
+      expect(() => resurrect.switchNetwork('mainnet')).not.toThrow()
+    })
+  })
+
   describe('state management', () => {
     it('starts in idle state', () => {
       expect(resurrect.state).toBe('idle')

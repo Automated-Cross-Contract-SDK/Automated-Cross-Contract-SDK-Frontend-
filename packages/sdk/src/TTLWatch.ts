@@ -182,6 +182,7 @@ export function watchTTL(
         keys,
         thresholdLedgers,
       )
+      if (stopped) return
       if (expiring.length === 0) return
 
       emitter.emit('ttlLow', expiring)
@@ -193,12 +194,15 @@ export function watchTTL(
         xdr.LedgerKey.fromXDR(entry.keyBase64, 'base64'),
       )
       const publicKey = await wallet.getPublicKey()
+      if (stopped) return
 
       const restoreTx = await buildRestoreTxForKeys(server, publicKey, keysToRestore, config)
+      if (stopped) return
       const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
       const signedXdr = await wallet.signTransaction(asXdrBase64(restoreTx.toXDR()), {
         networkPassphrase,
       })
+      if (stopped) return
       const signedTx = TransactionBuilder.fromXDR(signedXdr, networkPassphrase)
       if (!(signedTx instanceof Transaction)) {
         throw new Error('Failed to parse signed TTL auto-extend transaction')
@@ -212,6 +216,7 @@ export function watchTTL(
         config.pollIntervalMs,
         config.pollTimeoutMs,
       )
+      if (stopped) return
 
       if (status.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
         throw new Error('TTL auto-extend restore transaction failed to confirm')

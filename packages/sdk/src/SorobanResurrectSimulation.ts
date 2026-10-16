@@ -72,18 +72,19 @@ export class SorobanResurrectSimulator {
    * @returns The raw simulation response (success, error, or restore-required).
    */
   async simulate(transaction: Transaction): Promise<rpc.Api.SimulateTransactionResponse> {
-    if (this._cache) {
-      const cached = this._cache.get(transaction)
+    const server = this._server
+    const cache = this._cache
+
+    if (cache) {
+      const cached = cache.get(transaction)
       if (cached) return cached
     }
 
     this._stateMgr.setState('simulating', 'Simulating transaction...')
 
-    const response = await this._server.simulateTransaction(transaction)
+    const response = await server.simulateTransaction(transaction)
 
-    if (this._cache) {
-      this._cache.set(transaction, response)
-    }
+    cache?.set(transaction, response)
 
     return response
   }
@@ -172,7 +173,8 @@ export class SorobanResurrectSimulator {
    * is not used.
    */
   private async _detectViaDirect(transaction: Transaction): Promise<ArchivedLedgerEntry[]> {
+    const server = this._server
     const { detectArchivedKeysViaDirect } = await import('./Archiver.js')
-    return detectArchivedKeysViaDirect(this._server, transaction)
+    return detectArchivedKeysViaDirect(server, transaction)
   }
 }

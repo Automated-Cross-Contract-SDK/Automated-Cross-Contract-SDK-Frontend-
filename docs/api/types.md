@@ -84,28 +84,33 @@ Payload emitted on the `networkChanged` event after a successful
 
 ```typescript
 interface NetworkChangedEvent {
-  previous: SorobanResurrectNetwork
-  current: SorobanResurrectNetwork
+  rpcUrl: string
+  networkPassphrase: string
 }
 ```
 
-| Field      | Description                                              |
-| ---------- | -------------------------------------------------------- |
-| `previous` | The network the instance was on before the switch.       |
-| `current`  | The network the instance is now on.                      |
+| Field               | Description                                      |
+| ------------------- | ------------------------------------------------ |
+| `rpcUrl`             | The RPC endpoint active after the switch.         |
+| `networkPassphrase` | The passphrase active after the switch.           |
 
 ### What survives a switch
 
-`switchNetwork()` swaps the RPC endpoint and passphrase in place. It does **not**
-recreate the instance, so anything bound to the instance keeps working:
+`switchNetwork()` swaps the RPC endpoint and passphrase in place. A changed
+`rpcUrl` creates a fresh RPC client unless a replacement `rpcClient` is passed.
+Calls made while any SDK operation or TTL watch cycle is in progress are
+rejected; finish or cancel the operation before switching. The SDK retains the instance, event
+listeners, and historical transaction records, while resetting network-specific
+state and stopping active TTL watchers:
 
 | Concern            | After `switchNetwork()`                                                                 |
 | ------------------ | --------------------------------------------------------------------------------------- |
-| Event listeners    | **Preserved.** `on('networkChanged', …)` and other subscriptions stay attached.          |
-| Restore history    | **Preserved.** Previously recorded restore results remain readable.                      |
-| TTL watchers       | **Preserved.** Active watchers keep running and now poll the new network.                |
-| Archive cache      | **Reset.** Cached archive-detection results are cleared — ledger keys differ per network.|
-| In-flight workflow | **Not migrated.** A submit/restore already running finishes against the old network.     |
+| Event listeners    | **Preserved.** Subscriptions remain attached to the same SDK instance.                   |
+| Restore history    | **Preserved.** Historical records remain readable; they are not replayed on switch.      |
+| TTL watchers       | **Stopped.** Start a new watch after switching to monitor the new network.               |
+| Archive cache      | **Reset.** Simulation and latest-ledger caches are cleared for the new network.          |
+| Workflow state     | **Reset.** State returns to `idle`, with prior archived keys and errors cleared.          |
+| In-flight operation | **Switch rejected.** The active operation must settle before the network can change.   |
 
 ## `WalletAdapter`
 
