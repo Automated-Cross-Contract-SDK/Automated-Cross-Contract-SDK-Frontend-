@@ -37,6 +37,7 @@ describe('RabetAdapter', () => {
   it('disconnects the wallet and clears local connection state', async () => {
     const adapter = new RabetAdapter({ rabet })
     await adapter.getPublicKey()
+    isUnlocked.mockResolvedValueOnce(false)
 
     await adapter.disconnect()
 
