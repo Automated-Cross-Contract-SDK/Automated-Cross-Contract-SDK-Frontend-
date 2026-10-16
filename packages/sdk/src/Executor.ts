@@ -53,6 +53,8 @@ export interface ExecuteParams {
   wallet: WalletAdapter
   /** SDK configuration. */
   config: SorobanResurrectConfig
+  /** Cancels further signing, submission, or transaction polling. */
+  signal?: AbortSignal
   /** Called when the wallet is prompted to sign the restore transaction. */
   onSigningRestore?: () => void
   /** Called right before the restore transaction is submitted. */
@@ -112,6 +114,7 @@ async function signAndMaybeFeeBump(params: {
   onSigning?: () => void
   onSigningFeeBump?: () => void
   onSubmitting?: () => void
+  signal?: AbortSignal
 }): Promise<{ hash: TxHash }> {
   const {
     tx,
@@ -122,7 +125,10 @@ async function signAndMaybeFeeBump(params: {
     onSigning,
     onSigningFeeBump,
     onSubmitting,
+    signal,
   } = params
+
+  throwIfCancelled(signal)
 
   // Fail fast when a fee-bump is requested but the wallet has opted out of it,
   // rather than prompting the user only to reject the envelope later.
@@ -132,6 +138,7 @@ async function signAndMaybeFeeBump(params: {
 
   onSigning?.()
   const signedXdr = await wallet.signTransaction(asXdrBase64(tx.toXDR()), { networkPassphrase })
+  throwIfCancelled(signal)
 
   // If no fee-bump, submit directly
   if (!feeBumpConfig) {
@@ -139,6 +146,7 @@ async function signAndMaybeFeeBump(params: {
     if (!(signedTx instanceof Transaction)) {
       throw new Error('Failed to parse signed transaction')
     }
+    throwIfCancelled(signal)
     onSubmitting?.()
     const result = await server.sendTransaction(signedTx)
     return { hash: asTxHash(result.hash) }
@@ -153,6 +161,7 @@ async function signAndMaybeFeeBump(params: {
     feeBumpConfig.feeBumpFee,
   )
 
+  throwIfCancelled(signal)
   onSubmitting?.()
   const result = await submitFeeBumpTransaction(server, feeBumpXdr, networkPassphrase)
   return { hash: asTxHash(result.hash) }
@@ -189,15 +198,23 @@ async function waitForTx(
   server: ISorobanRpcClient,
   hash: TxHash | string,
   config: SorobanResurrectConfig,
+  signal?: AbortSignal,
 ): Promise<rpc.Api.GetTransactionResponse> {
   const pollTimeout = config.pollTimeoutMs ?? POLL_TIMEOUT_MS
 
   if (config.useSSE) {
-    return waitForTransactionSSE(server, hash, pollTimeout, config.rpcUrl)
+    return waitForTransactionSSE(server, hash, pollTimeout, config.rpcUrl, signal)
   }
 
   const pollInterval = config.pollIntervalMs ?? POLL_INTERVAL_MS
-  return waitForTransaction(server, hash, pollInterval, pollTimeout)
+  return waitForTransaction(server, hash, pollInterval, pollTimeout, signal)
+}
+
+function throwIfCancelled(signal?: AbortSignal): void {
+  if (!signal?.aborted) return
+  const error = new Error('Operation cancelled')
+  error.name = 'AbortError'
+  throw error
 }
 
 /**
@@ -242,6 +259,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
     onOriginalSubmitted,
     onRestoreFailed,
     onSigningFeeBump,
+    signal,
   } = params
 
   const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
@@ -256,12 +274,12 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
   const feeBumpConfig = (params as ExecuteParams & { feeBumpConfig?: FeeBumpConfig }).feeBumpConfig
   const simulationCache = (params as ExecuteParams & { simulationCache?: SimulationCache })
     .simulationCache
-  const pollInterval = config.pollIntervalMs ?? POLL_INTERVAL_MS
-  const pollTimeout = config.pollTimeoutMs ?? POLL_TIMEOUT_MS
-
   try {
+    throwIfCancelled(signal)
     await validateWalletNetwork(wallet, networkPassphrase)
+    throwIfCancelled(signal)
     const simResponse = await simulateWithCache(server, originalTx, simulationCache)
+    throwIfCancelled(signal)
 
     if (isErrorResponse(simResponse)) {
       const err = `Simulation error: ${simResponse.error}`
@@ -274,6 +292,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       debug('executeWithRestore: restore required for %d entries', archivedKeys.length)
 
       const isConnected = await wallet.isConnected()
+      throwIfCancelled(signal)
       if (!isConnected) {
         const err = 'Wallet is not connected'
         onRestoreFailed?.(err)
@@ -286,7 +305,9 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       }
 
       const publicKey = await wallet.getPublicKey()
+      throwIfCancelled(signal)
       const account = await server.getAccount(publicKey)
+      throwIfCancelled(signal)
 
       const restoreTx = await buildRestoreTransaction({
         server,
@@ -296,6 +317,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
         config,
         account,
       })
+      throwIfCancelled(signal)
 
       // Defer onRestoreNeeded until after restore tx is built
       onRestoreNeeded?.(archivedKeys)
@@ -304,6 +326,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       const signedRestoreXdr = await wallet.signTransaction(asXdrBase64(restoreTx.toXDR()), {
         networkPassphrase,
       })
+      throwIfCancelled(signal)
 
       const signedRestoreTx = TransactionBuilder.fromXDR(signedRestoreXdr, networkPassphrase)
       if (!(signedRestoreTx instanceof Transaction)) {
@@ -322,7 +345,8 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       const restoreHash = asTxHash(restoreResult.hash)
       onRestoreSubmitted?.(restoreHash)
 
-      const restoreStatus = await waitForTransaction(server, restoreHash, pollInterval, pollTimeout)
+      const restoreStatus = await waitForTx(server, restoreHash, config, signal)
+      throwIfCancelled(signal)
 
       if (restoreStatus.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
         const err = 'Restore transaction failed'
@@ -356,11 +380,13 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
           networkPassphrase,
           originalTx.fee,
         )
+        throwIfCancelled(signal)
 
         onSigningOriginal?.()
         const signedOriginalXdr = await wallet.signTransaction(asXdrBase64(preparedTx.toXDR()), {
           networkPassphrase,
         })
+        throwIfCancelled(signal)
 
         const signedOriginalTx = TransactionBuilder.fromXDR(signedOriginalXdr, networkPassphrase)
         if (!(signedOriginalTx instanceof Transaction)) {
@@ -433,6 +459,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
         wallet,
         networkPassphrase,
       })
+      throwIfCancelled(signal)
 
       const { hash } = await signAndMaybeFeeBump({
         tx: txToSubmit,
@@ -440,6 +467,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
         feeBumpConfig,
         networkPassphrase,
         server,
+        signal,
         onSigning: onSigningOriginal,
         onSigningFeeBump,
       })
@@ -447,7 +475,8 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       onOriginalSubmitted?.(hash)
 
       // Wait for confirmation on success path for consistency with restore path
-      const txStatus = await waitForTx(server, hash, config)
+      const txStatus = await waitForTx(server, hash, config, signal)
+      throwIfCancelled(signal)
 
       if (txStatus.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
         return {
@@ -474,7 +503,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       errorCode: 'UNEXPECTED_SIMULATION_RESPONSE',
     }
   } catch (err) {
-    const message = walletErrorMessage(err)
+    const message = signal?.aborted ? 'Operation cancelled' : walletErrorMessage(err)
     onRestoreFailed?.(message)
     return { success: false, archivedKeysDetected: 0, error: message, errorCode: 'UNKNOWN_ERROR' }
   }

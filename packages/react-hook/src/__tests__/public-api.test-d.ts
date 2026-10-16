@@ -45,6 +45,7 @@ test('useSorobanResurrect return shape', () => {
   expectTypeOf<UseSorobanResurrectReturn>().toHaveProperty('state')
   expectTypeOf<UseSorobanResurrectReturn['state']>().toEqualTypeOf<RestoreStateInfo>()
   expectTypeOf<UseSorobanResurrectReturn['isProcessing']>().toEqualTypeOf<boolean>()
+  expectTypeOf<UseSorobanResurrectReturn['cancel']>().returns.toEqualTypeOf<boolean>()
   expectTypeOf<UseSorobanResurrectReturn['submitWithRestore']>().returns.toEqualTypeOf<
     Promise<ResurrectResult>
   >()
@@ -64,6 +65,7 @@ test('useSorobanResurrectSubmit return shape', () => {
   expectTypeOf<UseSorobanResurrectSubmitReturn['error']>().toEqualTypeOf<string | null>()
   expectTypeOf<UseSorobanResurrectSubmitReturn['state']>().toEqualTypeOf<RestoreStateInfo>()
   expectTypeOf<UseSorobanResurrectSubmitReturn['reset']>().returns.toEqualTypeOf<void>()
+  expectTypeOf<UseSorobanResurrectSubmitReturn['cancel']>().returns.toEqualTypeOf<boolean>()
 })
 
 test('useRestoreWatcher return shape', () => {
@@ -72,6 +74,7 @@ test('useRestoreWatcher return shape', () => {
   expectTypeOf<RestoreWatchStatus>().toEqualTypeOf<'idle' | 'watching' | 'stopped' | 'error'>()
   expectTypeOf<UseRestoreWatcherReturn['lastCheckedAt']>().toEqualTypeOf<number | null>()
   expectTypeOf<UseRestoreWatcherReturn['start']>().returns.toEqualTypeOf<void>()
+  expectTypeOf<UseRestoreWatcherReturn['cancel']>().returns.toEqualTypeOf<boolean>()
   expectTypeOf<UseRestoreWatcherReturn['extend']>().returns.toEqualTypeOf<
     Promise<ResurrectResult | null>
   >()

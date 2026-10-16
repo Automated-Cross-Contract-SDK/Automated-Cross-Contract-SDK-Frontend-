@@ -161,6 +161,55 @@ describe('SorobanResurrect', () => {
   })
 
   describe('submitWithRestore', () => {
+    it('cancels active workflows through the public API', async () => {
+      let executionParams!: Parameters<typeof executeWithRestore>[0]
+      let finishWorkflow!: (value: never) => void
+      vi.mocked(executeWithRestore).mockImplementation(
+        (params) =>
+          new Promise((resolve) => {
+            executionParams = params
+            finishWorkflow = resolve
+          }),
+      )
+
+      const workflow = resurrect.submitWithRestore({
+        transaction: makeSampleTx(),
+        wallet: makeWallet(),
+      })
+
+      expect(resurrect.cancel()).toBe(true)
+      expect(executionParams.signal?.aborted).toBe(true)
+      expect(resurrect.cancel()).toBe(false)
+
+      finishWorkflow({ success: false, archivedKeysDetected: 0, error: 'Operation cancelled' } as never)
+      await workflow
+      expect(resurrect.cancel()).toBe(false)
+    })
+
+    it('forwards a caller-provided abort signal', async () => {
+      const controller = new AbortController()
+      let executionParams!: Parameters<typeof executeWithRestore>[0]
+      let finishWorkflow!: (value: never) => void
+      vi.mocked(executeWithRestore).mockImplementation(
+        (params) =>
+          new Promise((resolve) => {
+            executionParams = params
+            finishWorkflow = resolve
+          }),
+      )
+
+      const workflow = resurrect.submitWithRestore({
+        transaction: makeSampleTx(),
+        wallet: makeWallet(),
+        signal: controller.signal,
+      })
+      controller.abort()
+
+      expect(executionParams.signal?.aborted).toBe(true)
+      finishWorkflow({ success: false, archivedKeysDetected: 0 } as never)
+      await workflow
+    })
+
     it('returns result from executeWithRestore on success', async () => {
       const mockResult = {
         success: true,

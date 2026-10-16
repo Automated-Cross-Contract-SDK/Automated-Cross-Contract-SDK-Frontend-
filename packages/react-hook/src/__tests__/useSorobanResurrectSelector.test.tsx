@@ -15,6 +15,7 @@ vi.mock('@soroban-resurrect/sdk', () => ({
     reset: vi.fn(),
     detectArchivedKeys: vi.fn(),
     submitWithRestore: vi.fn(),
+    cancel: vi.fn().mockReturnValue(false),
     config: { rpcUrl: 'https://test' },
   })),
   isProcessingState: (s: string) =>

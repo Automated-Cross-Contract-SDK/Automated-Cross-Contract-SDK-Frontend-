@@ -71,6 +71,7 @@ export class SorobanResurrect {
   private readonly _executor: SorobanResurrectExecutor
   private readonly _ttlWatches = new Set<TTLWatchHandle>()
   private _activeOperations = 0
+  private readonly _submitControllers = new Set<AbortController>()
 
   // Last set of archived keys from a standalone detectArchivedKeys() call.
   // The FSM context already stores archivedKeys for the full submit workflow;
@@ -600,6 +601,24 @@ export class SorobanResurrect {
   }
 
   /**
+   * Cancels active `submitWithRestore` workflows. Transactions already
+   * submitted to the network cannot be retracted; cancellation prevents
+   * subsequent signing/submission steps and stops confirmation polling.
+   *
+   * @returns `true` if at least one active workflow was cancelled.
+   */
+  cancel(): boolean {
+    let cancelled = false
+    for (const controller of this._submitControllers) {
+      if (!controller.signal.aborted) {
+        controller.abort()
+        cancelled = true
+      }
+    }
+    return cancelled
+  }
+
+  /**
    * Submits a transaction with automatic archive restoration.
    *
    * Records the attempt in transaction history. The returned result includes
@@ -624,23 +643,40 @@ export class SorobanResurrect {
    * }
    * ```
    */
-  async submitWithRestore(options: SubmitWithRestoreOptions): Promise<ResurrectResult> {
+  async submitWithRestore(
+    options: SubmitWithRestoreOptions & { signal?: AbortSignal },
+  ): Promise<ResurrectResult> {
+    const controller = new AbortController()
+    const externalSignal = options.signal
+    const abortFromCaller = () => controller.abort()
+    if (externalSignal?.aborted) controller.abort()
+    else externalSignal?.addEventListener('abort', abortFromCaller, { once: true })
+    this._submitControllers.add(controller)
     return this._trackOperation(async () => {
-      this._requestId = createRequestId()
-      this.logger.info('submitWithRestore: start', { requestId: this._requestId })
       try {
-        const result = await this._executor.submitWithRestore(options)
-        this.logger[result.success ? 'info' : 'error']('submitWithRestore: finished', {
-          requestId: this._requestId,
-          success: result.success,
-          archivedKeysDetected: result.archivedKeysDetected,
-          restoreTxHash: result.restoreTxHash,
-          originalTxHash: result.originalTxHash,
-          error: result.error,
-        })
-        return result
+        this._requestId = createRequestId()
+        this.logger.info('submitWithRestore: start', { requestId: this._requestId })
+        try {
+          const executionOptions: SubmitWithRestoreOptions & { signal: AbortSignal } = {
+            ...options,
+            signal: controller.signal,
+          }
+          const result = await this._executor.submitWithRestore(executionOptions)
+          this.logger[result.success ? 'info' : 'error']('submitWithRestore: finished', {
+            requestId: this._requestId,
+            success: result.success,
+            archivedKeysDetected: result.archivedKeysDetected,
+            restoreTxHash: result.restoreTxHash,
+            originalTxHash: result.originalTxHash,
+            error: result.error,
+          })
+          return result
+        } finally {
+          this._requestId = undefined
+        }
       } finally {
-        this._requestId = undefined
+        this._submitControllers.delete(controller)
+        externalSignal?.removeEventListener('abort', abortFromCaller)
       }
     })
   }
