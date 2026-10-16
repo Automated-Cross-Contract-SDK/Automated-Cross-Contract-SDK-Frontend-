@@ -28,6 +28,40 @@ const keys = extractFootprintFromSuccess(sim)
 If you already know the contract data keys you want to protect, construct them
 directly with `xdr.LedgerKey.contractData(...)` and pass them in.
 
+## Query TTL and lifecycle status
+
+Use `queryLedgerTTL` to get a snapshot with a stable status for each requested
+key. The default `warningWindowLedgers` is 100; keys with a positive TTL at or
+below that window are `near-expiry`. Override the window per query:
+
+```typescript
+const result = await sr.queryLedgerTTL(keys, { warningWindowLedgers: 17_280 })
+
+for (const entry of result.entries) {
+  switch (entry.status) {
+    case 'healthy':
+      break
+    case 'near-expiry':
+      showWarning(`${entry.ttlLedgers} ledgers remain`)
+      break
+    case 'archived':
+      showRestoreAction(entry.keyBase64)
+      break
+    case 'unknown':
+      // The RPC request failed or returned incomplete TTL data; retry rather
+      // than treating the key as archived.
+      break
+  }
+}
+```
+
+`result.hasErrors` and `result.failedChunks` describe failed ledger-entry RPC
+requests. Entries in those chunks have `status: 'unknown'` and are not returned
+by `getExpiringSoonEntries`, so a transient RPC failure cannot trigger an
+unnecessary restore. Missing entries from a successful response are reported
+as `archived`. Existing callers can continue using `isArchived`; it is false
+for both `healthy`, `near-expiry`, and `unknown` entries.
+
 ## Choosing `thresholdLedgers`
 
 `thresholdLedgers` is the number of ledgers remaining before the watcher

@@ -1,5 +1,5 @@
 import { rpc, xdr } from '@stellar/stellar-sdk'
-import { ArchivedLedgerEntry } from './types.js'
+import type { ArchivedLedgerEntry } from './types.js'
 import type { ISorobanRpcClient } from './RpcClient.js'
 import { asXdrBase64, type XdrBase64 } from './branded-types.js'
 import { fetchLedgerEntriesChunked } from './ledgerChunks.js'
@@ -11,6 +11,8 @@ export const LATEST_LEDGER_CACHE_MS = 1000
 export interface QueryLedgerTTLOptions {
   /** Known current ledger sequence; skips the `getLatestLedger` RPC call entirely. */
   currentLedger?: number
+  /** Remaining-ledger window for the `near-expiry` status (default 100). */
+  warningWindowLedgers?: number
   /** Window (ms) to reuse a cached latest ledger (default {@link LATEST_LEDGER_CACHE_MS}; `0` disables). */
   latestLedgerCacheMs?: number
   /** Keys per `getLedgerEntries` request. */
@@ -48,6 +50,8 @@ export function invalidateLatestLedgerCache(server: ISorobanRpcClient): void {
  * before a ledger entry expires.
  */
 export const LEDGER_CLOSE_TIME_SECONDS = 5
+/** Default remaining-TTL window for the `near-expiry` status. */
+export const DEFAULT_TTL_WARNING_WINDOW_LEDGERS = 100
 
 /**
  * The kind of ledger entry a TTL query was performed against.
@@ -59,6 +63,9 @@ export const LEDGER_CLOSE_TIME_SECONDS = 5
  */
 export type LedgerKeyEntryType = 'contractData' | 'contractCode' | 'other'
 
+/** Stable lifecycle status for a queried ledger entry. */
+export type LedgerEntryStatus = 'healthy' | 'near-expiry' | 'archived' | 'unknown'
+
 /**
  * Detailed TTL information for a single ledger entry.
  */
@@ -67,6 +74,8 @@ export interface LedgerEntryTTLInfo {
   keyBase64: XdrBase64
   /** The kind of ledger entry this key refers to. */
   entryType: LedgerKeyEntryType
+  /** Lifecycle status, computed using the query's warning window. */
+  status: LedgerEntryStatus
   /** Ledger sequence number at which this entry expires (0 if archived). */
   liveUntilLedger: number
   /** Current ledger sequence number at the time of the query. */
@@ -77,6 +86,8 @@ export interface LedgerEntryTTLInfo {
   isArchived: boolean
   /** Rough estimate of seconds remaining until expiry, based on ~5 s per ledger. */
   estimatedSecondsRemaining: number
+  /** Error returned for the chunk containing this key, when its status is unknown. */
+  error?: unknown
 }
 
 /**
@@ -105,6 +116,10 @@ export interface TTLQueryResult {
   currentLedger: number
   /** Unix timestamp (ms) when the query was performed. */
   queriedAt: number
+  /** Ledger-entry requests that failed; affected entries have `status: 'unknown'`. */
+  failedChunks: Array<{ chunkIndex: number; keys: string[]; error: unknown }>
+  /** Whether one or more ledger-entry requests failed. */
+  hasErrors: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -123,6 +138,7 @@ function makeArchivedInfo(
   return {
     keyBase64,
     entryType,
+    status: 'archived',
     liveUntilLedger: 0,
     currentLedger,
     ttlLedgers: 0,
@@ -139,12 +155,14 @@ function makeLiveInfo(
   liveUntilLedger: number,
   currentLedger: number,
   entryType: LedgerKeyEntryType,
+  warningWindowLedgers: number,
 ): LedgerEntryTTLInfo {
   const ttlLedgers = Math.max(0, liveUntilLedger - currentLedger)
   const isArchived = ttlLedgers === 0
   return {
     keyBase64,
     entryType,
+    status: isArchived ? 'archived' : ttlLedgers <= warningWindowLedgers ? 'near-expiry' : 'healthy',
     liveUntilLedger,
     currentLedger,
     ttlLedgers,
@@ -180,12 +198,19 @@ export async function queryLedgerTTL(
   opts: QueryLedgerTTLOptions = {},
 ): Promise<TTLQueryResult> {
   const queriedAt = Date.now()
+  const warningWindowLedgers = opts.warningWindowLedgers ?? DEFAULT_TTL_WARNING_WINDOW_LEDGERS
+  if (!Number.isInteger(warningWindowLedgers) || warningWindowLedgers < 0) {
+    throw new Error('warningWindowLedgers must be a non-negative integer')
+  }
 
   const currentLedger =
     opts.currentLedger ?? (await getCachedLatestLedger(server, opts.latestLedgerCacheMs))
 
   // Build a map from keyBase64 → LedgerEntryTTLInfo for fast lookup
   const infoMap = new Map<string, LedgerEntryTTLInfo>()
+  const failedChunks: TTLQueryResult['failedChunks'] = []
+  const errorsByKey = new Map<string, unknown>()
+  const failedKeys = new Set<string>()
 
   // Pre-populate all keys as archived; overwrite if found on-chain
   for (const key of keys) {
@@ -196,26 +221,52 @@ export async function queryLedgerTTL(
   const found = await fetchLedgerEntriesChunked(server, keys, {
     chunkSize: opts.chunkSize,
     concurrency: opts.concurrency,
-    onChunkError: (err) =>
-      // On network error the pre-populated archived entries remain in the map.
-      console.warn('TTLHelpers: getLedgerEntries chunk failed, treating keys as archived:', err),
+    onChunkError: (error, chunkIndex, chunkKeys) => {
+      const keyBase64s = chunkKeys.map((key) => asXdrBase64(key.toXDR('base64')))
+      failedChunks.push({ chunkIndex, keys: keyBase64s, error })
+      for (const keyBase64 of keyBase64s) {
+        failedKeys.add(keyBase64)
+        errorsByKey.set(keyBase64, error)
+      }
+    },
   })
   for (const entry of found) {
     const keyBase64 = asXdrBase64(entry.key.toXDR('base64'))
+    if (entry.liveUntilLedgerSeq === undefined) {
+      infoMap.set(keyBase64, {
+        keyBase64,
+        entryType: getLedgerKeyEntryType(entry.key),
+        status: 'unknown',
+        liveUntilLedger: 0,
+        currentLedger,
+        ttlLedgers: 0,
+        isArchived: false,
+        estimatedSecondsRemaining: 0,
+      })
+      continue
+    }
     infoMap.set(
       keyBase64,
-      makeLiveInfo(keyBase64, entry.liveUntilLedgerSeq ?? 0, currentLedger, getLedgerKeyEntryType(entry.key)),
+      makeLiveInfo(
+        keyBase64,
+        entry.liveUntilLedgerSeq,
+        currentLedger,
+        getLedgerKeyEntryType(entry.key),
+        warningWindowLedgers,
+      ),
     )
   }
 
   // Preserve original key order
   const entries: LedgerEntryTTLInfo[] = keys.map((key) => {
     const keyBase64 = asXdrBase64(key.toXDR('base64'))
-
-    return infoMap.get(keyBase64)!
+    const info = infoMap.get(keyBase64)!
+    if (!failedKeys.has(keyBase64)) return info
+    const error = errorsByKey.get(keyBase64)
+    return { ...info, status: 'unknown', isArchived: false, error }
   })
 
-  return { entries, currentLedger, queriedAt }
+  return { entries, currentLedger, queriedAt, failedChunks, hasErrors: failedChunks.length > 0 }
 }
 
 /**
@@ -228,8 +279,9 @@ export async function queryLedgerTTL(
 export async function queryLedgerEntryTTL(
   server: ISorobanRpcClient,
   key: xdr.LedgerKey,
+  opts: QueryLedgerTTLOptions = {},
 ): Promise<LedgerEntryTTLInfo> {
-  const result = await queryLedgerTTL(server, [key])
+  const result = await queryLedgerTTL(server, [key], opts)
   return result.entries[0]
 }
 
@@ -247,8 +299,8 @@ export async function getExpiringSoonEntries(
   keys: xdr.LedgerKey[],
   ledgersThreshold: number,
 ): Promise<LedgerEntryTTLInfo[]> {
-  const result = await queryLedgerTTL(server, keys)
-  return result.entries.filter((entry) => entry.isArchived || entry.ttlLedgers <= ledgersThreshold)
+  const result = await queryLedgerTTL(server, keys, { warningWindowLedgers: ledgersThreshold })
+  return result.entries.filter((entry) => entry.status === 'archived' || entry.status === 'near-expiry')
 }
 
 /**

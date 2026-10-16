@@ -133,12 +133,14 @@ export type {
   LedgerEntryTTLInfo,
   TTLQueryResult,
   LedgerKeyEntryType,
+  LedgerEntryStatus,
   QueryLedgerTTLOptions,
 } from './TTLHelpers.js'
 export {
   getCachedLatestLedger,
   invalidateLatestLedgerCache,
   LATEST_LEDGER_CACHE_MS,
+  DEFAULT_TTL_WARNING_WINDOW_LEDGERS,
 } from './TTLHelpers.js'
 export { fetchLedgerEntriesChunked } from './ledgerChunks.js'
 export type { ChunkedFetchOptions } from './ledgerChunks.js'

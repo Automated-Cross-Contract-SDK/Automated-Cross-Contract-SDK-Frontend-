@@ -31,6 +31,7 @@ import type {
   MultiSigConfig,
   TransactionHistoryEntry,
   LedgerEntryTTLInfo,
+  LedgerEntryStatus,
   RestoreCostEstimate,
 } from '../index.js'
 
@@ -190,5 +191,9 @@ test('scan / multisig / history / TTL public types exist', () => {
   expectTypeOf<KnownWallet>().not.toBeAny()
   expectTypeOf<TransactionHistoryEntry>().not.toBeAny()
   expectTypeOf<LedgerEntryTTLInfo>().not.toBeAny()
+  expectTypeOf<LedgerEntryTTLInfo['status']>().toEqualTypeOf<LedgerEntryStatus>()
+  expectTypeOf<LedgerEntryStatus>().toEqualTypeOf<
+    'healthy' | 'near-expiry' | 'archived' | 'unknown'
+  >()
   expectTypeOf<RestoreCostEstimate>().not.toBeAny()
 })
