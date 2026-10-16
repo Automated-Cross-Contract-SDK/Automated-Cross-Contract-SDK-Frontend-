@@ -216,7 +216,7 @@ async function detectArchivedChunk(
       if (!knownKeys.has(keyXdr)) {
         archived.push({
           key,
-        keyBase64: serializeLedgerKey(key),
+          keyBase64: serializeLedgerKey(key),
         })
       }
     }
