@@ -28,6 +28,12 @@ export type ResurrectErrorCode =
   | 'WALLET_NOT_CONNECTED'
 
   /**
+   * The wallet reports a different network passphrase than the SDK config.
+   * This check is performed before any signing prompt is opened.
+   */
+  | 'NETWORK_MISMATCH'
+
+  /**
    * The Soroban RPC simulation returned an error response.
    * Check `result.error` for the underlying RPC error message.
    */

@@ -10,7 +10,6 @@ import { SorobanResurrectConfig, FeeBumpSponsor, ArchivedLedgerEntry } from './t
 import type { ISorobanRpcClient } from './RpcClient.js'
 import { DEFAULT_NETWORK_PASSPHRASE } from './constants.js'
 import { calculateRestoreFee } from './feeCalculation.js'
-import { ISorobanRpcClient } from './RpcClient.js'
 
 /** Parameters for building a restore transaction. */
 export interface BuildRestoreTxParams {

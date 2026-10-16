@@ -8,8 +8,13 @@ import {
   Keypair,
   Transaction,
   SorobanDataBuilder,
+  xdr,
 } from '@stellar/stellar-sdk'
-import { executeWithRestore } from '../Executor.js'
+import {
+  executeWithRestore,
+  restoreKeys,
+  sendTransaction as executeSendTransaction,
+} from '../Executor.js'
 import type { WalletAdapter, SorobanResurrectConfig } from '../types.js'
 
 function makeMockServer(): rpc.Server {
@@ -106,6 +111,30 @@ describe('executeWithRestore', () => {
     vi.clearAllMocks()
   })
 
+  describe('sendTransaction', () => {
+    it('connects before signing when the wallet is disconnected', async () => {
+      const server = makeMockServer()
+      const wallet = makeWallet()
+      const order: string[] = []
+      wallet.isConnected = vi.fn().mockResolvedValue(false)
+      wallet.connect = vi.fn().mockImplementation(async () => {
+        order.push('connect')
+        return Keypair.random().publicKey()
+      })
+      wallet.signTransaction = vi.fn().mockImplementation(async (tx: string) => {
+        order.push('sign')
+        return tx
+      })
+      vi.mocked(server.sendTransaction).mockResolvedValue({ hash: 'connected-send-hash' } as never)
+
+      const result = await executeSendTransaction(server, makeSampleTx(), wallet, defaultConfig)
+
+      expect(result.success).toBe(true)
+      expect(order).toEqual(['connect', 'sign'])
+      expect(wallet.signTransaction).toHaveBeenCalledTimes(1)
+    })
+  })
+
   it('returns error result when simulation fails', async () => {
     vi.mocked(server.simulateTransaction).mockResolvedValue(makeErrorResponse() as never)
 
@@ -144,6 +173,44 @@ describe('executeWithRestore', () => {
     expect(result.archivedKeysDetected).toBe(0)
     expect(wallet.signTransaction).toHaveBeenCalledTimes(1)
     expect(onOriginalSubmitted).toHaveBeenCalledWith('tx-hash-123')
+  })
+
+  it('returns a typed network mismatch before simulation or signing', async () => {
+    const wallet = makeWallet()
+    wallet.getNetwork = vi.fn().mockResolvedValue(Networks.PUBLIC)
+
+    const result = await executeWithRestore({
+      server,
+      transaction: makeSampleTx(),
+      wallet,
+      config: defaultConfig,
+    })
+
+    expect(result).toMatchObject({
+      success: false,
+      errorCode: 'NETWORK_MISMATCH',
+    })
+    expect(server.simulateTransaction).not.toHaveBeenCalled()
+    expect(wallet.signTransaction).not.toHaveBeenCalled()
+  })
+
+  it('returns a typed network mismatch before manual restore account lookup or signing', async () => {
+    const wallet = makeWallet()
+    wallet.getNetwork = vi.fn().mockResolvedValue(Networks.PUBLIC)
+
+    const result = await restoreKeys({
+      server,
+      keys: [{} as xdr.LedgerKey],
+      wallet,
+      config: defaultConfig,
+    })
+
+    expect(result).toMatchObject({
+      success: false,
+      errorCode: 'NETWORK_MISMATCH',
+    })
+    expect(server.getAccount).not.toHaveBeenCalled()
+    expect(wallet.signTransaction).not.toHaveBeenCalled()
   })
 
   it('performs full restore flow when restore is needed', async () => {

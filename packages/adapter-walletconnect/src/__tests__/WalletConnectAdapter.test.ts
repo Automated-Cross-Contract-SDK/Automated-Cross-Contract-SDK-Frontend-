@@ -7,6 +7,10 @@ import {
   STELLAR_WC_METHODS,
   type WalletConnectSessionLike,
 } from '../index.js'
+import type { WalletAdapterEvent } from '@soroban-resurrect/sdk'
+import { registerWalletAdapterContract } from '../../../testing/src/index.js'
+
+vi.mock('@soroban-resurrect/sdk', async () => import('../../../testing/src/sdkTestModule.js'))
 
 const TESTNET = 'Test SDF Network ; September 2015'
 const PUBNET = 'Public Global Stellar Network ; September 2015'
@@ -54,6 +58,98 @@ describe('WalletConnectAdapter', () => {
     expect(await wallet.getPublicKey()).toBe(ADDR)
   })
 
+  it('reads the active account from the current session instead of caching it', async () => {
+    const session = makeSession()
+    const wallet = new WalletConnectAdapter({
+      client: { request: vi.fn() },
+      session,
+      networkPassphrase: TESTNET,
+    })
+    session.namespaces.stellar.accounts = [`${STELLAR_WC_CHAINS.testnet}:G${'Z'.repeat(55)}`]
+
+    expect(await wallet.getPublicKey()).toBe(`G${'Z'.repeat(55)}`)
+    expect(await wallet.getNetwork()).toBe(TESTNET)
+  })
+
+  it('reports account and connection changes and removes provider listeners idempotently', async () => {
+    const handlers = new Map<string, (payload: unknown) => void>()
+    const client = {
+      request: vi.fn(),
+      on: vi.fn((event: string, listener: (payload: unknown) => void) => {
+        handlers.set(event, listener)
+      }),
+      off: vi.fn((event: string) => {
+        handlers.delete(event)
+      }),
+    }
+    const wallet = new WalletConnectAdapter({
+      client,
+      session: makeSession(),
+      networkPassphrase: TESTNET,
+    })
+    const events: WalletAdapterEvent[] = []
+    const unsubscribe = wallet.subscribe((event) => events.push(event))
+    handlers.get('session_update')?.({
+      topic: 'topic-123',
+      params: {
+        namespaces: {
+          stellar: {
+            accounts: [`${STELLAR_WC_CHAINS.testnet}:G${'Z'.repeat(55)}`],
+            methods: [STELLAR_WC_METHODS.signXDR],
+            events: [],
+          },
+        },
+      },
+    })
+    expect(await wallet.getNetwork()).toBe(TESTNET)
+    const handleDelete = handlers.get('session_delete')
+    handleDelete?.({ topic: 'topic-123' })
+    expect(await wallet.isConnected()).toBe(false)
+    unsubscribe()
+    unsubscribe()
+    handleDelete?.({ topic: 'topic-123' })
+
+    expect(events).toEqual([
+      { type: 'accountChanged', publicKey: `G${'Z'.repeat(55)}` },
+      { type: 'accountChanged', publicKey: null },
+      { type: 'connectionChanged', connected: false },
+    ])
+    expect(client.off).toHaveBeenCalledTimes(2)
+    expect(handlers.size).toBe(0)
+  })
+
+  it('reports the updated session network for pre-signing validation', async () => {
+    const handlers = new Map<string, (payload: unknown) => void>()
+    const client = {
+      request: vi.fn(),
+      on: vi.fn((event: string, listener: (payload: unknown) => void) =>
+        handlers.set(event, listener),
+      ),
+      off: vi.fn(),
+    }
+    const wallet = new WalletConnectAdapter({
+      client,
+      session: makeSession(),
+      networkPassphrase: TESTNET,
+    })
+    wallet.subscribe(() => undefined)
+    handlers.get('session_update')?.({
+      topic: 'topic-123',
+      params: {
+        namespaces: {
+          stellar: {
+            accounts: [`${STELLAR_WC_CHAINS.public}:${ADDR}`],
+            methods: [STELLAR_WC_METHODS.signXDR],
+            events: [],
+          },
+        },
+      },
+    })
+
+    expect(await wallet.getNetwork()).toBe(PUBNET)
+    expect(await wallet.isConnected()).toBe(false)
+  })
+
   it('rejects a session whose accounts are on the wrong network', () => {
     expect(
       () =>
@@ -70,7 +166,11 @@ describe('WalletConnectAdapter', () => {
     session.namespaces.stellar.methods = []
     expect(
       () =>
-        new WalletConnectAdapter({ client: { request: vi.fn() }, session, networkPassphrase: TESTNET }),
+        new WalletConnectAdapter({
+          client: { request: vi.fn() },
+          session,
+          networkPassphrase: TESTNET,
+        }),
     ).toThrow(/stellar_signXDR/)
   })
 
@@ -102,5 +202,22 @@ describe('WalletConnectAdapter', () => {
       networkPassphrase: TESTNET,
     })
     await expect(wallet.signTransaction('x')).rejects.toThrow('WalletConnect: user rejected')
+  })
+
+  let contractRequest = vi.fn()
+  registerWalletAdapterContract((name, test) => it(name, test), {
+    createAdapter: () => {
+      contractRequest = vi.fn().mockResolvedValue({ signedXDR: 'AAAA-signed' })
+      return new WalletConnectAdapter({
+        client: { request: contractRequest },
+        session: makeSession(),
+        networkPassphrase: TESTNET,
+      })
+    },
+    publicKey: ADDR,
+    transactionXdr: 'AAAA-unsigned',
+    signedXdr: 'AAAA-signed',
+    networkPassphrase: TESTNET,
+    rejectSigning: () => contractRequest.mockRejectedValueOnce(new Error('User rejected')),
   })
 })

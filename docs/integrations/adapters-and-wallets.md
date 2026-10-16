@@ -12,20 +12,36 @@ and behaves exactly like a built-in one.
 
 ```ts
 interface WalletAdapter {
-  /** Stable identifier, usually a `KnownWallet` value. */
-  readonly id: string;
-  /** Human-readable name shown in the UI. */
-  readonly name: string;
-  /** Capabilities this adapter supports. */
-  readonly capabilities: WalletCapabilities;
-  /** Connect and return the active account. */
-  connect(): Promise<WalletAccount>;
-  /** Disconnect and release any transport/resources. */
-  disconnect(): Promise<void>;
-  /** Sign a transaction or message payload. */
-  sign(payload: SignPayload): Promise<SignedPayload>;
+  isConnected(): Promise<boolean>;
+  connect?(): Promise<StellarPublicKey | void>;
+  getPublicKey(): Promise<StellarPublicKey>;
+  signTransaction(
+    xdr: XdrBase64,
+    options?: { networkPassphrase?: string; network?: string },
+  ): Promise<XdrBase64>;
+  getNetwork?(): Promise<string>;
+  subscribe?(
+    listener: (event: WalletAdapterEvent) => void,
+  ): WalletAdapterUnsubscribe;
 }
 ```
+
+The SDK keeps `connect()` optional for compatibility. When `isConnected()` is
+false and an adapter implements `connect()`, SDK flows invoke that interactive
+step and use its returned public key when provided. Adapters should retrieve the
+account at call time rather than reuse an indefinitely cached key.
+
+When `getNetwork()` is available, the SDK compares its result with the
+configured `networkPassphrase` before simulation or signing. A mismatch returns
+`{ success: false, errorCode: 'NETWORK_MISMATCH' }`; no signing prompt is
+opened. Adapters that cannot query the selected wallet network may omit this
+optional method.
+
+Adapters may also expose an optional `subscribe(listener)` method that emits
+typed `accountChanged` and `connectionChanged` events. Its unsubscribe function
+must be safe to call more than once. The Freighter and WalletConnect adapters
+currently support provider-backed subscriptions; other adapters omit the
+method when their provider offers no reliable change notifications.
 
 ## The `createAdapter` factory
 

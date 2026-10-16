@@ -27,7 +27,11 @@ export class LobstrAdapter implements WalletAdapter {
   }
 
   async getPublicKey() {
-    return asStellarPublicKey(await lobstrGetPublicKey())
+    try {
+      return asStellarPublicKey(await lobstrGetPublicKey())
+    } catch (error) {
+      throw normalizeError(error)
+    }
   }
 
   async signTransaction(

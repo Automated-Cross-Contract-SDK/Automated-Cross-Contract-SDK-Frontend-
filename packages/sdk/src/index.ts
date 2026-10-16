@@ -24,6 +24,8 @@ export type { SorobanNetworkName, SorobanNetworkPreset } from './SorobanResurrec
 export type {
   SorobanResurrectConfig,
   WalletAdapter,
+  WalletAdapterEvent,
+  WalletAdapterUnsubscribe,
   WalletCapabilities,
   FeeBumpSponsor,
   FeeBumpConfig,
@@ -59,7 +61,7 @@ export { ResurrectError, RestoreFeeExceededError } from './errors.js'
 // ---------------------------------------------------------------------------
 // RPC abstraction layer (dependency injection / testing — see RpcClient.ts)
 // ---------------------------------------------------------------------------
-export type { ISorobanRpcClient } from './RpcClient.js'
+export type { ISorobanRpcClient, RpcResilienceOptions } from './RpcClient.js'
 export { SorobanRpcClient, createRpcClient } from './RpcClient.js'
 
 // ---------------------------------------------------------------------------
@@ -153,23 +155,6 @@ export type { TTLWatchOptions, TTLWatchHandle } from './TTLWatch.js'
 // Fee calculation (returned by SorobanResurrect.estimateRestoreCost)
 // ---------------------------------------------------------------------------
 export type { RestoreCostEstimate } from './feeCalculation.js'
-
-// ---------------------------------------------------------------------------
-// Network presets (used by SorobanResurrect.switchNetwork)
-// ---------------------------------------------------------------------------
-export type { SorobanNetworkName, SorobanNetworkPreset } from './constants.js'
-export { NETWORK_PRESETS } from './constants.js'
-
-// ---------------------------------------------------------------------------
-// RPC client abstraction (dependency injection / resilient transport)
-// ---------------------------------------------------------------------------
-export type { ISorobanRpcClient, RpcResilienceOptions } from './RpcClient.js'
-export {
-  SorobanRpcClient,
-  createRpcClient,
-  RpcTimeoutError,
-  RpcCircuitOpenError,
-} from './RpcClient.js'
 
 // ---------------------------------------------------------------------------
 // Transaction history (returned by SorobanResurrect.history / getHistory)
