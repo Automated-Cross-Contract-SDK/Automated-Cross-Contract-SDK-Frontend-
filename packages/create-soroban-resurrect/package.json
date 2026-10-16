@@ -1,6 +1,9 @@
 {
   "name": "create-soroban-resurrect",
   "version": "0.1.0",
+  "engines": {
+    "node": ">=20"
+  },
   "description": "Scaffold a Vite + React app wired to @soroban-resurrect/sdk",
   "keywords": [
     "soroban",
@@ -27,9 +30,6 @@
     "index.js",
     "template"
   ],
-  "engines": {
-    "node": ">=18"
-  },
   "scripts": {
     "typecheck": "tsc -p template/tsconfig.json"
   },

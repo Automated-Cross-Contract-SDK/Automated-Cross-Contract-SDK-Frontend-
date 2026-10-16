@@ -338,7 +338,7 @@ async function streamTransactionViaEvents(
   // SSE relies on browser-standard fetch/AbortController with a readable
   // stream body. Older Node runtimes (< 18) may lack these — degrade
   // gracefully to the polling fallback instead of throwing.
-  if (typeof fetch === 'undefined' || typeof AbortController === 'undefined') {
+  if (!isSSEEnvironmentSupported()) {
     return null
   }
 
