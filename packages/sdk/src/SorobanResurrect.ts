@@ -30,7 +30,14 @@ import {
 } from './TTLHelpers.js'
 import type { LedgerEntryTTLInfo, QueryLedgerTTLOptions, TTLQueryResult } from './TTLHelpers.js'
 import { NETWORK_PRESETS } from './constants.js'
-import { watchTTL, type TTLWatchHandle, type TTLWatchOptions } from './TTLWatch.js'
+import {
+  extendLedgerTTL,
+  watchTTL,
+  type ExtendLedgerTTLOptions,
+  type ExtendLedgerTTLResult,
+  type TTLWatchHandle,
+  type TTLWatchOptions,
+} from './TTLWatch.js'
 import type { SorobanNetworkName } from './constants.js'
 
 /**
@@ -63,7 +70,9 @@ const debug = createDebugger('core')
 
 export class SorobanResurrect {
   private _server: ISorobanRpcClient
-  private _config: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & { rpcClient: ISorobanRpcClient }
+  private _config: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & {
+    rpcClient: ISorobanRpcClient
+  }
 
   private readonly _stateMgr: SorobanResurrectStateManager
   private readonly _simulator: SorobanResurrectSimulator
@@ -140,7 +149,9 @@ export class SorobanResurrect {
   }
 
   /** Resolved configuration with defaults applied. Re-bound in place by {@link switchNetwork}. */
-  get config(): Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & { rpcClient: ISorobanRpcClient } {
+  get config(): Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & {
+    rpcClient: ISorobanRpcClient
+  } {
     return this._config
   }
 
@@ -629,7 +640,10 @@ export class SorobanResurrect {
     keys: xdr.LedgerKey[],
     opts: QueryLedgerTTLOptions = {},
   ): Promise<TTLQueryResult> {
-    const cfg = this._config as { archiveDetectionChunkSize?: number; archiveDetectionConcurrency?: number }
+    const cfg = this._config as {
+      archiveDetectionChunkSize?: number
+      archiveDetectionConcurrency?: number
+    }
     return queryLedgerTTL(this._server, keys, {
       chunkSize: cfg.archiveDetectionChunkSize,
       concurrency: cfg.archiveDetectionConcurrency,
@@ -672,5 +686,17 @@ export class SorobanResurrect {
     ledgersThreshold = 100_000,
   ): Promise<LedgerEntryTTLInfo[]> {
     return getExpiringSoonEntries(this._server, keys, ledgersThreshold)
+  }
+
+  /**
+   * Estimates and explicitly confirms a persistent-entry TTL extension before
+   * requesting a wallet signature. The callback receives the fee estimate and
+   * can decline without any signing or submission.
+   */
+  async extendLedgerTTL(
+    keys: xdr.LedgerKey[],
+    options: ExtendLedgerTTLOptions,
+  ): Promise<ExtendLedgerTTLResult> {
+    return extendLedgerTTL(this._server, this._config, keys, options)
   }
 }
