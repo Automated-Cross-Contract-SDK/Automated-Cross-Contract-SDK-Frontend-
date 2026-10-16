@@ -16,9 +16,7 @@ describe('serializeLedgerKey', () => {
   it('returns canonical base64 XDR for contract-data and contract-code keys', () => {
     const keys = [
       contractDataKey(),
-      xdr.LedgerKey.contractCode(
-        new xdr.LedgerKeyContractCode({ hash: Buffer.alloc(32, 2) }),
-      ),
+      xdr.LedgerKey.contractCode(new xdr.LedgerKeyContractCode({ hash: Buffer.alloc(32, 2) })),
     ]
 
     for (const key of keys) {
