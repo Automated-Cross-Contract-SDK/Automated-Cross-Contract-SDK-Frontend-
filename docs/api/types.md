@@ -274,6 +274,25 @@ const myWallet: WalletAdapter = {
 }
 ```
 
+## Stable ledger-key serialization
+
+Use `serializeLedgerKey` to obtain a deterministic base64 XDR identity for a
+ledger key. The result can be used as a cache key or included in diagnostics;
+it is XDR, not JSON, and should be decoded with the Stellar SDK when needed.
+
+```typescript
+import { xdr } from '@stellar/stellar-sdk'
+import { serializeLedgerKey } from '@soroban-resurrect/sdk'
+
+const cacheKey = serializeLedgerKey(ledgerKey)
+const restoredKey = xdr.LedgerKey.fromXDR(cacheKey, 'base64')
+```
+
+The serializer accepts any Stellar `LedgerKey` supported by the SDK, including
+`contractData` and `contractCode`. The encoded value is stable for that key
+under the SDK's XDR format; applications persisting it across Stellar SDK or
+protocol upgrades should retain that compatibility consideration.
+
 ## Contract and account scanning
 
 These APIs answer "what in my contract is about to expire?" **without submitting a
