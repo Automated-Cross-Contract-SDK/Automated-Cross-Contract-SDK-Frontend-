@@ -69,6 +69,31 @@ describe('AlbedoAdapter', () => {
   it('propagates rejection from the Albedo intent', async () => {
     mockTx.mockRejectedValueOnce(new Error('User rejected'))
     const adapter = new AlbedoAdapter()
-    await expect(adapter.signTransaction('AAAAtx')).rejects.toThrow('User rejected')
+    await expect(adapter.signTransaction('AAAAtx')).rejects.toMatchObject({
+      name: 'WalletError',
+      code: 'USER_REJECTED',
+      message: 'Albedo: User rejected',
+    })
+  })
+
+  it('maps connection failures to structured wallet errors', async () => {
+    mockPublicKey.mockRejectedValueOnce(new Error('wallet unavailable'))
+    const adapter = new AlbedoAdapter()
+
+    await expect(adapter.getPublicKey()).rejects.toMatchObject({
+      name: 'WalletError',
+      code: 'NOT_CONNECTED',
+    })
+    expect(await adapter.isConnected()).toBe(false)
+  })
+
+  it('rejects a signing response without signed envelope XDR', async () => {
+    mockTx.mockResolvedValueOnce({ signed_envelope_xdr: '' } as never)
+    const adapter = new AlbedoAdapter()
+
+    await expect(adapter.signTransaction('AAAAtx')).rejects.toMatchObject({
+      code: 'UNKNOWN',
+      message: 'Albedo: wallet returned no signed transaction XDR',
+    })
   })
 })

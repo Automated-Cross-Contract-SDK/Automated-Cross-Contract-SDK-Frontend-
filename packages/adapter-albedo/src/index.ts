@@ -27,6 +27,9 @@ export class AlbedoAdapter implements WalletAdapter {
   async getPublicKey() {
     try {
       const result = await albedo.publicKey({})
+      if (!result || typeof result.pubkey !== 'string' || result.pubkey.length === 0) {
+        throw new WalletError('NOT_CONNECTED', 'Albedo: wallet returned no public key')
+      }
       this.publicKey = result.pubkey
       return asStellarPublicKey(result.pubkey)
     } catch (error) {
@@ -42,6 +45,13 @@ export class AlbedoAdapter implements WalletAdapter {
         networkPassphrase: opts?.networkPassphrase,
         submit: false,
       })
+      if (
+        !result ||
+        typeof result.signed_envelope_xdr !== 'string' ||
+        result.signed_envelope_xdr.length === 0
+      ) {
+        throw new WalletError('UNKNOWN', 'Albedo: wallet returned no signed transaction XDR')
+      }
       return asXdrBase64(result.signed_envelope_xdr)
     } catch (error) {
       throw normalizeError(error)
@@ -50,9 +60,15 @@ export class AlbedoAdapter implements WalletAdapter {
 }
 
 function normalizeError(error: unknown): WalletError {
+  if (error instanceof WalletError) return error
   const message = error instanceof Error ? error.message : String(error)
-  const code = /reject|declin|cancel|denied/.test(message.toLowerCase())
+  const lower = message.toLowerCase()
+  const code = /reject|declin|cancel|denied/.test(lower)
     ? 'USER_REJECTED'
-    : 'UNKNOWN'
+    : /network/.test(lower)
+      ? 'NETWORK_MISMATCH'
+      : /not installed|unavailable|not connected/.test(lower)
+        ? 'NOT_CONNECTED'
+        : 'UNKNOWN'
   return new WalletError(code, `Albedo: ${message}`, error)
 }
