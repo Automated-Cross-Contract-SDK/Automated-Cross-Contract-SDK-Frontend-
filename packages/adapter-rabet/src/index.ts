@@ -1,4 +1,9 @@
-import type { WalletAdapter, WalletCapabilities } from '@soroban-resurrect/sdk'
+import {
+  WalletError,
+  type WalletAdapter,
+  type WalletCapabilities,
+  type WalletErrorCode,
+} from '@soroban-resurrect/sdk'
 import { asStellarPublicKey, asXdrBase64 } from '@soroban-resurrect/sdk'
 
 /**
@@ -25,22 +30,53 @@ declare global {
 const RABET_TESTNET = 'testnet'
 const RABET_PUBLIC = 'mainnet'
 
-/** Maps a Stellar network passphrase to Rabet's network identifier. */
-function toRabetNetwork(networkPassphrase?: string): string {
-  if (!networkPassphrase) return RABET_TESTNET
-  return networkPassphrase.includes('Public Global Stellar Network')
-    ? RABET_PUBLIC
-    : RABET_TESTNET
+/** Maps SDK network options to Rabet's supported network identifiers. */
+function toRabetNetwork(network?: string, networkPassphrase?: string): string {
+  const requestedNetwork =
+    network === 'testnet'
+      ? RABET_TESTNET
+      : network === 'public' || network === 'mainnet'
+        ? RABET_PUBLIC
+        : undefined
+  if (network && !requestedNetwork) {
+    throw new WalletError('NETWORK_MISMATCH', `Rabet: unsupported network "${network}"`)
+  }
+  const passphraseNetwork = networkPassphrase
+    ? networkPassphrase.includes('Public Global Stellar Network')
+      ? RABET_PUBLIC
+      : networkPassphrase.includes('Test SDF Network')
+        ? RABET_TESTNET
+        : undefined
+    : undefined
+  if (networkPassphrase && !passphraseNetwork) {
+    throw new WalletError(
+      'NETWORK_MISMATCH',
+      'Rabet: unsupported network passphrase; use Stellar testnet or public network',
+    )
+  }
+  if (requestedNetwork && passphraseNetwork && requestedNetwork !== passphraseNetwork) {
+    throw new WalletError('NETWORK_MISMATCH', 'Rabet: network and networkPassphrase disagree')
+  }
+  return requestedNetwork ?? passphraseNetwork ?? RABET_TESTNET
 }
 
-/** Normalizes an unknown thrown value into an `Error` with a `Rabet:` prefix. */
-function toRabetError(err: unknown): Error {
-  if (err instanceof Error) return new Error(`Rabet: ${err.message}`)
-  if (typeof err === 'string') return new Error(`Rabet: ${err}`)
-  if (err && typeof err === 'object' && 'message' in err) {
-    return new Error(`Rabet: ${String((err as { message: unknown }).message)}`)
-  }
-  return new Error('Rabet: unknown error')
+function toRabetError(err: unknown, fallback: WalletErrorCode = 'UNKNOWN'): WalletError {
+  if (err instanceof WalletError) return err
+  const message =
+    err instanceof Error
+      ? err.message
+      : err && typeof err === 'object' && 'message' in err
+        ? String(err.message)
+        : String(err)
+  const lower = message.toLowerCase()
+  const code = /reject|declin|cancel|denied/.test(lower)
+    ? 'USER_REJECTED'
+    : /network/.test(lower)
+      ? 'NETWORK_MISMATCH'
+      : /not installed|unavailable|not connected|no account/.test(lower)
+        ? 'NOT_CONNECTED'
+        : fallback
+  return new WalletError(code, `Rabet: ${message}`, err)
 }
 
 /**
@@ -91,7 +127,8 @@ export class RabetAdapter implements WalletAdapter {
   /** Returns the injected Rabet API or throws a helpful error if it is missing. */
   private getApi(): RabetApi {
     if (!this.rabet) {
-      throw new Error(
+      throw new WalletError(
+        'NOT_CONNECTED',
         'Rabet: extension not found. Install Rabet (https://rabet.io) or pass a ' +
           '`rabet` instance to the RabetAdapter constructor.',
       )
@@ -101,24 +138,37 @@ export class RabetAdapter implements WalletAdapter {
 
   async isConnected(): Promise<boolean> {
     if (!this.rabet) return false
-    if (this.publicKey !== undefined) return true
-    try {
-      if (typeof this.rabet.isUnlocked === 'function') {
-        return Boolean(await this.rabet.isUnlocked())
+    if (typeof this.rabet.isUnlocked === 'function') {
+      try {
+        const unlocked = Boolean(await this.rabet.isUnlocked())
+        if (!unlocked) this.publicKey = undefined
+        return unlocked
+      } catch (err) {
+        throw toRabetError(err, 'NOT_CONNECTED')
       }
-    } catch {
-      return false
     }
-    return false
+    return this.publicKey !== undefined
+  }
+
+  async disconnect(): Promise<void> {
+    this.publicKey = undefined
+    try {
+      await this.rabet?.disconnect?.()
+    } catch (err) {
+      throw toRabetError(err)
+    }
   }
 
   async getPublicKey() {
     try {
       const result = await this.getApi().connect()
+      if (!result || typeof result.publicKey !== 'string' || result.publicKey.length === 0) {
+        throw new WalletError('NOT_CONNECTED', 'Rabet: connection returned no public key')
+      }
       this.publicKey = result.publicKey
       return asStellarPublicKey(result.publicKey)
     } catch (err) {
-      throw toRabetError(err)
+      throw toRabetError(err, 'NOT_CONNECTED')
     }
   }
 
@@ -126,8 +176,12 @@ export class RabetAdapter implements WalletAdapter {
     tx: string,
     opts?: { networkPassphrase?: string; network?: string },
   ) {
+    const api = this.getApi()
     try {
-      const result = await this.getApi().sign(tx, toRabetNetwork(opts?.networkPassphrase))
+      const result = await api.sign(tx, toRabetNetwork(opts?.network, opts?.networkPassphrase))
+      if (!result || typeof result.xdr !== 'string' || result.xdr.length === 0) {
+        throw new WalletError('UNKNOWN', 'Rabet: wallet returned no signed transaction XDR')
+      }
       return asXdrBase64(result.xdr)
     } catch (err) {
       throw toRabetError(err)
