@@ -17,6 +17,7 @@ interface SorobanResurrectConfig {
   networkPassphrase?: string // default: resolved from rpcUrl, else Testnet
   pollIntervalMs?: number // default: 1000
   pollTimeoutMs?: number // default: 60000
+  runtime?: SdkRuntime // default: system clock and timers
   restoreFeeMultiplier?: number // default: 3 — see "Choosing restoreFeeMultiplier" below
   maxRestoreFeeStroops?: FeeStroops | string // plain stroop strings are branded at the config boundary
   maxSequenceRetries?: number // default: 3 — retries when a restore tx fails on sequence number
@@ -32,12 +33,105 @@ interface SorobanResurrectConfig {
 | `networkPassphrase`        | Network passphrase (defaults to Testnet).                                      |
 | `pollIntervalMs`           | Polling interval in ms when waiting for transaction confirmation.              |
 | `pollTimeoutMs`             | Timeout in ms when waiting for transaction confirmation.                       |
+| `runtime`                  | Injectable clock, random source, and timers for deterministic TTL/polling behavior. |
 | `restoreFeeMultiplier`     | Multiplier applied to `minResourceFee` when building a restore transaction.    |
 | `maxRestoreFeeStroops`     | Upper bound on the restore fee. Accepts a branded `FeeStroops` or a plain numeric stroop string, which is branded at the config boundary. |
 | `maxSequenceRetries`       | Number of times a restore transaction is retried after a sequence-number failure. |
 | `archiveDetectionMethod`   | Method for detecting archived keys: `'simulation'` (default) or `'direct'`.    |
 | `archiveDetectionChunkSize` | Ledger keys per `getLedgerEntries` request during `'direct'` detection.       |
 | `archiveDetectionConcurrency` | Chunk requests kept in flight at once during `'direct'` detection.          |
+
+### `SdkRuntime`
+
+Pass one runtime object to `SorobanResurrectConfig.runtime` to control wall
+time, poll jitter, one-shot delays, and TTL-watch intervals. Omit it in normal
+applications to use the host's `Date`, `Math.random`, and global timers.
+
+```typescript
+interface SdkRuntime {
+  now(): number
+  random(): number
+  setTimeout(callback: () => void, delayMs: number): ReturnType<typeof globalThis.setTimeout>
+  clearTimeout(timer: ReturnType<typeof globalThis.setTimeout>): void
+  setInterval(callback: () => void, intervalMs: number): ReturnType<typeof globalThis.setInterval>
+  clearInterval(timer: ReturnType<typeof globalThis.setInterval>): void
+}
+```
+
+```typescript
+const runtime: SdkRuntime = {
+  now: () => testClock.now,
+  random: () => 0,
+  setTimeout: (callback, delay) => testClock.setTimeout(callback, delay),
+  clearTimeout: (timer) => testClock.clearTimeout(timer),
+  setInterval: (callback, interval) => testClock.setInterval(callback, interval),
+  clearInterval: (timer) => testClock.clearInterval(timer),
+}
+
+const resurrect = new SorobanResurrect({ rpcUrl, runtime })
+```
+
+## Error codes and failure results
+
+Workflow failures are returned as a discriminated `ResurrectResult`. Every
+failure has `success: false`, an `error` message, and a stable `errorCode`;
+successful results have `success: true` and no failure-only fields.
+
+```typescript
+import { isResurrectFailure } from '@soroban-resurrect/sdk'
+
+const result = await resurrect.submitWithRestore({ transaction, wallet })
+if (isResurrectFailure(result)) {
+  switch (result.errorCode) {
+    case 'WALLET_NOT_CONNECTED':
+      showConnectWallet()
+      break
+    case 'SIGNING_FAILED':
+      showSigningError(result.error)
+      break
+    case 'TIMEOUT':
+    case 'RPC_TIMEOUT':
+      offerRetry()
+      break
+    default:
+      showError(result.error)
+  }
+}
+```
+
+| Code | Meaning |
+| --- | --- |
+| `NETWORK_ERROR` | RPC transport or configured wallet network failed. |
+| `RPC_TIMEOUT` | An individual RPC call exceeded its timeout. |
+| `TIMEOUT` | Transaction polling did not reach a terminal status before its deadline. |
+| `SIMULATION_FAILED` | Soroban transaction simulation returned an error. |
+| `SIGNING_FAILED` | A wallet rejected or failed a signing request. |
+| `WALLET_NOT_CONNECTED` | The wallet is disconnected. |
+| `RESTORE_TX_PARSE_FAILED` / `RESTORE_TX_FAILED` | Restore XDR parsing or on-chain restore failed. |
+| `ORIGINAL_TX_PARSE_FAILED` / `ORIGINAL_TX_FAILED` | Original XDR parsing or on-chain submission failed. |
+| `RESTORE_FEE_CAP_EXCEEDED` | The restore fee exceeded `maxRestoreFeeStroops`. |
+| `UNSUPPORTED_WALLET_CAPABILITY` | The wallet lacks a capability required by the selected workflow. |
+| `INVALID_INPUT` | Caller-provided configuration or operation input is invalid. |
+| `UNEXPECTED_SIMULATION_RESPONSE` | The RPC returned an unsupported simulation response. |
+| `UNKNOWN_ERROR` | An otherwise unclassified exception occurred. |
+
+Exception-based APIs throw `ResurrectError` (with `code` and `message`) or a
+category-specific subclass such as `NetworkError`, `SigningError`,
+`ResurrectTimeoutError`, and `InvalidInputError`. `ResurrectErrorCode` is also
+exported as a runtime constant object and as a TypeScript union. Existing code
+that reads `success`, `error`, or `errorCode` continues to work; failure
+`errorCode` is now required in the type system so consumers can switch without
+an optional-field check.
+
+**Migration note:** code that constructs synthetic `ResurrectResult` failures
+must now provide an `errorCode`, for example `errorCode: 'UNKNOWN_ERROR'`.
+Results returned by the SDK already include this field.
+
+`isResurrectSuccess(result)` and `isResurrectFailure(result)` are type guards;
+`matchResurrectResult(result, { success, failure })` handles both branches in
+one expression. The package also exports the generic `Result<T, E>` and
+`Option<T>` helpers (`ok`, `err`, `isOk`, `isErr`, `some`, `none`, `isSome`,
+and `isNone`) for callers who prefer explicit success/failure values.
 
 ## `SorobanResurrectNetwork`
 

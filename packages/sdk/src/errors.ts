@@ -20,62 +20,56 @@
  * }
  * ```
  */
+export const ResurrectErrorCode = {
+  /** RPC or transport request failed. */
+  NETWORK_ERROR: 'NETWORK_ERROR',
+  /** Soroban RPC simulation failed. */
+  SIMULATION_FAILED: 'SIMULATION_FAILED',
+  /** Wallet could not sign a transaction or authorization entry. */
+  SIGNING_FAILED: 'SIGNING_FAILED',
+  /** A transaction did not reach a terminal state before its deadline. */
+  TIMEOUT: 'TIMEOUT',
+  /** Caller-provided configuration or operation input is invalid. */
+  INVALID_INPUT: 'INVALID_INPUT',
+  /** RPC request exceeded its configured deadline. */
+  RPC_TIMEOUT: 'RPC_TIMEOUT',
+  /** The wallet adapter returned `false` from `isConnected()`. */
+  WALLET_NOT_CONNECTED: 'WALLET_NOT_CONNECTED',
+  /** The signed restore transaction could not be parsed from XDR. */
+  RESTORE_TX_PARSE_FAILED: 'RESTORE_TX_PARSE_FAILED',
+  /** The on-chain restore transaction failed. */
+  RESTORE_TX_FAILED: 'RESTORE_TX_FAILED',
+  /** The configured restore fee cap was exceeded. */
+  RESTORE_FEE_CAP_EXCEEDED: 'RESTORE_FEE_CAP_EXCEEDED',
+  /** The signed original transaction could not be parsed from XDR. */
+  ORIGINAL_TX_PARSE_FAILED: 'ORIGINAL_TX_PARSE_FAILED',
+  /** The on-chain original transaction failed. */
+  ORIGINAL_TX_FAILED: 'ORIGINAL_TX_FAILED',
+  /** The simulation response did not match a supported response shape. */
+  UNEXPECTED_SIMULATION_RESPONSE: 'UNEXPECTED_SIMULATION_RESPONSE',
+  /** The wallet does not support a capability required by the workflow. */
+  UNSUPPORTED_WALLET_CAPABILITY: 'UNSUPPORTED_WALLET_CAPABILITY',
+  /** An unexpected exception was thrown during the workflow. */
+  UNKNOWN_ERROR: 'UNKNOWN_ERROR',
+} as const
+
+/** Stable, machine-readable codes for SDK workflow and validation failures. */
 export type ResurrectErrorCode =
-  /**
-   * The wallet adapter returned `false` from `isConnected()`.
-   * The user must connect their wallet before retrying.
-   */
-  | 'WALLET_NOT_CONNECTED'
+  (typeof ResurrectErrorCode)[keyof typeof ResurrectErrorCode]
 
-  /**
-   * The Soroban RPC simulation returned an error response.
-   * Check `result.error` for the underlying RPC error message.
-   */
-  | 'SIMULATION_FAILED'
-
-  /**
-   * The restore transaction was signed but could not be parsed from XDR.
-   * This is usually a wallet adapter bug or a network passphrase mismatch.
-   */
-  | 'RESTORE_TX_PARSE_FAILED'
-
-  /**
-   * The restore transaction was submitted but the on-chain result was
-   * `FAILED`. Check `result.restoreTxHash` to inspect the transaction.
-   */
-  | 'RESTORE_TX_FAILED'
-
-  /**
-   * The original transaction was signed but could not be parsed from XDR
-   * after the restore step. Usually a wallet adapter bug.
-   */
-  | 'ORIGINAL_TX_PARSE_FAILED'
-
-  /**
-   * The submitted original transaction did not reach `SUCCESS` status
-   * within the polling timeout.
-   */
-  | 'ORIGINAL_TX_FAILED'
-
-  /**
-   * The simulation response was not a recognised type (not success, error,
-   * or restore). This indicates a Soroban RPC API change or an SDK bug.
-   */
-  | 'UNEXPECTED_SIMULATION_RESPONSE'
-
-  /**
-   * The connected wallet declared that it does not support a required
-   * capability (e.g. `capabilities.feeBump === false` or
-   * `capabilities.signAuthEntry === false`). The caller should surface a
-   * "wallet not supported" message rather than a generic failure.
-   */
-  | 'UNSUPPORTED_WALLET_CAPABILITY'
-
-  /**
-   * An unexpected JavaScript exception was thrown during the workflow.
-   * Check `result.error` for the exception message.
-   */
-  | 'UNKNOWN_ERROR'
+/** Returns a stable code for a thrown SDK error, falling back to UNKNOWN_ERROR. */
+export function getResurrectErrorCode(error: unknown): ResurrectErrorCode {
+  if (error instanceof ResurrectError) return error.code
+  if (error !== null && typeof error === 'object' && 'code' in error) {
+    const code = error.code
+    if (typeof code === 'string' && Object.values(ResurrectErrorCode).includes(code as ResurrectErrorCode)) {
+      return code as ResurrectErrorCode
+    }
+    if (code === 'NETWORK_MISMATCH') return ResurrectErrorCode.NETWORK_ERROR
+    if (code === 'USER_REJECTED' || code === 'NOT_CONNECTED') return ResurrectErrorCode.SIGNING_FAILED
+  }
+  return ResurrectErrorCode.UNKNOWN_ERROR
+}
 
 /**
  * Structured error thrown by SDK methods that use exception-based error
@@ -105,6 +99,67 @@ export class ResurrectError extends Error {
     if (Error.captureStackTrace) {
       Error.captureStackTrace(this, ResurrectError)
     }
+  }
+}
+
+/** Category-specific error carrying the same stable code used by result values. */
+export class NetworkError extends ResurrectError {
+  readonly originalError: unknown
+
+  constructor(message: string, originalError?: unknown) {
+    super(ResurrectErrorCode.NETWORK_ERROR, message)
+    this.name = 'NetworkError'
+    this.originalError = originalError
+  }
+}
+
+/** Error raised when transaction simulation cannot complete successfully. */
+export class SimulationError extends ResurrectError {
+  constructor(message: string) {
+    super(ResurrectErrorCode.SIMULATION_FAILED, message)
+    this.name = 'SimulationError'
+  }
+}
+
+/** Error raised when a wallet refuses or fails to sign. */
+export class SigningError extends ResurrectError {
+  constructor(message: string) {
+    super(ResurrectErrorCode.SIGNING_FAILED, message)
+    this.name = 'SigningError'
+  }
+}
+
+/** Converts a rejected wallet or sponsor signing operation to `SIGNING_FAILED`. */
+export async function wrapSigningError<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation()
+  } catch (error) {
+    if (error instanceof ResurrectError) throw error
+    throw new SigningError(error instanceof Error ? error.message : String(error))
+  }
+}
+
+/** Error raised when a restore operation fails outside on-chain failure results. */
+export class RestoreError extends ResurrectError {
+  constructor(message: string) {
+    super(ResurrectErrorCode.RESTORE_TX_FAILED, message)
+    this.name = 'RestoreError'
+  }
+}
+
+/** Error raised when a polling operation reaches its configured deadline. */
+export class ResurrectTimeoutError extends ResurrectError {
+  constructor(message: string) {
+    super(ResurrectErrorCode.TIMEOUT, message)
+    this.name = 'ResurrectTimeoutError'
+  }
+}
+
+/** Error raised when caller-provided configuration or operation input is invalid. */
+export class InvalidInputError extends ResurrectError {
+  constructor(message: string) {
+    super(ResurrectErrorCode.INVALID_INPUT, message)
+    this.name = 'InvalidInputError'
   }
 }
 

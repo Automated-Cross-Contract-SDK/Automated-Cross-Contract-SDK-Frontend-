@@ -3,6 +3,8 @@ import { ArchivedLedgerEntry } from './types.js'
 import type { ISorobanRpcClient } from './RpcClient.js'
 import { asXdrBase64, type XdrBase64 } from './branded-types.js'
 import { fetchLedgerEntriesChunked } from './ledgerChunks.js'
+import type { SdkRuntime } from './types.js'
+import { SYSTEM_RUNTIME } from './runtime.js'
 
 /** Default window (ms) during which a fetched latest-ledger sequence is reused. */
 export const LATEST_LEDGER_CACHE_MS = 1000
@@ -17,9 +19,14 @@ export interface QueryLedgerTTLOptions {
   chunkSize?: number
   /** Maximum chunk requests in flight. */
   concurrency?: number
+  /** Runtime used for cache timestamps and query metadata. */
+  runtime?: SdkRuntime
 }
 
-const latestLedgerCache = new WeakMap<ISorobanRpcClient, { at: number; sequence: Promise<number> }>()
+const latestLedgerCache = new WeakMap<
+  ISorobanRpcClient,
+  { at: number; sequence: Promise<number>; runtime: SdkRuntime }
+>()
 
 /**
  * Returns the latest ledger sequence, sharing one in-flight/cached request per
@@ -28,12 +35,15 @@ const latestLedgerCache = new WeakMap<ISorobanRpcClient, { at: number; sequence:
 export function getCachedLatestLedger(
   server: ISorobanRpcClient,
   cacheMs: number = LATEST_LEDGER_CACHE_MS,
+  runtime: SdkRuntime = SYSTEM_RUNTIME,
 ): Promise<number> {
-  const now = Date.now()
+  const now = runtime.now()
   const hit = latestLedgerCache.get(server)
-  if (hit && cacheMs > 0 && now - hit.at < cacheMs) return hit.sequence
+  if (hit && hit.runtime === runtime && cacheMs > 0 && now - hit.at < cacheMs) {
+    return hit.sequence
+  }
   const sequence = server.getLatestLedger().then((r) => r.sequence)
-  latestLedgerCache.set(server, { at: now, sequence })
+  latestLedgerCache.set(server, { at: now, sequence, runtime })
   sequence.catch(() => latestLedgerCache.delete(server))
   return sequence
 }
@@ -179,10 +189,11 @@ export async function queryLedgerTTL(
   keys: xdr.LedgerKey[],
   opts: QueryLedgerTTLOptions = {},
 ): Promise<TTLQueryResult> {
-  const queriedAt = Date.now()
+  const runtime = opts.runtime ?? SYSTEM_RUNTIME
+  const queriedAt = runtime.now()
 
   const currentLedger =
-    opts.currentLedger ?? (await getCachedLatestLedger(server, opts.latestLedgerCacheMs))
+    opts.currentLedger ?? (await getCachedLatestLedger(server, opts.latestLedgerCacheMs, runtime))
 
   // Build a map from keyBase64 → LedgerEntryTTLInfo for fast lookup
   const infoMap = new Map<string, LedgerEntryTTLInfo>()
@@ -228,8 +239,9 @@ export async function queryLedgerTTL(
 export async function queryLedgerEntryTTL(
   server: ISorobanRpcClient,
   key: xdr.LedgerKey,
+  opts: QueryLedgerTTLOptions = {},
 ): Promise<LedgerEntryTTLInfo> {
-  const result = await queryLedgerTTL(server, [key])
+  const result = await queryLedgerTTL(server, [key], opts)
   return result.entries[0]
 }
 
@@ -246,8 +258,9 @@ export async function getExpiringSoonEntries(
   server: ISorobanRpcClient,
   keys: xdr.LedgerKey[],
   ledgersThreshold: number,
+  opts: QueryLedgerTTLOptions = {},
 ): Promise<LedgerEntryTTLInfo[]> {
-  const result = await queryLedgerTTL(server, keys)
+  const result = await queryLedgerTTL(server, keys, opts)
   return result.entries.filter((entry) => entry.isArchived || entry.ttlLedgers <= ledgersThreshold)
 }
 
@@ -263,8 +276,9 @@ export async function getExpiringSoonEntries(
 export async function getArchivedEntries(
   server: ISorobanRpcClient,
   keys: xdr.LedgerKey[],
+  opts: QueryLedgerTTLOptions = {},
 ): Promise<ArchivedLedgerEntry[]> {
-  const result = await queryLedgerTTL(server, keys)
+  const result = await queryLedgerTTL(server, keys, opts)
   return result.entries
     .filter((entry) => entry.isArchived)
     .map((entry) => {

@@ -2,6 +2,7 @@ import { rpc, Transaction, xdr } from '@stellar/stellar-sdk'
 import type { ISorobanRpcClient } from './RpcClient.js'
 import type {
   SorobanResurrectConfig,
+  ResolvedSorobanResurrectConfig,
   WalletAdapter,
   RestoreState,
   RestoreStateInfo,
@@ -63,7 +64,7 @@ const debug = createDebugger('core')
 
 export class SorobanResurrect {
   private _server: ISorobanRpcClient
-  private _config: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & { rpcClient: ISorobanRpcClient }
+  private _config: ResolvedSorobanResurrectConfig
 
   private readonly _stateMgr: SorobanResurrectStateManager
   private readonly _simulator: SorobanResurrectSimulator
@@ -140,7 +141,7 @@ export class SorobanResurrect {
   }
 
   /** Resolved configuration with defaults applied. Re-bound in place by {@link switchNetwork}. */
-  get config(): Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & { rpcClient: ISorobanRpcClient } {
+  get config(): ResolvedSorobanResurrectConfig {
     return this._config
   }
 
@@ -320,7 +321,7 @@ export class SorobanResurrect {
   watchTTL(keys: xdr.LedgerKey[], opts: TTLWatchOptions = {}): TTLWatchHandle {
     const handle = watchTTL(
       this._server,
-      this._config as unknown as Required<SorobanResurrectConfig>,
+      this._config,
       this._stateMgr.emitter as never,
       keys,
       opts,
@@ -631,9 +632,10 @@ export class SorobanResurrect {
   ): Promise<TTLQueryResult> {
     const cfg = this._config as { archiveDetectionChunkSize?: number; archiveDetectionConcurrency?: number }
     return queryLedgerTTL(this._server, keys, {
-      chunkSize: cfg.archiveDetectionChunkSize,
-      concurrency: cfg.archiveDetectionConcurrency,
       ...opts,
+      chunkSize: opts.chunkSize ?? cfg.archiveDetectionChunkSize,
+      concurrency: opts.concurrency ?? cfg.archiveDetectionConcurrency,
+      runtime: opts.runtime ?? this._config.runtime,
     })
   }
 
@@ -649,8 +651,14 @@ export class SorobanResurrect {
    * if (info.ttlLedgers < 10_000) console.warn('Entry expiring soon!')
    * ```
    */
-  async queryLedgerEntryTTL(key: xdr.LedgerKey): Promise<LedgerEntryTTLInfo> {
-    return queryLedgerEntryTTL(this._server, key)
+  async queryLedgerEntryTTL(
+    key: xdr.LedgerKey,
+    opts: QueryLedgerTTLOptions = {},
+  ): Promise<LedgerEntryTTLInfo> {
+    return queryLedgerEntryTTL(this._server, key, {
+      ...opts,
+      runtime: opts.runtime ?? this._config.runtime,
+    })
   }
 
   /**
@@ -670,7 +678,11 @@ export class SorobanResurrect {
   async getExpiringSoonEntries(
     keys: xdr.LedgerKey[],
     ledgersThreshold = 100_000,
+    opts: QueryLedgerTTLOptions = {},
   ): Promise<LedgerEntryTTLInfo[]> {
-    return getExpiringSoonEntries(this._server, keys, ledgersThreshold)
+    return getExpiringSoonEntries(this._server, keys, ledgersThreshold, {
+      ...opts,
+      runtime: opts.runtime ?? this._config.runtime,
+    })
   }
 }

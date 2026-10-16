@@ -8,7 +8,13 @@ import {
   SorobanDataBuilder,
 } from '@stellar/stellar-sdk'
 import type { ISorobanRpcClient } from './RpcClient.js'
-import type { SorobanResurrectConfig, WalletAdapter, SorobanResurrectEvents } from './types.js'
+import type {
+  ResolvedSorobanResurrectConfig,
+  WalletAdapter,
+  SorobanResurrectEvents,
+} from './types.js'
+import type { SdkRuntime } from './types.js'
+import { SYSTEM_RUNTIME } from './runtime.js'
 import type { TypedEventEmitter } from './EventEmitter.js'
 import { getExpiringSoonEntries, type LedgerEntryTTLInfo } from './TTLHelpers.js'
 import { calculateRestoreFee } from './feeCalculation.js'
@@ -55,11 +61,12 @@ async function waitForTerminalStatus(
   hash: string,
   pollIntervalMs: number,
   pollTimeoutMs: number,
+  runtime: SdkRuntime,
 ): Promise<rpc.Api.GetTransactionResponse> {
-  const startTime = Date.now()
+  const startTime = runtime.now()
   let attempt = 0
 
-  while (Date.now() - startTime < pollTimeoutMs) {
+  while (runtime.now() - startTime < pollTimeoutMs) {
     const response = await server.getTransaction(hash)
     if (
       response.status === rpc.Api.GetTransactionStatus.SUCCESS ||
@@ -70,8 +77,8 @@ async function waitForTerminalStatus(
     attempt++
     const exponentialDelay = 100 * Math.pow(2, attempt)
     const delay = Math.min(exponentialDelay, pollIntervalMs)
-    const jitter = delay * (0.5 + Math.random() * 0.5)
-    await new Promise((resolve) => setTimeout(resolve, jitter))
+    const jitter = delay * (0.5 + runtime.random() * 0.5)
+    await new Promise<void>((resolve) => runtime.setTimeout(resolve, jitter))
   }
 
   throw new Error(`Transaction ${hash} did not complete within ${pollTimeoutMs}ms`)
@@ -90,7 +97,7 @@ async function buildRestoreTxForKeys(
   server: ISorobanRpcClient,
   sourcePublicKey: string,
   keys: xdr.LedgerKey[],
-  config: SorobanResurrectConfig,
+  config: ResolvedSorobanResurrectConfig,
 ): Promise<Transaction> {
   const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
   const accountInfo = await server.getAccount(sourcePublicKey)
@@ -149,7 +156,7 @@ async function buildRestoreTxForKeys(
  */
 export function watchTTL(
   server: ISorobanRpcClient,
-  config: Required<SorobanResurrectConfig>,
+  config: ResolvedSorobanResurrectConfig,
   emitter: TypedEventEmitter<SorobanResurrectEvents>,
   keys: xdr.LedgerKey[],
   opts: TTLWatchOptions = {},
@@ -157,6 +164,7 @@ export function watchTTL(
   const intervalMs = opts.intervalMs ?? config.ttlWatchIntervalMs
   const thresholdLedgers = opts.thresholdLedgers ?? config.ttlWatchThreshold
   const autoExtend = opts.autoExtend ?? config.ttlWatchAutoExtend
+  const runtime = config.runtime ?? SYSTEM_RUNTIME
 
   if (autoExtend && !opts.wallet) {
     throw new Error('watchTTL: `wallet` is required when `autoExtend` is enabled')
@@ -175,12 +183,13 @@ export function watchTTL(
       return
     }
     inFlight = true
-    lastTickAt = Date.now()
+    lastTickAt = runtime.now()
     try {
       const expiring: LedgerEntryTTLInfo[] = await getExpiringSoonEntries(
         server,
         keys,
         thresholdLedgers,
+        { runtime },
       )
       if (expiring.length === 0) return
 
@@ -211,6 +220,7 @@ export function watchTTL(
         hash,
         config.pollIntervalMs,
         config.pollTimeoutMs,
+        runtime,
       )
 
       if (status.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
@@ -230,7 +240,7 @@ export function watchTTL(
     }
   }
 
-  const timer = setInterval(() => {
+  const timer = runtime.setInterval(() => {
     void tick()
   }, intervalMs)
   // Don't let the poller keep a Node process alive (#426).
@@ -245,7 +255,7 @@ export function watchTTL(
       if (stopped) return
       stopped = true
       rerunPending = false
-      clearInterval(timer)
+      runtime.clearInterval(timer)
     },
     get inFlight() {
       return inFlight

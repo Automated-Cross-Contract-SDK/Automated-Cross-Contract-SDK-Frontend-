@@ -105,6 +105,22 @@ describe('SorobanRpcClient', () => {
     expect(client.serverURL).toBe('https://soroban-testnet.stellar.org')
   })
 
+  it('wraps transport failures in a typed NETWORK_ERROR without hiding the cause', async () => {
+    const client = new SorobanRpcClient('https://soroban-testnet.stellar.org')
+    const cause = new Error('connection refused')
+    const spy = vi.spyOn(rpc.Server.prototype, 'getLatestLedger').mockRejectedValue(cause)
+
+    try {
+      await expect(client.getLatestLedger()).rejects.toMatchObject({
+        code: 'NETWORK_ERROR',
+        message: 'connection refused',
+        originalError: cause,
+      })
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
   it('creates the underlying rpc.Server lazily on first method use', async () => {
     const client = new SorobanRpcClient('https://soroban-testnet.stellar.org') as any
 

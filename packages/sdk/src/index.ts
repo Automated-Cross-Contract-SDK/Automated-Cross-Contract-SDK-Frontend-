@@ -11,6 +11,7 @@
 // Main class
 // ---------------------------------------------------------------------------
 export { SorobanResurrect } from './SorobanResurrect.js'
+export { SYSTEM_RUNTIME } from './runtime.js'
 
 // ---------------------------------------------------------------------------
 // Network presets / switching helper
@@ -23,6 +24,8 @@ export type { SorobanNetworkName, SorobanNetworkPreset } from './SorobanResurrec
 // ---------------------------------------------------------------------------
 export type {
   SorobanResurrectConfig,
+  ResolvedSorobanResurrectConfig,
+  SdkRuntime,
   WalletAdapter,
   WalletCapabilities,
   FeeBumpSponsor,
@@ -51,10 +54,23 @@ export type {
   TrezorAdapterConfig,
   // Error types
   ResurrectErrorCode,
+  ResurrectFailure,
+  ResurrectSuccess,
 } from './types.js'
 export type { WalletErrorCode } from './types.js'
 export { WalletError } from './types.js'
-export { ResurrectError, RestoreFeeExceededError } from './errors.js'
+export {
+  ResurrectErrorCode,
+  getResurrectErrorCode,
+  ResurrectError,
+  RestoreFeeExceededError,
+  NetworkError,
+  SimulationError,
+  SigningError,
+  RestoreError,
+  ResurrectTimeoutError,
+  InvalidInputError,
+} from './errors.js'
 
 // ---------------------------------------------------------------------------
 // RPC abstraction layer (dependency injection / testing — see RpcClient.ts)
@@ -223,3 +239,31 @@ export type {
   AttachHistoryPersistenceOptions,
 } from './HistoryPersistence.js'
 export type { MinimalHistoryEntry } from './TransactionHistory.js'
+
+// ---------------------------------------------------------------------------
+// Result and Option helpers
+// ---------------------------------------------------------------------------
+export type { Result, Option } from './result.js'
+export {
+  Ok,
+  Err,
+  Some,
+  None,
+  ok,
+  err,
+  some,
+  none,
+  isOk,
+  isErr,
+  isSome,
+  isNone,
+  isResurrectSuccess,
+  isResurrectFailure,
+  matchResurrectResult,
+  toError,
+  toResult,
+  toResultAsync,
+  fromNullable,
+  extractArchivedKeysSafe,
+  extractFootprintFromSuccessSafe,
+} from './result.js'

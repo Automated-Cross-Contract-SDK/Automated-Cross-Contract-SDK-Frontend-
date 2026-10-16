@@ -11,6 +11,9 @@ import type { ISorobanRpcClient } from './RpcClient.js'
 import { DEFAULT_NETWORK_PASSPHRASE } from './constants.js'
 import { calculateRestoreFee } from './feeCalculation.js'
 import { ISorobanRpcClient } from './RpcClient.js'
+import { ResurrectTimeoutError, wrapSigningError } from './errors.js'
+import type { SdkRuntime } from './types.js'
+import { SYSTEM_RUNTIME } from './runtime.js'
 
 /** Parameters for building a restore transaction. */
 export interface BuildRestoreTxParams {
@@ -257,11 +260,12 @@ export async function waitForTransaction(
   hash: TxHash | string,
   pollIntervalMs: number = 1000,
   pollTimeoutMs: number = 60_000,
+  runtime: SdkRuntime = SYSTEM_RUNTIME,
 ): Promise<rpc.Api.GetTransactionResponse> {
-  const startTime = Date.now()
+  const startTime = runtime.now()
   let attempt = 0
 
-  while (Date.now() - startTime < pollTimeoutMs) {
+  while (runtime.now() - startTime < pollTimeoutMs) {
     const response = await server.getTransaction(hash)
 
     if (
@@ -275,11 +279,11 @@ export async function waitForTransaction(
     attempt++
     const exponentialDelay = 100 * Math.pow(2, attempt)
     const delay = Math.min(exponentialDelay, pollIntervalMs)
-    const jitter = delay * (0.5 + Math.random() * 0.5)
-    await new Promise((resolve) => setTimeout(resolve, jitter))
+    const jitter = delay * (0.5 + runtime.random() * 0.5)
+    await new Promise<void>((resolve) => runtime.setTimeout(resolve, jitter))
   }
 
-  throw new Error(`Transaction ${hash} did not complete within ${pollTimeoutMs}ms`)
+  throw new ResurrectTimeoutError(`Transaction ${hash} did not complete within ${pollTimeoutMs}ms`)
 }
 
 /**
@@ -334,6 +338,7 @@ async function streamTransactionViaEvents(
   hash: TxHash | string,
   timeoutMs: number,
   rpcUrl: string,
+  runtime: SdkRuntime,
 ): Promise<rpc.Api.GetTransactionResponse | null> {
   // SSE relies on browser-standard fetch/AbortController with a readable
   // stream body. Older Node runtimes (< 18) may lack these — degrade
@@ -372,7 +377,7 @@ async function streamTransactionViaEvents(
   }
 
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+  const timeoutId = runtime.setTimeout(() => controller.abort(), timeoutMs)
 
   try {
     const response = await fetch(rpcUrl, {
@@ -447,7 +452,7 @@ async function streamTransactionViaEvents(
     // SSE stream failed (network error, timeout, abort) — fall through
     return null
   } finally {
-    clearTimeout(timeoutId)
+    runtime.clearTimeout(timeoutId)
     controller.abort()
   }
 
@@ -464,21 +469,22 @@ async function pollTransactionAdaptive(
   server: ISorobanRpcClient,
   hash: string,
   timeoutMs: number,
+  runtime: SdkRuntime,
 ): Promise<rpc.Api.GetTransactionResponse> {
   let attempt = 0
-  const startTime = Date.now()
+  const startTime = runtime.now()
 
-  while (Date.now() - startTime < timeoutMs) {
+  while (runtime.now() - startTime < timeoutMs) {
     const response = await server.getTransaction(hash)
     if (isTerminalStatus(response.status)) {
       return response
     }
     attempt++
     const delay = Math.min(200 * attempt, 2000)
-    await new Promise((resolve) => setTimeout(resolve, delay))
+    await new Promise<void>((resolve) => runtime.setTimeout(resolve, delay))
   }
 
-  throw new Error(`Transaction ${hash} did not complete within ${timeoutMs}ms`)
+  throw new ResurrectTimeoutError(`Transaction ${hash} did not complete within ${timeoutMs}ms`)
 }
 
 /**
@@ -511,6 +517,7 @@ export async function waitForTransactionSSE(
   hash: TxHash | string,
   pollTimeoutMs: number = 60_000,
   rpcUrl = '',
+  runtime: SdkRuntime = SYSTEM_RUNTIME,
 ): Promise<rpc.Api.GetTransactionResponse> {
   // First, attempt to get the transaction immediately (it might already be done)
   const immediate = await server.getTransaction(hash)
@@ -520,7 +527,7 @@ export async function waitForTransactionSSE(
 
   // Try SSE stream via getEvents (low latency when supported)
   try {
-    const sseResult = await streamTransactionViaEvents(server, hash, pollTimeoutMs, rpcUrl)
+    const sseResult = await streamTransactionViaEvents(server, hash, pollTimeoutMs, rpcUrl, runtime)
     if (sseResult) {
       return sseResult
     }
@@ -533,7 +540,7 @@ export async function waitForTransactionSSE(
   // and avoid tracking elapsed time across the SSE stream and the
   // immediate getTransaction call, we use a fresh timeout here.
   // In practice the SSE stream either succeeds quickly (< 2s) or fails fast.
-  return pollTransactionAdaptive(server, hash, pollTimeoutMs)
+  return pollTransactionAdaptive(server, hash, pollTimeoutMs, runtime)
 }
 
 /**
@@ -748,9 +755,9 @@ export async function buildFeeBumpTransaction(
     throw new Error('Failed to build fee-bump transaction')
   }
 
-  const signedFeeBumpXdr = await sponsor.signFeeBump(asXdrBase64(feeBumpTx.toXDR()), {
-    networkPassphrase,
-  })
+  const signedFeeBumpXdr = await wrapSigningError(() =>
+    sponsor.signFeeBump(asXdrBase64(feeBumpTx.toXDR()), { networkPassphrase }),
+  )
 
   return asXdrBase64(signedFeeBumpXdr)
 }

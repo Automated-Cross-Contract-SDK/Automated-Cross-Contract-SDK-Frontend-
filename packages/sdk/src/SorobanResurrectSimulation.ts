@@ -1,5 +1,6 @@
 import { Transaction, rpc } from '@stellar/stellar-sdk'
 import { ArchivedLedgerEntry } from './types.js'
+import type { ResolvedSorobanResurrectConfig } from './types.js'
 import { SimulationCache } from './SimulationCache.js'
 import { isRestoreResponse, isSuccessResponse, isErrorResponse, extractArchivedKeys } from './Archiver.js'
 import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
@@ -24,7 +25,7 @@ import type { ISorobanRpcClient } from './RpcClient.js'
  */
 export class SorobanResurrectSimulator {
   private _server: ISorobanRpcClient
-  private _config: Required<SorobanResurrectConfig>
+  private _config: ResolvedSorobanResurrectConfig
   private _cache: SimulationCache | undefined
   private readonly _stateMgr: SorobanResurrectStateManager
 
@@ -36,7 +37,7 @@ export class SorobanResurrectSimulator {
    */
   constructor(
     server: ISorobanRpcClient,
-    config: Required<SorobanResurrectConfig>,
+    config: ResolvedSorobanResurrectConfig,
     cache: SimulationCache | undefined,
     stateMgr: SorobanResurrectStateManager,
   ) {
@@ -50,7 +51,7 @@ export class SorobanResurrectSimulator {
    * Re-binds this simulator to a new RPC client / config / cache in place,
    * without losing any other state. Used by `SorobanResurrect.switchNetwork`.
    */
-  rebind(server: ISorobanRpcClient, config: Required<SorobanResurrectConfig>, cache: SimulationCache | undefined): void {
+  rebind(server: ISorobanRpcClient, config: ResolvedSorobanResurrectConfig, cache: SimulationCache | undefined): void {
     this._server = server
     this._config = config
     this._cache = cache

@@ -19,6 +19,7 @@ import { xdr, Transaction, TransactionBuilder, hash } from '@stellar/stellar-sdk
 import { asXdrBase64, type XdrBase64 } from './branded-types.js'
 import type { WalletCapabilities } from './types.js'
 import { assertWalletCapability } from './walletCapabilities.js'
+import { wrapSigningError } from './errors.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -210,10 +211,12 @@ export async function signAuthorizationEntries(
     }
 
     // Address entries must be signed by the specified address
-    const signedXdr = await wallet.signAuthEntry(categorized.entryBase64, {
-      networkPassphrase,
-      address: categorized.signerAddress,
-    })
+    const signedXdr = await wrapSigningError(() =>
+      wallet.signAuthEntry!(categorized.entryBase64, {
+        networkPassphrase,
+        address: categorized.signerAddress,
+      }),
+    )
 
     signed.push(xdr.SorobanAuthorizationEntry.fromXDR(signedXdr, 'base64'))
   }
