@@ -466,3 +466,8 @@ const account = await getExpiringEntriesForAccount(accountId, {
 Use the scan functions to build a dashboard or a pre-flight check. Use
 `detectArchivedKeys` when you have a specific transaction in hand and want to know
 whether its footprint touches archived entries.
+
+Detected archived-key arrays are normalized by ascending serialized ledger-key
+XDR. Their order is therefore stable even when footprint or RPC response ordering
+changes; callers can use `serializeLedgerKey` for the same identity format in
+caches and diagnostics.
