@@ -1,15 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { WalletAdapter } from '@soroban-resurrect/sdk'
 import { XBullAdapter } from '../index.js'
+import { registerWalletAdapterContract } from '../../../testing/src/index.js'
+
+vi.mock('@soroban-resurrect/sdk', async () => import('../../../testing/src/sdkTestModule.js'))
 
 const mockConnect = vi.fn()
 const mockSign = vi.fn()
 
 vi.mock('@creit.tech/xbull-wallet-connect', () => ({
-  XBullWalletConnect: vi.fn().mockImplementation(() => ({
-    connect: mockConnect,
-    sign: mockSign,
-  })),
+  XBullWalletConnect: vi.fn().mockImplementation(function () {
+    return { connect: mockConnect, sign: mockSign }
+  }),
 }))
 
 const PUBKEY = 'GABC000000000000000000000000000000000000000000000000000XBULL'
@@ -48,9 +50,15 @@ describe('XBullAdapter', () => {
     await expect(adapter.getPublicKey()).rejects.toThrow('user rejected connection')
   })
 
-  it('signTransaction throws when the wallet is not connected', async () => {
+  it('connects before signing when the wallet is not connected', async () => {
     const adapter = new XBullAdapter()
-    await expect(adapter.signTransaction('AAAA')).rejects.toThrow('xBull: wallet is not connected')
+    await expect(adapter.signTransaction('AAAA')).resolves.toBe(SIGNED_XDR)
+    expect(mockConnect).toHaveBeenCalledTimes(1)
+    expect(mockSign).toHaveBeenCalledWith({
+      xdr: 'AAAA',
+      publicKey: PUBKEY,
+      network: undefined,
+    })
   })
 
   it('signTransaction returns base64 XDR and forwards the network passphrase', async () => {
@@ -74,5 +82,13 @@ describe('XBullAdapter', () => {
     const adapter = new XBullAdapter()
     await adapter.getPublicKey()
     await expect(adapter.signTransaction('AAAAtx')).rejects.toThrow('user declined')
+  })
+
+  registerWalletAdapterContract((name, test) => it(name, test), {
+    createAdapter: () => new XBullAdapter(),
+    publicKey: PUBKEY,
+    transactionXdr: 'AAAAtx',
+    signedXdr: SIGNED_XDR,
+    rejectSigning: () => mockSign.mockRejectedValueOnce(new Error('user rejected')),
   })
 })

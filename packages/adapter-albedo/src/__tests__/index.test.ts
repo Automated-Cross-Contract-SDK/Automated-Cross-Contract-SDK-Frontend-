@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { WalletAdapter } from '@soroban-resurrect/sdk'
 import albedo from '@albedo-link/intent'
 import { AlbedoAdapter } from '../index.js'
+import { registerWalletAdapterContract } from '../../../testing/src/index.js'
+
+vi.mock('@soroban-resurrect/sdk', async () => import('../../../testing/src/sdkTestModule.js'))
 
 vi.mock('@albedo-link/intent', () => ({
   default: {
@@ -30,16 +33,27 @@ describe('AlbedoAdapter', () => {
     expect(typeof adapter.signTransaction).toBe('function')
   })
 
-  it('reports not connected until getPublicKey resolves', async () => {
+  it('remains stateless after account selection', async () => {
     const adapter = new AlbedoAdapter()
     expect(await adapter.isConnected()).toBe(false)
     await adapter.getPublicKey()
-    expect(await adapter.isConnected()).toBe(true)
+    expect(await adapter.isConnected()).toBe(false)
   })
 
   it('getPublicKey returns the selected pubkey', async () => {
     const adapter = new AlbedoAdapter()
     expect(await adapter.getPublicKey()).toBe(PUBKEY)
+  })
+
+  it('retrieves the current public key instead of reusing a previous account', async () => {
+    const adapter = new AlbedoAdapter()
+    mockPublicKey
+      .mockResolvedValueOnce({ pubkey: PUBKEY } as never)
+      .mockResolvedValueOnce({ pubkey: `${PUBKEY}2` } as never)
+
+    expect(await adapter.getPublicKey()).toBe(PUBKEY)
+    expect(await adapter.getPublicKey()).toBe(`${PUBKEY}2`)
+    expect(mockPublicKey).toHaveBeenCalledTimes(2)
   })
 
   it('signTransaction returns base64 XDR from signed_envelope_xdr', async () => {
@@ -70,5 +84,14 @@ describe('AlbedoAdapter', () => {
     mockTx.mockRejectedValueOnce(new Error('User rejected'))
     const adapter = new AlbedoAdapter()
     await expect(adapter.signTransaction('AAAAtx')).rejects.toThrow('User rejected')
+  })
+
+  registerWalletAdapterContract((name, test) => it(name, test), {
+    createAdapter: () => new AlbedoAdapter(),
+    publicKey: PUBKEY,
+    transactionXdr: 'AAAAtx',
+    signedXdr: SIGNED_XDR,
+    networkPassphrase: 'Test SDF Network ; September 2015',
+    rejectSigning: () => mockTx.mockRejectedValueOnce(new Error('User rejected')),
   })
 })

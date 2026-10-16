@@ -5,3 +5,8 @@
 export { createMockRpcClient, scenarios } from './mockRpcClient.js'
 export type { MockRpcClient, MockRpcScript } from './mockRpcClient.js'
 export * as fixtures from './fixtures.js'
+export { registerWalletAdapterContract } from './walletAdapterContract.js'
+export type {
+  WalletAdapterContractOptions,
+  WalletAdapterContractTest,
+} from './walletAdapterContract.js'

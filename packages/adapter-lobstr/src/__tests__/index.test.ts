@@ -6,6 +6,9 @@ import {
   signTransaction as lobstrSignTransaction,
 } from '@lobstrco/signer-extension-api'
 import { LobstrAdapter } from '../index.js'
+import { registerWalletAdapterContract } from '../../../testing/src/index.js'
+
+vi.mock('@soroban-resurrect/sdk', async () => import('../../../testing/src/sdkTestModule.js'))
 
 vi.mock('@lobstrco/signer-extension-api', () => ({
   isConnected: vi.fn(),
@@ -71,5 +74,13 @@ describe('LobstrAdapter', () => {
     mockSignTransaction.mockRejectedValueOnce(new Error('User declined'))
     const adapter = new LobstrAdapter()
     await expect(adapter.signTransaction('AAAAtx')).rejects.toThrow('User declined')
+  })
+
+  registerWalletAdapterContract((name, test) => it(name, test), {
+    createAdapter: () => new LobstrAdapter(),
+    publicKey: PUBKEY,
+    transactionXdr: 'AAAAtx',
+    signedXdr: SIGNED_XDR,
+    rejectSigning: () => mockSignTransaction.mockRejectedValueOnce(new Error('User rejected')),
   })
 })
