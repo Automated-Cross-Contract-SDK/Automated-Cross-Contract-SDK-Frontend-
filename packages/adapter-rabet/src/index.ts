@@ -1,4 +1,4 @@
-import type { WalletAdapter, WalletCapabilities } from '@soroban-resurrect/sdk'
+import { WalletError, type WalletAdapter, type WalletCapabilities } from '@soroban-resurrect/sdk'
 import { asStellarPublicKey, asXdrBase64 } from '@soroban-resurrect/sdk'
 
 /**
@@ -8,10 +8,7 @@ import { asStellarPublicKey, asXdrBase64 } from '@soroban-resurrect/sdk'
 export interface RabetApi {
   connect(): Promise<{ publicKey: string }>
   disconnect?(): Promise<void> | void
-  sign(
-    xdr: string,
-    network: string,
-  ): Promise<{ xdr: string }>
+  sign(xdr: string, network: string): Promise<{ xdr: string }>
   isUnlocked?(): Promise<boolean> | boolean
 }
 
@@ -28,19 +25,28 @@ const RABET_PUBLIC = 'mainnet'
 /** Maps a Stellar network passphrase to Rabet's network identifier. */
 function toRabetNetwork(networkPassphrase?: string): string {
   if (!networkPassphrase) return RABET_TESTNET
-  return networkPassphrase.includes('Public Global Stellar Network')
-    ? RABET_PUBLIC
-    : RABET_TESTNET
+  return networkPassphrase.includes('Public Global Stellar Network') ? RABET_PUBLIC : RABET_TESTNET
 }
 
 /** Normalizes an unknown thrown value into an `Error` with a `Rabet:` prefix. */
-function toRabetError(err: unknown): Error {
-  if (err instanceof Error) return new Error(`Rabet: ${err.message}`)
-  if (typeof err === 'string') return new Error(`Rabet: ${err}`)
-  if (err && typeof err === 'object' && 'message' in err) {
-    return new Error(`Rabet: ${String((err as { message: unknown }).message)}`)
-  }
-  return new Error('Rabet: unknown error')
+function toRabetError(err: unknown): WalletError {
+  const message =
+    err instanceof Error
+      ? err.message
+      : typeof err === 'string'
+        ? err
+        : err && typeof err === 'object' && 'message' in err
+          ? String(err.message)
+          : 'unknown error'
+  const lower = message.toLowerCase()
+  const code = /reject|declin|cancel|denied/.test(lower)
+    ? 'USER_REJECTED'
+    : /network|chain/.test(lower)
+      ? 'NETWORK_MISMATCH'
+      : /not connected|locked/.test(lower)
+        ? 'NOT_CONNECTED'
+        : 'UNKNOWN'
+  return new WalletError(code, `Rabet: ${message}`, err)
 }
 
 /**
@@ -82,7 +88,6 @@ export class RabetAdapter implements WalletAdapter {
   }
 
   private readonly rabet?: RabetApi
-  private publicKey: string | undefined
 
   constructor(options: RabetAdapterOptions = {}) {
     this.rabet = options.rabet ?? (typeof window !== 'undefined' ? window.rabet : undefined)
@@ -101,7 +106,6 @@ export class RabetAdapter implements WalletAdapter {
 
   async isConnected(): Promise<boolean> {
     if (!this.rabet) return false
-    if (this.publicKey !== undefined) return true
     try {
       if (typeof this.rabet.isUnlocked === 'function') {
         return Boolean(await this.rabet.isUnlocked())
@@ -113,19 +117,19 @@ export class RabetAdapter implements WalletAdapter {
   }
 
   async getPublicKey() {
+    return this.connect()
+  }
+
+  async connect() {
     try {
       const result = await this.getApi().connect()
-      this.publicKey = result.publicKey
       return asStellarPublicKey(result.publicKey)
     } catch (err) {
       throw toRabetError(err)
     }
   }
 
-  async signTransaction(
-    tx: string,
-    opts?: { networkPassphrase?: string; network?: string },
-  ) {
+  async signTransaction(tx: string, opts?: { networkPassphrase?: string; network?: string }) {
     try {
       const result = await this.getApi().sign(tx, toRabetNetwork(opts?.networkPassphrase))
       return asXdrBase64(result.xdr)

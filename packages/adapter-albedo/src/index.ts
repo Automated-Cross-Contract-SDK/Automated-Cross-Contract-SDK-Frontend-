@@ -18,16 +18,17 @@ export class AlbedoAdapter implements WalletAdapter {
     hardware: false,
   }
 
-  private publicKey: string | undefined
-
   async isConnected(): Promise<boolean> {
-    return this.publicKey !== undefined
+    return false
   }
 
   async getPublicKey() {
+    return this.connect()
+  }
+
+  async connect() {
     try {
       const result = await albedo.publicKey({})
-      this.publicKey = result.pubkey
       return asStellarPublicKey(result.pubkey)
     } catch (error) {
       throw normalizeError(error)
@@ -51,8 +52,11 @@ export class AlbedoAdapter implements WalletAdapter {
 
 function normalizeError(error: unknown): WalletError {
   const message = error instanceof Error ? error.message : String(error)
-  const code = /reject|declin|cancel|denied/.test(message.toLowerCase())
+  const lower = message.toLowerCase()
+  const code = /reject|declin|cancel|denied/.test(lower)
     ? 'USER_REJECTED'
-    : 'UNKNOWN'
+    : /network|chain/.test(lower)
+      ? 'NETWORK_MISMATCH'
+      : 'UNKNOWN'
   return new WalletError(code, `Albedo: ${message}`, error)
 }

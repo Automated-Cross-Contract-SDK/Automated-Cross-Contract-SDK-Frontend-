@@ -1,4 +1,4 @@
-import type { WalletAdapter, WalletCapabilities } from '@soroban-resurrect/sdk'
+import { WalletError, type WalletAdapter, type WalletCapabilities } from '@soroban-resurrect/sdk'
 import { asStellarPublicKey, asXdrBase64 } from '@soroban-resurrect/sdk'
 
 /**
@@ -19,13 +19,24 @@ export interface StellarWalletsKitLike {
 }
 
 /** Normalizes an unknown thrown value into an `Error` with a `WalletKit:` prefix. */
-function toWalletKitError(err: unknown): Error {
-  if (err instanceof Error) return new Error(`WalletKit: ${err.message}`)
-  if (typeof err === 'string') return new Error(`WalletKit: ${err}`)
-  if (err && typeof err === 'object' && 'message' in err) {
-    return new Error(`WalletKit: ${String((err as { message: unknown }).message)}`)
-  }
-  return new Error('WalletKit: unknown error')
+function toWalletKitError(err: unknown): WalletError {
+  const message =
+    err instanceof Error
+      ? err.message
+      : typeof err === 'string'
+        ? err
+        : err && typeof err === 'object' && 'message' in err
+          ? String(err.message)
+          : 'unknown error'
+  const lower = message.toLowerCase()
+  const code = /reject|declin|cancel|denied/.test(lower)
+    ? 'USER_REJECTED'
+    : /network|chain/.test(lower)
+      ? 'NETWORK_MISMATCH'
+      : /not connected|unavailable/.test(lower)
+        ? 'NOT_CONNECTED'
+        : 'UNKNOWN'
+  return new WalletError(code, `WalletKit: ${message}`, err)
 }
 
 /**
@@ -80,7 +91,6 @@ export class WalletKitAdapter implements WalletAdapter {
   }
 
   private readonly kit: StellarWalletsKitLike
-  private address: string | undefined
 
   constructor(options: WalletKitAdapterOptions) {
     if (!options?.kit) {
@@ -93,10 +103,8 @@ export class WalletKitAdapter implements WalletAdapter {
   }
 
   async isConnected(): Promise<boolean> {
-    if (this.address !== undefined) return true
     try {
       const { address } = await this.kit.getAddress()
-      this.address = address
       return Boolean(address)
     } catch {
       return false
@@ -104,22 +112,23 @@ export class WalletKitAdapter implements WalletAdapter {
   }
 
   async getPublicKey() {
+    return this.connect()
+  }
+
+  async connect() {
     try {
       const { address } = await this.kit.getAddress()
-      this.address = address
       return asStellarPublicKey(address)
     } catch (err) {
       throw toWalletKitError(err)
     }
   }
 
-  async signTransaction(
-    tx: string,
-    opts?: { networkPassphrase?: string; network?: string },
-  ) {
+  async signTransaction(tx: string, opts?: { networkPassphrase?: string; network?: string }) {
     try {
+      const { address } = await this.kit.getAddress()
       const { signedTxXdr } = await this.kit.signTransaction(tx, {
-        address: this.address,
+        address,
         networkPassphrase: opts?.networkPassphrase,
       })
       return asXdrBase64(signedTxXdr)

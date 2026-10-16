@@ -19,36 +19,53 @@ export class XBullAdapter implements WalletAdapter {
   }
 
   private readonly connector = new XBullWalletConnect()
-  private publicKey: string | undefined
+  private connected = false
 
   async isConnected(): Promise<boolean> {
-    return this.publicKey !== undefined
+    return this.connected
   }
 
   async getPublicKey() {
-    const publicKey = await this.connector.connect()
-    this.publicKey = publicKey
-    return asStellarPublicKey(publicKey)
+    return this.connect()
+  }
+
+  async connect() {
+    try {
+      const publicKey = await this.connector.connect()
+      this.connected = true
+      return asStellarPublicKey(publicKey)
+    } catch (error) {
+      this.connected = false
+      throw normalizeError(error)
+    }
   }
 
   async signTransaction(tx: string, opts?: { networkPassphrase?: string; network?: string }) {
-    if (!this.publicKey) {
-      throw new Error('xBull: wallet is not connected')
-    }
-
     try {
+      const publicKey = await this.connector.connect()
+      this.connected = true
       const signed = await this.connector.sign({
         xdr: tx,
-        publicKey: this.publicKey,
+        publicKey,
         network: opts?.networkPassphrase,
       })
       return asXdrBase64(signed)
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      const code = /reject|declin|cancel|denied/.test(message.toLowerCase())
-        ? 'USER_REJECTED'
-        : 'UNKNOWN'
-      throw new WalletError(code, `xBull: ${message}`, error)
+      this.connected = false
+      throw normalizeError(error)
     }
   }
+}
+
+function normalizeError(error: unknown): WalletError {
+  const message = error instanceof Error ? error.message : String(error)
+  const lower = message.toLowerCase()
+  const code = /reject|declin|cancel|denied/.test(lower)
+    ? 'USER_REJECTED'
+    : /network|chain/.test(lower)
+      ? 'NETWORK_MISMATCH'
+      : /not connected|unavailable/.test(lower)
+        ? 'NOT_CONNECTED'
+        : 'UNKNOWN'
+  return new WalletError(code, `xBull: ${message}`, error)
 }
