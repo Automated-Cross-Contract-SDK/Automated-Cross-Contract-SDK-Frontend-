@@ -266,6 +266,93 @@ describe('SorobanResurrect', () => {
     })
   })
 
+  describe('previewRestore', () => {
+    it('returns a typed restore plan without mutating or submitting the original transaction', async () => {
+      const transaction = makeSampleTx()
+      const originalXdr = transaction.toXDR()
+      const archivedKey = { toXDR: () => 'archived-key-xdr' }
+      const sendSpy = vi.spyOn(resurrect.server, 'sendTransaction')
+      vi.spyOn(resurrect.server, 'simulateTransaction').mockResolvedValue({
+        id: '1',
+        latestLedger: 100,
+        events: [],
+        _parsed: true,
+        transactionData: {
+          getFootprint: () => ({ readOnly: () => [], readWrite: () => [archivedKey] }),
+        },
+        minResourceFee: '100',
+        cost: { cpuInsns: '100', memBytes: '100' },
+        result: { auth: [], retval: { switch: () => 0 } },
+        restorePreamble: {
+          minResourceFee: '100',
+          transactionData: new SorobanDataBuilder(),
+        },
+      } as never)
+
+      const plan = await resurrect.previewRestore(transaction)
+      const simulatedTransaction = vi.mocked(resurrect.server.simulateTransaction).mock.calls[0][0]
+
+      expect(plan).toMatchObject({
+        transaction: {
+          xdr: originalXdr,
+          operationCount: 1,
+        },
+        network: {
+          rpcUrl: testConfig.rpcUrl,
+          networkPassphrase: Networks.TESTNET,
+        },
+        wouldNeedRestore: true,
+        archivedKeys: ['archived-key-xdr'],
+        minResourceFee: 100,
+        feeMultiplier: 3,
+        estimatedRestoreFee: '300',
+      })
+      expect(simulatedTransaction).not.toBe(transaction)
+      expect(simulatedTransaction.toXDR()).toBe(originalXdr)
+      expect(transaction.toXDR()).toBe(originalXdr)
+      expect(resurrect.state).toBe('idle')
+      expect(resurrect.history).toHaveLength(0)
+      expect(sendSpy).not.toHaveBeenCalled()
+    })
+
+    it('reports no restore when simulation succeeds without archived entries', async () => {
+      const sendSpy = vi.spyOn(resurrect.server, 'sendTransaction')
+      vi.spyOn(resurrect.server, 'simulateTransaction').mockResolvedValue({
+        id: '1',
+        latestLedger: 100,
+        events: [],
+        _parsed: true,
+        transactionData: new SorobanDataBuilder(),
+        minResourceFee: '0',
+        cost: { cpuInsns: '100', memBytes: '100' },
+        result: { auth: [], retval: { switch: () => 0 } },
+      } as never)
+
+      const plan = await resurrect.previewRestore(makeSampleTx())
+
+      expect(plan.wouldNeedRestore).toBe(false)
+      expect(plan.archivedKeys).toEqual([])
+      expect(plan.estimatedRestoreFee).toBe('0')
+      expect(sendSpy).not.toHaveBeenCalled()
+    })
+
+    it('surfaces simulation errors rather than returning a success-shaped plan', async () => {
+      const sendSpy = vi.spyOn(resurrect.server, 'sendTransaction')
+      vi.spyOn(resurrect.server, 'simulateTransaction').mockResolvedValue({
+        id: '1',
+        latestLedger: 100,
+        events: [],
+        _parsed: true,
+        error: 'simulation rejected',
+      } as never)
+
+      await expect(resurrect.previewRestore(makeSampleTx())).rejects.toThrow(
+        'Transaction simulation failed: simulation rejected',
+      )
+      expect(sendSpy).not.toHaveBeenCalled()
+    })
+  })
+
   describe('buildRestoreTx', () => {
     it('throws when no restore is needed', async () => {
       vi.spyOn(resurrect.server, 'simulateTransaction').mockResolvedValue({

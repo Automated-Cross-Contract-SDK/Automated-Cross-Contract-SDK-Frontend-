@@ -125,26 +125,25 @@ npm install @trezor/connect-web
 
 Submits a transaction with automatic archive restoration. If the simulation detects archived entries, a restore transaction is built, signed, submitted, and confirmed before the original transaction is rebuilt and submitted. State transitions are published to all registered listeners throughout. See [`SubmitWithRestoreOptions`](/api/types#submitwithrestoreoptions) for the full set of lifecycle callbacks.
 
-##### Dry-run mode
+##### Previewing a restore plan
 
-Pass `dryRun: true` to preview a restore without signing or submitting anything:
+Call `previewRestore` to get a typed, serializable summary before requesting a
+wallet signature:
 
 ```typescript
-const result = await sr.submitWithRestore({ transaction, wallet, dryRun: true })
+const plan = await sr.previewRestore(transaction)
 
-if (result.dryRun) {
-  console.log(result.dryRunResult?.archivedKeys)
-  console.log(result.dryRunResult?.estimatedRestoreFee)
+if (plan.wouldNeedRestore) {
+  console.log(plan.archivedKeys)
+  console.log(plan.estimatedRestoreFee)
 }
 ```
 
-In dry-run mode the SDK runs archive detection plus fee estimation and returns
-`{ success: true, dryRun: true, dryRunResult }`. It performs **zero wallet calls**
-(no `signTransaction`, no `signAuthEntry`) and **zero submissions** (no
-`sendTransaction`), and it does not record anything to history. Because no wallet
-callbacks fire, none of the lifecycle callbacks in `SubmitWithRestoreOptions` are
-invoked either. If fee estimation fails, the error is surfaced on
-`dryRunResult.simulationError` rather than thrown.
+The returned `RestorePlan` includes original transaction XDR, source account,
+fee, operation count, network, archived key XDR, and the estimated restore fee.
+The method simulates a clone of the transaction; it does not mutate the
+original, change workflow state or history, call the wallet, or submit anything.
+Simulation failures reject with a descriptive error.
 
 #### `onStateChange(listener)`
 

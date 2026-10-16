@@ -22,6 +22,7 @@ import type {
   HardwareWalletAdapter,
   FeeBumpSponsor,
   DryRunResult,
+  RestorePlan,
   TxDiagnostics,
   ISorobanRpcClient,
   KnownWallet,
@@ -155,6 +156,8 @@ test('SorobanResurrectConfig and result types keep their shape', () => {
 
   expectTypeOf<FeeBumpSponsor>().toHaveProperty('signFeeBump')
   expectTypeOf<DryRunResult>().toHaveProperty('wouldNeedRestore')
+  expectTypeOf<RestorePlan>().toHaveProperty('transaction')
+  expectTypeOf<RestorePlan['archivedKeys']>().toEqualTypeOf<string[]>()
   expectTypeOf<TxDiagnostics>().toHaveProperty('events')
 })
 

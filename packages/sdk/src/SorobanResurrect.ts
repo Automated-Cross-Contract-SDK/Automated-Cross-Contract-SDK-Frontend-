@@ -1,4 +1,4 @@
-import { rpc, Transaction, xdr } from '@stellar/stellar-sdk'
+import { rpc, Transaction, TransactionBuilder, xdr } from '@stellar/stellar-sdk'
 import type { ISorobanRpcClient } from './RpcClient.js'
 import type {
   SorobanResurrectConfig,
@@ -19,8 +19,9 @@ import type { StellarPublicKey } from './branded-types.js'
 import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
 import { SorobanResurrectSimulator } from './SorobanResurrectSimulation.js'
 import { SorobanResurrectExecutor } from './SorobanResurrectExecution.js'
-import { isRestoreResponse, extractArchivedKeys } from './Archiver.js'
+import { isErrorResponse, isRestoreResponse, isSuccessResponse, extractArchivedKeys } from './Archiver.js'
 import { buildRestoreCostEstimate, type RestoreCostEstimate } from './feeCalculation.js'
+import type { RestorePlan } from './RestorePlan.js'
 import type { TransactionHistoryEntry } from './TransactionHistory.js'
 import {
   queryLedgerTTL,
@@ -459,6 +460,71 @@ export class SorobanResurrect {
         const archivedKeys = extractArchivedKeys(response)
         const minResourceFee = parseInt(response.minResourceFee, 10)
         return buildRestoreCostEstimate(minResourceFee, archivedKeys.length, this._config)
+      }
+
+      /**
+       * Simulates a copy of `transaction` and returns a serializable restore plan
+       * for application review. This method does not mutate the original
+       * transaction, update workflow state or history, call the wallet, or submit
+       * any transaction.
+       *
+       * @throws {Error} If simulation fails or returns an unrecognized response.
+       */
+      async previewRestore(transaction: Transaction): Promise<RestorePlan> {
+        return this._trackOperation(async () => {
+          const transactionXdr = transaction.toXDR()
+          const simulationTx = TransactionBuilder.fromXDR(
+            transactionXdr,
+            this._config.networkPassphrase,
+          )
+          if (!(simulationTx instanceof Transaction)) {
+            throw new Error('Cannot preview a fee-bump transaction')
+          }
+
+          const response = await this._server.simulateTransaction(simulationTx)
+          if (isErrorResponse(response)) {
+            throw new Error(`Transaction simulation failed: ${response.error}`)
+          }
+          if (!isRestoreResponse(response) && !isSuccessResponse(response)) {
+            throw new Error('Transaction simulation returned an unrecognized response')
+          }
+
+          let archivedKeys: string[] = []
+          let minResourceFee = 0
+          if (isRestoreResponse(response)) {
+            if (!response._parsed) {
+              throw new Error('Transaction simulation returned an unparsed restore plan')
+            }
+            archivedKeys = response.transactionData
+              .getFootprint()
+              .readWrite()
+              .map((key) => key.toXDR('base64'))
+            minResourceFee = Number.parseInt(response.minResourceFee, 10)
+            if (!Number.isSafeInteger(minResourceFee) || minResourceFee < 0) {
+              throw new Error(`Invalid minimum restore resource fee: ${response.minResourceFee}`)
+            }
+          }
+
+          const estimate = buildRestoreCostEstimate(minResourceFee, archivedKeys.length, this._config)
+          return {
+            transaction: {
+              xdr: transactionXdr,
+              sourceAccount: transaction.source,
+              sequence: transaction.sequence,
+              fee: transaction.fee,
+              operationCount: transaction.operations.length,
+            },
+            network: {
+              rpcUrl: this._config.rpcUrl,
+              networkPassphrase: this._config.networkPassphrase,
+            },
+            wouldNeedRestore: estimate.wouldNeedRestore,
+            archivedKeys,
+            minResourceFee: estimate.minResourceFee,
+            feeMultiplier: estimate.multiplier,
+            estimatedRestoreFee: estimate.estimatedFee,
+          }
+        })
       }
 
       return buildRestoreCostEstimate(0, 0, this._config)

@@ -14,7 +14,6 @@ import type {
   FeeBumpConfig,
   ArchivedLedgerEntry,
   ResurrectResult,
-  DryRunResult,
 } from './types.js'
 import { WalletError } from './types.js'
 import type { ResurrectErrorCode } from './errors.js'
