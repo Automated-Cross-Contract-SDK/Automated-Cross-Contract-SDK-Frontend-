@@ -110,6 +110,25 @@ describe('queryLedgerTTL', () => {
     })
   })
 
+  it('tracks contract-code TTL independently from contract-data TTL', async () => {
+    const data = dataKey(1)
+    const code = codeKey(2)
+    const { server } = mockServer(new Map([[b64(data), CURRENT_LEDGER + 20]]))
+
+    const { entries } = await queryLedgerTTL(server, [data, code])
+
+    expect(entries[0]).toMatchObject({
+      entryType: 'contractData',
+      isArchived: false,
+      ttlLedgers: 20,
+    })
+    expect(entries[1]).toMatchObject({
+      entryType: 'contractCode',
+      isArchived: true,
+      ttlLedgers: 0,
+    })
+  })
+
   it('tags non-contract keys as "other"', async () => {
     const acct = accountKey()
     const { server } = mockServer(new Map([[b64(acct), CURRENT_LEDGER + 1]]))

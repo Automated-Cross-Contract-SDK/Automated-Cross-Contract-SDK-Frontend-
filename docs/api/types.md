@@ -280,6 +280,22 @@ These APIs answer "what in my contract is about to expire?" **without submitting
 transaction**. They read ledger entries directly, so they are safe to call on page
 load, in a background poll, or before you decide whether a restore is needed.
 
+### Contract code and contract data TTLs
+
+Soroban tracks a contract's Wasm code (`contractCode`) and its instance and
+storage (`contractData`) as separate ledger entries. Their TTLs are independent:
+restoring or extending one entry does not refresh the TTL of another. A contract
+can therefore have live storage while its code is archived, or live code while a
+data entry is archived.
+
+The SDK TTL helpers accept both key types and report each key's own
+`entryType`, `liveUntilLedger`, and `ttlLedgers`. To monitor both sides of a
+contract, include both its code key and the relevant contract-data keys in the
+same query. Contract-code entries are included in a contract scan by default
+when the contract instance can be read; contract storage keys must still be
+provided explicitly because Soroban does not expose a storage-key enumeration
+API.
+
 > **Important limitation — contract storage keys cannot be enumerated.**
 > Soroban does not expose a way to list the storage keys a contract holds. The
 > scan functions therefore only check the keys **you supply**. If you omit a key,
