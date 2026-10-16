@@ -1,8 +1,10 @@
-import { rpc, Transaction, TransactionBuilder } from '@stellar/stellar-sdk'
-import {
+import { rpc, Transaction, TransactionBuilder, xdr } from '@stellar/stellar-sdk'
+import type {
   ArchivedLedgerEntry,
+  HistoryPersistenceOptions,
   ResurrectResult,
   RestoreKeysOptions,
+  SorobanResurrectConfig,
   SubmitWithRestoreOptions,
   WalletAdapter,
 } from './types.js'
@@ -11,17 +13,24 @@ import { executeWithRestore, sendTransaction as _sendTransaction } from './Execu
 import {
   buildRestoreTransaction,
   buildBatchRestoreTransaction,
+  buildRestoreTransactionFromKeys,
   buildOriginalAfterRestore,
   waitForTransaction,
+  waitForTransactionSSE,
 } from './Restorer.js'
 import { isRestoreResponse } from './Archiver.js'
-import { TransactionHistory, TransactionHistoryEntry } from './TransactionHistory.js'
+import { TransactionHistory, type TransactionHistoryEntry } from './TransactionHistory.js'
 import { attachHistoryPersistence, type HistoryPersistenceHandle } from './HistoryPersistence.js'
-import type { HistoryPersistenceOptions } from './types.js'
 import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
 import { SorobanResurrectSimulator } from './SorobanResurrectSimulation.js'
-import type { ISorobanRpcClient } from './RpcClient.js'
-import { asTxHash, asHistoryEntryId } from './branded-types.js'
+import {
+  asTxHash,
+  asHistoryEntryId,
+  asXdrBase64,
+  type HistoryEntryId,
+  type TxHash,
+} from './branded-types.js'
+import { DEFAULT_NETWORK_PASSPHRASE, POLL_INTERVAL_MS, POLL_TIMEOUT_MS } from './constants.js'
 
 /**
  * Handles all transaction execution concerns for a `SorobanResurrect` instance:
@@ -269,20 +278,6 @@ export class SorobanResurrectExecutor {
   }
 
   /**
-   * Restores an arbitrary list of ledger keys, with no source transaction
-   * required. See {@link restoreKeys} in `Executor.ts` for the full
-   * behavior — this is a thin pass-through binding this instance's server
-   * and config.
-   *
-   * @param keys   - Ledger keys to restore.
-   * @param wallet - Wallet adapter used for signing.
-   * @returns {@link ResurrectResult}; never throws.
-   */
-  async restoreKeys(keys: xdr.LedgerKey[], wallet: WalletAdapter): Promise<ResurrectResult> {
-    return _restoreKeys({ server: this._server, keys, wallet, config: this._config })
-  }
-
-  /**
    * Submits a transaction with automatic archive restoration.
    *
    * Records the attempt in history and returns a `historyId` in the result
@@ -354,7 +349,10 @@ export class SorobanResurrectExecutor {
       },
 
       onRestoreConfirmed: (txHash: string) => {
-        stateMgr.setState('submitting_original', 'Restore confirmed. Preparing original transaction...')
+        stateMgr.setState(
+          'submitting_original',
+          'Restore confirmed. Preparing original transaction...',
+        )
         emitter.emit('restoreConfirmed', asTxHash(txHash))
         onRestoreConfirmed?.(asTxHash(txHash))
       },
@@ -371,6 +369,7 @@ export class SorobanResurrectExecutor {
       },
 
       onRestoreFailed: (error: string) => {
+        stateMgr.setError(error)
         emitter.emit('error', error)
         onRestoreFailed?.(error)
       },

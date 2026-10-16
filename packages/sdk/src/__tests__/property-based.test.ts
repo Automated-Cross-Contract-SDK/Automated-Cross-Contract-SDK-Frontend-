@@ -32,6 +32,7 @@ beforeAll(() => {
 
 const SOURCE = Keypair.fromRawEd25519Seed(Buffer.alloc(32, 1)).publicKey()
 const DEST = Keypair.fromRawEd25519Seed(Buffer.alloc(32, 2)).publicKey()
+const FIXED_CLOSE_TIME = 1_700_000_000
 
 function buildTx(opts: {
   seq: string
@@ -46,7 +47,7 @@ function buildTx(opts: {
     .addOperation(
       Operation.payment({ destination: DEST, asset: Asset.native(), amount: opts.amount }),
     )
-    .setTimeout(opts.timeout ?? 30)
+    .setTimeout(opts.timeout ?? 30, FIXED_CLOSE_TIME)
     .build()
 }
 
@@ -120,11 +121,11 @@ describe('branded-type guards (property-based)', () => {
   const guards = { isTxHash, isContractIdHex, isStellarPublicKey, isXdrBase64, isHexString }
 
   it.each(Object.entries(guards))('%s rejects every non-string value', (_name, guard) => {
-    fc.assert(fc.property(nonStringArb, (v) => expect(guard(v)).toBe(false)))
+    fc.assert(fc.property(nonStringArb, (v) => guard(v) === false))
   })
 
   it.each(Object.entries(guards))('%s is a pure function of its input', (_name, guard) => {
-    fc.assert(fc.property(fc.string(), (s) => expect(guard(s)).toBe(guard(s))))
+    fc.assert(fc.property(fc.string(), (s) => guard(s) === guard(s)))
   })
 
   it('isTxHash / isContractIdHex accept any 64-char lowercase hex', () => {

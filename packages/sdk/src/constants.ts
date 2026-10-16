@@ -28,6 +28,9 @@ interface SdkDefaults {
  */
 export const SDK_DEFAULTS: SdkDefaults = defaults
 
+/** Standard Stellar base fee in stroops used for placeholder and fallback transactions. */
+export const BASE_FEE = 100
+
 /** Default network passphrase for the Soroban Testnet. */
 export const DEFAULT_NETWORK_PASSPHRASE: string = defaults.defaultNetworkPassphrase
 
@@ -43,9 +46,8 @@ export const POLL_TIMEOUT_MS: number = defaults.pollTimeoutMs
 /**
  * Default multiplier applied to minResourceFee when building a restore transaction.
  *
- * A multiplier of 3x is a reasonable balance: high enough to ensure successful
- * inclusion during network congestion, but not so excessive that users pay 3-5x
- * more than necessary. Can be customized via SorobanResurrectConfig.restoreFeeMultiplier.
+ * A multiplier of 3x is the SDK default and matches the documented fee policy for
+ * restore transactions while preserving a modest premium during congestion.
  */
 export const RESTORE_FEE_MULTIPLIER: number = defaults.restoreFeeMultiplier
 
@@ -95,6 +97,7 @@ export const RESTORE_TX_SIZE_WARN_RATIO = 0.8
  * `SorobanResurrectConfig.maxSequenceRetries`.
  */
 export const MAX_SEQUENCE_RETRIES = 3
+export const DEFAULT_MAX_SEQUENCE_RETRIES = MAX_SEQUENCE_RETRIES
 
 /**
  * Default number of ledger keys fetched per `getLedgerEntries` request when
@@ -143,6 +146,8 @@ export const TTL_WATCH_INTERVAL_MS = 60_000
  * considers an entry at risk and triggers an extension.
  */
 export const TTL_WATCH_THRESHOLD = 100
+/** Alias used by the config resolver for the same threshold. */
+export const TTL_WATCH_THRESHOLD_LEDGERS = TTL_WATCH_THRESHOLD
 
 /**
  * Whether the TTL watcher automatically extends entries that fall below

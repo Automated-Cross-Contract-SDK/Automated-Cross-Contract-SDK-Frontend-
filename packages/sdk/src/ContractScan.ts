@@ -32,7 +32,9 @@ import {
   type QueryLedgerTTLOptions,
 } from './TTLHelpers.js'
 import { fetchLedgerEntriesChunked } from './ledgerChunks.js'
-import { DEFAULT_EXPIRING_SOON_LEDGERS } from './ttl.js'
+
+/** Default threshold (in ledgers) below which a live contract entry is reported as expiring soon. */
+export const DEFAULT_EXPIRING_SOON_LEDGERS = 100
 
 // ---------------------------------------------------------------------------
 // Contract scan

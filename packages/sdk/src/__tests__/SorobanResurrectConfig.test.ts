@@ -1,72 +1,45 @@
-import { SorobanResurrectConfig } from '../SorobanResurrectConfig';
+import { describe, expect, it } from 'vitest'
+import { resolveConfig, validateConfigShape } from '../SorobanResurrectConfig.js'
 
 describe('SorobanResurrectConfig', () => {
   const validConfig = {
     rpcUrl: 'https://soroban-testnet.stellar.org',
     networkPassphrase: 'Test SDF Network ; September 2015',
-    contractId: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4',
-  };
+  }
 
-  describe('constructor validation', () => {
-    it('accepts a valid config', () => {
-      expect(() => new SorobanResurrectConfig(validConfig)).not.toThrow();
-    });
+  it('accepts a valid config', () => {
+    expect(() => validateConfigShape(validConfig)).not.toThrow()
+    expect(() => resolveConfig(validConfig)).not.toThrow()
+  })
 
-    const invalidCases: Array<{
-      field: string;
-      config: Record<string, unknown>;
-      expected: RegExp;
-    }> = [
-      {
-        field: 'rpcUrl',
-        config: { ...validConfig, rpcUrl: '' },
-        expected: /Invalid rpcUrl: .* Must be a non-empty string/,
-      },
-      {
-        field: 'rpcUrl',
-        config: { ...validConfig, rpcUrl: 42 },
-        expected: /Invalid rpcUrl: .* Must be a non-empty string/,
-      },
-      {
-        field: 'networkPassphrase',
-        config: { ...validConfig, networkPassphrase: '' },
-        expected: /Invalid networkPassphrase: .* Must be a non-empty string/,
-      },
-      {
-        field: 'networkPassphrase',
-        config: { ...validConfig, networkPassphrase: null },
-        expected: /Invalid networkPassphrase: .* Must be a non-empty string/,
-      },
-      {
-        field: 'contractId',
-        config: { ...validConfig, contractId: '' },
-        expected: /Invalid contractId: .* Must be a non-empty string/,
-      },
-      {
-        field: 'contractId',
-        config: { ...validConfig, contractId: undefined },
-        expected: /Invalid contractId: .* Must be a non-empty string/,
-      },
-    ];
+  it.each([
+    {
+      field: 'rpcUrl',
+      config: { ...validConfig, rpcUrl: '' },
+      expected: /config\.rpcUrl must be a non-empty string/,
+    },
+    {
+      field: 'rpcUrl',
+      config: { ...validConfig, rpcUrl: 'not a url' },
+      expected: /config\.rpcUrl must be a valid URL/,
+    },
+    {
+      field: 'networkPassphrase',
+      config: { ...validConfig, networkPassphrase: '' },
+      expected: /Invalid network passphrase/,
+    },
+  ])('rejects invalid $field', ({ config, expected }) => {
+    expect(() => resolveConfig(config as never)).toThrow(expected)
+  })
 
-    it.each(invalidCases)('rejects invalid $field', ({ config, expected }) => {
-      expect(() => new SorobanResurrectConfig(config as never)).toThrow(expected);
-    });
-  });
-
-  describe('switchNetwork validation', () => {
-    it('applies the same validation as the constructor', () => {
-      const instance = new SorobanResurrectConfig(validConfig);
-      expect(() => instance.switchNetwork({ rpcUrl: '' })).toThrow(
-        /Invalid rpcUrl: .* Must be a non-empty string/,
-      );
-    });
-
-    it('accepts a valid partial update', () => {
-      const instance = new SorobanResurrectConfig(validConfig);
-      expect(() =>
-        instance.switchNetwork({ rpcUrl: 'https://soroban-futurenet.stellar.org' }),
-      ).not.toThrow();
-    });
-  });
-});
+  it('keeps explicit logger configuration when resolving', () => {
+    const logger = {
+      debug: () => undefined,
+      info: () => undefined,
+      warn: () => undefined,
+      error: () => undefined,
+    }
+    const resolved = resolveConfig({ ...validConfig, logger })
+    expect(resolved.config.logger).toBe(logger)
+  })
+})

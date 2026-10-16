@@ -13,7 +13,7 @@
   "rpcCircuitBreakerThreshold": 5,
   "rpcCircuitBreakerCooldownMs": 30000,
   "ttlWatchIntervalMs": 60000,
-  "ttlWatchThreshold": 0.5,
+  "ttlWatchThreshold": 100,
   "ttlWatchAutoExtend": false,
   "restoreTxMemo": "none",
   "restoreTxMemoText": "",

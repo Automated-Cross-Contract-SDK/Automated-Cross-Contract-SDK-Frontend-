@@ -35,6 +35,7 @@ import {
   isTxBadSeqError,
 } from './Restorer.js'
 import { SimulationCache } from './SimulationCache.js'
+import { ensureAddressAuthorization } from './Authorization.js'
 import {
   DEFAULT_NETWORK_PASSPHRASE,
   POLL_INTERVAL_MS,
@@ -42,6 +43,7 @@ import {
   DEFAULT_MAX_SEQUENCE_RETRIES,
 } from './constants.js'
 import { asTxHash, asXdrBase64, type TxHash, type XdrBase64 } from './branded-types.js'
+import { parseTransactionDiagnostics } from './Diagnostics.js'
 import { parseTransactionFailure } from './TransactionFailure.js'
 
 /** Parameters for the full restore-and-submit execution flow. */
@@ -395,31 +397,21 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
           error: err,
           sequenceRetries,
         }
-
-        originalHash = asTxHash(originalResult.hash)
-        break
       }
 
       const originalHash = asTxHash(originalResult!.hash)
       onOriginalSubmitted?.(originalHash)
 
-      return {
+      const result: ResurrectResult = {
         success: true,
         originalTxHash: originalHash,
         restoreTxHash: restoreHash,
         archivedKeysDetected: archivedKeys.length,
-        sequenceRetries,
       }
-
-      const originalResult = await server.sendTransaction(signedOriginalTx)
-      onOriginalSubmitted?.(originalResult.hash)
-
-      return {
-        success: true,
-        originalTxHash: originalResult.hash,
-        restoreTxHash: restoreResult.hash,
-        archivedKeysDetected: archivedKeys.length,
+      if (sequenceRetries > 0) {
+        result.sequenceRetries = sequenceRetries
       }
+      return result
     }
 
     if (isSuccessResponse(simResponse)) {

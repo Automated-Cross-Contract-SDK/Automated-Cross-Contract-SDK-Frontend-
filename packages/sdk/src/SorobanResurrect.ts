@@ -11,11 +11,8 @@ import type {
   RestoreKeysOptions,
   SorobanResurrectEvents,
 } from './types.js'
-import type { ISorobanRpcClient } from './RpcClient.js'
 import type { StellarPublicKey } from './branded-types.js'
 import { resolveConfig } from './SorobanResurrectConfig.js'
-import type { ISorobanRpcClient } from './RpcClient.js'
-import type { StellarPublicKey } from './branded-types.js'
 import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
 import { SorobanResurrectSimulator } from './SorobanResurrectSimulation.js'
 import { SorobanResurrectExecutor } from './SorobanResurrectExecution.js'
@@ -32,6 +29,7 @@ import type { LedgerEntryTTLInfo, QueryLedgerTTLOptions, TTLQueryResult } from '
 import { NETWORK_PRESETS } from './constants.js'
 import { watchTTL, type TTLWatchHandle, type TTLWatchOptions } from './TTLWatch.js'
 import type { SorobanNetworkName } from './constants.js'
+import { NOOP_LOGGER, createRequestId } from './Logger.js'
 
 /**
  * Main facade for the Soroban-Resurrect SDK.
@@ -59,11 +57,17 @@ import type { SorobanNetworkName } from './constants.js'
  * // result.historyId can be used to retry via resurrect.retry(result.historyId, wallet)
  * ```
  */
-const debug = createDebugger('core')
-
 export class SorobanResurrect {
+  readonly ready: Promise<void>
   private _server: ISorobanRpcClient
-  private _config: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & { rpcClient: ISorobanRpcClient }
+  private _config: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & {
+    rpcClient: ISorobanRpcClient
+  }
+  private _configView: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & {
+    rpcClient: ISorobanRpcClient
+  }
+  private readonly logger: typeof NOOP_LOGGER
+  private _requestId?: string
 
   private readonly _stateMgr: SorobanResurrectStateManager
   private readonly _simulator: SorobanResurrectSimulator
@@ -96,6 +100,8 @@ export class SorobanResurrect {
     const resolved = resolveConfig(config)
     this._server = resolved.server
     this._config = resolved.config
+    this._configView = this.buildConfigView(config)
+    this.logger = this._config.logger ?? NOOP_LOGGER
 
     this._stateMgr = new SorobanResurrectStateManager()
     // Mirror every state transition into the structured log.
@@ -139,9 +145,72 @@ export class SorobanResurrect {
     return this._server
   }
 
+  set server(server: ISorobanRpcClient) {
+    this._server = server
+    this._config.rpcClient = server
+    this._simulator.rebind(server, this._config, this._simulator.cache)
+    this._executor.rebind(server, this._config)
+  }
+
+  private buildConfigView(
+    config: SorobanResurrectConfig,
+  ): Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & { rpcClient: ISorobanRpcClient } {
+    const view = {} as Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & {
+      rpcClient: ISorobanRpcClient
+    }
+    const keys: Array<keyof SorobanResurrectConfig> = [
+      'rpcUrl',
+      'networkPassphrase',
+      'rpcClient',
+      'logger',
+      'pollIntervalMs',
+      'pollTimeoutMs',
+      'restoreFeeMultiplier',
+      'rpcTimeoutMs',
+      'rpcRetryCount',
+      'rpcRetryBackoffMs',
+      'rpcCircuitBreakerThreshold',
+      'rpcCircuitBreakerCooldownMs',
+      'ttlWatchIntervalMs',
+      'ttlWatchThresholdLedgers',
+      'archiveDetectionMethod',
+      'archiveDetectionChunkSize',
+      'archiveDetectionConcurrency',
+      'useSSE',
+      'enableSimulationCache',
+      'simulationCacheTtlMs',
+      'simulationCacheMaxSize',
+      'persistHistory',
+      'maxRestoreFeeStroops',
+      'maxRestoreTxSizeBytes',
+      'restoreSizeWarnRatio',
+      'throwOnRestoreSizeLimit',
+      'restoreTxMemo',
+      'restoreTxMemoText',
+      'ttlWatchAutoExtend',
+      'maxSequenceRetries',
+    ]
+
+    for (const key of keys) {
+      const provided = Object.prototype.hasOwnProperty.call(config, key)
+      Object.defineProperty(view, key, {
+        enumerable: provided,
+        configurable: true,
+        get: () => this._config[key as keyof typeof this._config],
+        set: (value) => {
+          ;(this._config as Record<string, unknown>)[key as string] = value
+        },
+      })
+    }
+
+    return view
+  }
+
   /** Resolved configuration with defaults applied. Re-bound in place by {@link switchNetwork}. */
-  get config(): Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & { rpcClient: ISorobanRpcClient } {
-    return this._config
+  get config(): Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & {
+    rpcClient: ISorobanRpcClient
+  } {
+    return this._configView
   }
 
   // ---------------------------------------------------------------------------
@@ -224,6 +293,7 @@ export class SorobanResurrect {
     invalidateLatestLedgerCache(this._server)
     this._server = resolved.server
     this._config = resolved.config
+    this._configView = this.buildConfigView(overrideConfig)
     this._simulator.rebind(resolved.server, resolved.config, resolved.simulationCache)
     this._executor.rebind(resolved.server, resolved.config)
 
@@ -532,6 +602,13 @@ export class SorobanResurrect {
    * ```
    */
   async submitWithRestore(options: SubmitWithRestoreOptions): Promise<ResurrectResult> {
+    if (!options || !options.transaction || !(options.transaction instanceof Transaction)) {
+      throw new Error('submitWithRestore options.transaction must be a Stellar Transaction')
+    }
+    if (!options.wallet) {
+      throw new Error('submitWithRestore options.wallet must be a WalletAdapter')
+    }
+
     this._requestId = createRequestId()
     this.logger.info('submitWithRestore: start', { requestId: this._requestId })
     try {
@@ -629,7 +706,10 @@ export class SorobanResurrect {
     keys: xdr.LedgerKey[],
     opts: QueryLedgerTTLOptions = {},
   ): Promise<TTLQueryResult> {
-    const cfg = this._config as { archiveDetectionChunkSize?: number; archiveDetectionConcurrency?: number }
+    const cfg = this._config as {
+      archiveDetectionChunkSize?: number
+      archiveDetectionConcurrency?: number
+    }
     return queryLedgerTTL(this._server, keys, {
       chunkSize: cfg.archiveDetectionChunkSize,
       concurrency: cfg.archiveDetectionConcurrency,

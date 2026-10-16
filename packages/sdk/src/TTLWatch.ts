@@ -155,7 +155,7 @@ export function watchTTL(
   opts: TTLWatchOptions = {},
 ): TTLWatchHandle {
   const intervalMs = opts.intervalMs ?? config.ttlWatchIntervalMs
-  const thresholdLedgers = opts.thresholdLedgers ?? config.ttlWatchThreshold
+  const thresholdLedgers = opts.thresholdLedgers ?? config.ttlWatchThresholdLedgers
   const autoExtend = opts.autoExtend ?? config.ttlWatchAutoExtend
 
   if (autoExtend && !opts.wallet) {

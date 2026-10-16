@@ -112,7 +112,8 @@ describe('SorobanResurrect', () => {
         wallet: makeWallet(),
       })
 
-      expect(result).toEqual(mockResult)
+      expect(result).toEqual(expect.objectContaining(mockResult))
+      expect(result.historyId).toEqual(expect.any(String))
       expect(resurrect.state).toBe('success')
     })
 
@@ -241,8 +242,12 @@ describe('SorobanResurrect', () => {
       )
 
       const initialState = resurrect.state
-      await resurrect.buildRestoreTx(Keypair.random().publicKey(), makeSampleTx(), mockRestoreResponse as never)
-      
+      await resurrect.buildRestoreTx(
+        Keypair.random().publicKey(),
+        makeSampleTx(),
+        mockRestoreResponse as never,
+      )
+
       // When providing simulationResponse, state should not change to 'simulating'
       expect(resurrect.state).toBe(initialState)
     })
@@ -256,7 +261,10 @@ describe('SorobanResurrect', () => {
       const mainnet = new SorobanResurrect({ ...testConfig, networkPassphrase: Networks.PUBLIC })
       expect(mainnet.config.networkPassphrase).toBe(Networks.PUBLIC)
 
-      const futurenet = new SorobanResurrect({ ...testConfig, networkPassphrase: Networks.FUTURENET })
+      const futurenet = new SorobanResurrect({
+        ...testConfig,
+        networkPassphrase: Networks.FUTURENET,
+      })
       expect(futurenet.config.networkPassphrase).toBe(Networks.FUTURENET)
     })
 
