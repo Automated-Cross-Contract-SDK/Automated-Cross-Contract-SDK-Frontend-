@@ -4,11 +4,13 @@ import { XBullAdapter } from '../index.js'
 
 const mockConnect = vi.fn()
 const mockSign = vi.fn()
+const mockCloseWallet = vi.fn()
 
 vi.mock('@creit.tech/xbull-wallet-connect', () => ({
   XBullWalletConnect: vi.fn().mockImplementation(() => ({
     connect: mockConnect,
     sign: mockSign,
+    closeWallet: mockCloseWallet,
   })),
 }))
 
@@ -45,12 +47,31 @@ describe('XBullAdapter', () => {
   it('propagates errors from the underlying connect() call', async () => {
     mockConnect.mockRejectedValueOnce(new Error('user rejected connection'))
     const adapter = new XBullAdapter()
-    await expect(adapter.getPublicKey()).rejects.toThrow('user rejected connection')
+    await expect(adapter.getPublicKey()).rejects.toMatchObject({
+      code: 'USER_REJECTED',
+      message: 'xBull: user rejected connection',
+    })
   })
 
   it('signTransaction throws when the wallet is not connected', async () => {
     const adapter = new XBullAdapter()
-    await expect(adapter.signTransaction('AAAA')).rejects.toThrow('xBull: wallet is not connected')
+    await expect(adapter.signTransaction('AAAA')).rejects.toMatchObject({
+      code: 'NOT_CONNECTED',
+      message: 'xBull: wallet is not connected',
+    })
+  })
+
+  it('disconnect clears the adapter connection state', async () => {
+    const adapter = new XBullAdapter()
+    await adapter.getPublicKey()
+
+    await adapter.disconnect()
+
+    expect(await adapter.isConnected()).toBe(false)
+    expect(mockCloseWallet).toHaveBeenCalledOnce()
+    await expect(adapter.signTransaction('AAAAtx')).rejects.toMatchObject({
+      code: 'NOT_CONNECTED',
+    })
   })
 
   it('signTransaction returns base64 XDR and forwards the network passphrase', async () => {
@@ -73,6 +94,28 @@ describe('XBullAdapter', () => {
     mockSign.mockRejectedValueOnce(new Error('user declined'))
     const adapter = new XBullAdapter()
     await adapter.getPublicKey()
-    await expect(adapter.signTransaction('AAAAtx')).rejects.toThrow('user declined')
+    await expect(adapter.signTransaction('AAAAtx')).rejects.toMatchObject({
+      code: 'USER_REJECTED',
+      message: 'xBull: user declined',
+    })
+  })
+
+  it('maps network identifiers and rejects conflicting network options', async () => {
+    const adapter = new XBullAdapter()
+    await adapter.getPublicKey()
+
+    await adapter.signTransaction('AAAAtx', { network: 'public' })
+    expect(mockSign).toHaveBeenLastCalledWith({
+      xdr: 'AAAAtx',
+      publicKey: PUBKEY,
+      network: 'Public Global Stellar Network ; September 2015',
+    })
+
+    await expect(
+      adapter.signTransaction('AAAAtx', {
+        network: 'testnet',
+        networkPassphrase: 'Public Global Stellar Network ; September 2015',
+      }),
+    ).rejects.toMatchObject({ code: 'NETWORK_MISMATCH' })
   })
 })

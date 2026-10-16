@@ -1,6 +1,52 @@
 import { XBullWalletConnect } from '@creit.tech/xbull-wallet-connect'
-import { WalletError, type WalletAdapter, type WalletCapabilities } from '@soroban-resurrect/sdk'
+import {
+  WalletError,
+  type WalletAdapter,
+  type WalletCapabilities,
+  type WalletErrorCode,
+} from '@soroban-resurrect/sdk'
 import { asStellarPublicKey, asXdrBase64 } from '@soroban-resurrect/sdk'
+
+const TESTNET_PASSPHRASE = 'Test SDF Network ; September 2015'
+const PUBLIC_PASSPHRASE = 'Public Global Stellar Network ; September 2015'
+
+function resolveNetwork(opts?: { networkPassphrase?: string; network?: string }): string | undefined {
+  const network = opts?.network
+  const networkPassphrase = opts?.networkPassphrase
+  const expectedPassphrase =
+    network === 'testnet'
+      ? TESTNET_PASSPHRASE
+      : network === 'public' || network === 'mainnet'
+        ? PUBLIC_PASSPHRASE
+        : undefined
+
+  if (network && !expectedPassphrase) {
+    throw new WalletError('NETWORK_MISMATCH', `xBull: unsupported network "${network}"`)
+  }
+  if (expectedPassphrase && networkPassphrase && expectedPassphrase !== networkPassphrase) {
+    throw new WalletError('NETWORK_MISMATCH', 'xBull: network and networkPassphrase disagree')
+  }
+  return networkPassphrase ?? expectedPassphrase
+}
+
+function normalizeError(error: unknown, fallback: WalletErrorCode = 'UNKNOWN'): WalletError {
+  if (error instanceof WalletError) return error
+  const message =
+    error instanceof Error
+      ? error.message
+      : error && typeof error === 'object' && 'message' in error
+        ? String(error.message)
+        : String(error)
+  const lower = message.toLowerCase()
+  const code = /reject|declin|cancel|denied/.test(lower)
+    ? 'USER_REJECTED'
+    : /network/.test(lower)
+      ? 'NETWORK_MISMATCH'
+      : /not connected|not installed|unavailable/.test(lower)
+        ? 'NOT_CONNECTED'
+        : fallback
+  return new WalletError(code, `xBull: ${message}`, error)
+}
 
 /**
  * WalletAdapter implementation for the xBull browser extension wallet.
@@ -25,30 +71,42 @@ export class XBullAdapter implements WalletAdapter {
     return this.publicKey !== undefined
   }
 
+  async disconnect(): Promise<void> {
+    this.connector.closeWallet()
+    this.publicKey = undefined
+  }
+
   async getPublicKey() {
-    const publicKey = await this.connector.connect()
-    this.publicKey = publicKey
-    return asStellarPublicKey(publicKey)
+    this.publicKey = undefined
+    try {
+      const publicKey = await this.connector.connect()
+      if (typeof publicKey !== 'string' || publicKey.length === 0) {
+        throw new WalletError('NOT_CONNECTED', 'xBull: connection returned no public key')
+      }
+      this.publicKey = publicKey
+      return asStellarPublicKey(publicKey)
+    } catch (error) {
+      throw normalizeError(error, 'NOT_CONNECTED')
+    }
   }
 
   async signTransaction(tx: string, opts?: { networkPassphrase?: string; network?: string }) {
     if (!this.publicKey) {
-      throw new Error('xBull: wallet is not connected')
+      throw new WalletError('NOT_CONNECTED', 'xBull: wallet is not connected')
     }
 
     try {
       const signed = await this.connector.sign({
         xdr: tx,
         publicKey: this.publicKey,
-        network: opts?.networkPassphrase,
+        network: resolveNetwork(opts),
       })
+      if (typeof signed !== 'string' || signed.length === 0) {
+        throw new WalletError('UNKNOWN', 'xBull: wallet returned no signed transaction XDR')
+      }
       return asXdrBase64(signed)
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      const code = /reject|declin|cancel|denied/.test(message.toLowerCase())
-        ? 'USER_REJECTED'
-        : 'UNKNOWN'
-      throw new WalletError(code, `xBull: ${message}`, error)
+      throw normalizeError(error)
     }
   }
 }
