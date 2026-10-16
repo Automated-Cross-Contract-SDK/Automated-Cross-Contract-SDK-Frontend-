@@ -12,6 +12,7 @@ import {
   buildRestoreTransaction,
   buildBatchRestoreTransaction,
   buildOriginalAfterRestore,
+  assertRestoreTransactionFresh,
   waitForTransaction,
 } from './Restorer.js'
 import { isRestoreResponse } from './Archiver.js'
@@ -142,6 +143,7 @@ export class SorobanResurrectExecutor {
       sourcePublicKey,
       transactionData: response.transactionData.build(),
       minResourceFee: parseInt(response.minResourceFee, 10),
+      latestLedger: response.latestLedger,
       config: this._config,
     })
   }
@@ -204,6 +206,8 @@ export class SorobanResurrectExecutor {
       if (!(signedTx instanceof Transaction)) {
         throw new Error('Failed to parse signed restore transaction')
       }
+
+      await assertRestoreTransactionFresh(this._server, signedTx, restoreTx)
 
       stateMgr.setState('submitting_restore', 'Submitting restore transaction...')
       opts?.onSubmittingRestore?.()
@@ -560,6 +564,8 @@ export class SorobanResurrectExecutor {
       if (!(signedTx instanceof Transaction)) {
         throw new Error('Failed to parse signed batch restore transaction')
       }
+
+      await assertRestoreTransactionFresh(this._server, signedTx, restoreTx)
 
       stateMgr.setState('submitting_restore', 'Submitting batch restore transaction...')
       const sent = await this._server.sendTransaction(signedTx)

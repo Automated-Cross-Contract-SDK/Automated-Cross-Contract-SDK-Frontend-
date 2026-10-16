@@ -18,6 +18,7 @@ import type {
 } from './types.js'
 import { WalletError } from './types.js'
 import type { ResurrectErrorCode } from './errors.js'
+import { IncompleteFootprintError } from './SimulationFootprint.js'
 import {
   isRestoreResponse,
   isSuccessResponse,
@@ -30,6 +31,7 @@ import {
   waitForTransaction,
   waitForTransactionSSE,
   buildOriginalAfterRestore,
+  assertRestoreTransactionFresh,
   buildFeeBumpTransaction,
   submitFeeBumpTransaction,
   isTxBadSeqError,
@@ -294,6 +296,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
         sourcePublicKey: publicKey,
         transactionData: simResponse.transactionData.build(),
         minResourceFee: parseInt(simResponse.minResourceFee, 10),
+        latestLedger: simResponse.latestLedger,
         config,
         account,
       })
@@ -317,6 +320,8 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
           errorCode: 'RESTORE_TX_PARSE_FAILED',
         }
       }
+
+      await assertRestoreTransactionFresh(server, signedRestoreTx, restoreTx)
 
       onSubmittingRestore?.()
       const restoreResult = await server.sendTransaction(signedRestoreTx)
@@ -395,9 +400,6 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
           error: err,
           sequenceRetries,
         }
-
-        originalHash = asTxHash(originalResult.hash)
-        break
       }
 
       const originalHash = asTxHash(originalResult!.hash)
@@ -409,16 +411,6 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
         restoreTxHash: restoreHash,
         archivedKeysDetected: archivedKeys.length,
         sequenceRetries,
-      }
-
-      const originalResult = await server.sendTransaction(signedOriginalTx)
-      onOriginalSubmitted?.(originalResult.hash)
-
-      return {
-        success: true,
-        originalTxHash: originalResult.hash,
-        restoreTxHash: restoreResult.hash,
-        archivedKeysDetected: archivedKeys.length,
       }
     }
 
@@ -466,7 +458,9 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       }
     }
 
-    const err = 'Unexpected simulation response type'
+    const err =
+      'Cannot safely recover from simulation response (unrecognized-response): ' +
+      'the RPC response is not a recognized success, error, or restore response.'
     onRestoreFailed?.(err)
     return {
       success: false,
@@ -477,7 +471,12 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
   } catch (err) {
     const message = walletErrorMessage(err)
     onRestoreFailed?.(message)
-    return { success: false, archivedKeysDetected: 0, error: message, errorCode: 'UNKNOWN_ERROR' }
+    return {
+      success: false,
+      archivedKeysDetected: 0,
+      error: message,
+      errorCode: err instanceof IncompleteFootprintError ? 'INCOMPLETE_FOOTPRINT' : 'UNKNOWN_ERROR',
+    }
   }
 }
 
@@ -672,6 +671,7 @@ export async function restoreKeys(params: RestoreKeysParams): Promise<ResurrectR
       sourcePublicKey: publicKey,
       transactionData,
       minResourceFee,
+      latestLedger: simResponse.latestLedger,
       config,
       account,
     })
@@ -687,6 +687,8 @@ export async function restoreKeys(params: RestoreKeysParams): Promise<ResurrectR
         error: 'Failed to parse signed restore transaction',
       }
     }
+
+    await assertRestoreTransactionFresh(server, signedTx, restoreTx)
 
     const sendResult = await server.sendTransaction(signedTx)
     if (isTxBadSeqError(sendResult)) {

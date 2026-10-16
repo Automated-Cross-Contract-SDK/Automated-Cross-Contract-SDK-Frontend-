@@ -68,11 +68,34 @@ Only override the methods you care about — spreading `...client` first means
 every method not explicitly overridden still delegates to the wrapped
 client, so `ISorobanRpcClient`'s six-method contract stays satisfied.
 
+## Check restore compatibility
+
+Use `checkNetworkCapabilities()` before enabling restore flows in an
+application to verify that the configured endpoint targets the expected
+network, supports protocol 20 or later, and exposes the RPC methods required
+by this SDK:
+
+```typescript
+const report = await sdk.checkNetworkCapabilities()
+
+if (report.status !== 'compatible') {
+  console.warn(report.messages)
+  // 'incompatible' is a confirmed mismatch; 'unknown' means the endpoint
+  // or custom client did not provide enough information to verify support.
+}
+```
+
+The method checks `getNetwork()` and `getVersionInfo()` in addition to the
+SDK's required RPC methods. These two metadata probes are optional for
+custom `ISorobanRpcClient` implementations; when omitted or unavailable, the
+report is `unknown`, not a false claim of compatibility. Implement and
+forward both methods in custom wrappers for a complete report.
+
 ## Example: a test double
 
 Implement `ISorobanRpcClient` directly for unit tests. TypeScript enforces
-that all six methods are present, so a mock can't silently omit one the code
-under test ends up calling:
+that all six required methods are present; `getNetwork()` and
+`getVersionInfo()` are optional so older custom clients remain usable:
 
 ```typescript
 import type { ISorobanRpcClient } from '@soroban-resurrect/sdk'

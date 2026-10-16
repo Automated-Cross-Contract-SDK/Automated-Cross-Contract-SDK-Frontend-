@@ -30,6 +30,9 @@ import {
 } from './TTLHelpers.js'
 import type { LedgerEntryTTLInfo, QueryLedgerTTLOptions, TTLQueryResult } from './TTLHelpers.js'
 import { NETWORK_PRESETS } from './constants.js'
+import { createDebugger } from './Debug.js'
+import { checkNetworkCapabilities } from './NetworkCapabilities.js'
+import type { SorobanNetworkCapabilityReport } from './NetworkCapabilities.js'
 import { watchTTL, type TTLWatchHandle, type TTLWatchOptions } from './TTLWatch.js'
 import type { SorobanNetworkName } from './constants.js'
 
@@ -142,6 +145,15 @@ export class SorobanResurrect {
   /** Resolved configuration with defaults applied. Re-bound in place by {@link switchNetwork}. */
   get config(): Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & { rpcClient: ISorobanRpcClient } {
     return this._config
+  }
+
+  /**
+   * Checks whether the configured RPC client and network support the restore
+   * flow. The returned report distinguishes incompatible results from
+   * unknown results when the endpoint or a custom client cannot be probed.
+   */
+  checkNetworkCapabilities(): Promise<SorobanNetworkCapabilityReport> {
+    return checkNetworkCapabilities(this._server, this._config.networkPassphrase)
   }
 
   // ---------------------------------------------------------------------------

@@ -11,6 +11,7 @@ import { extractArchivedKeysSafe, extractFootprintFromSuccessSafe } from './resu
 import type { ISorobanRpcClient } from './RpcClient.js'
 import { createDebugger } from './Debug.js'
 import { LEDGER_ENTRY_CHUNK_SIZE, LEDGER_ENTRY_CONCURRENCY } from './constants.js'
+import { IncompleteFootprintError, readSimulationFootprint } from './SimulationFootprint.js'
 
 const debug = createDebugger('archiver')
 
@@ -89,33 +90,18 @@ export function isErrorResponse(
 export function extractArchivedKeys(
   response: rpc.Api.SimulateTransactionRestoreResponse,
 ): ArchivedLedgerEntry[] {
-  const keys: ArchivedLedgerEntry[] = []
-
-  if (!response._parsed) {
-    console.warn(
-      'SorobanResurrect: restore simulation response has _parsed=false, cannot extract archived keys',
-    )
-    return keys
-  }
-
+  const { readWrite } = readSimulationFootprint(response, { requireReadWrite: true })
   try {
-    const footprint = response.transactionData.getFootprint()
-    const readWrite = footprint.readWrite()
-
-    for (const ledgerKey of readWrite) {
-      const keyBase64 = asXdrBase64(ledgerKey.toXDR('base64'))
-      keys.push({
-        key: ledgerKey,
-        keyBase64,
-      })
-    }
-  } catch (err) {
-    debug('extractArchivedKeys: failed to read footprint', err)
-    return keys
+    return readWrite.map((ledgerKey) => ({
+      key: ledgerKey,
+      keyBase64: asXdrBase64(ledgerKey.toXDR('base64')),
+    }))
+  } catch (error) {
+    throw new IncompleteFootprintError(
+      'invalid-footprint',
+      `a read-write ledger key could not be serialized: ${error instanceof Error ? error.message : String(error)}.`,
+    )
   }
-
-  debug('extractArchivedKeys: %d archived key(s) in restore footprint', keys.length)
-  return keys
 }
 
 /**
@@ -133,22 +119,7 @@ export function extractFootprintFromSuccess(response: rpc.Api.SimulateTransactio
   readOnly: xdr.LedgerKey[]
   readWrite: xdr.LedgerKey[]
 } {
-  if (!response._parsed) {
-    console.warn(
-      'SorobanResurrect: success simulation response has _parsed=false, cannot extract footprint',
-    )
-    return { readOnly: [], readWrite: [] }
-  }
-
-  try {
-    const footprint = response.transactionData.getFootprint()
-    return {
-      readOnly: footprint.readOnly() || [],
-      readWrite: footprint.readWrite() || [],
-    }
-  } catch {
-    return { readOnly: [], readWrite: [] }
-  }
+  return readSimulationFootprint(response)
 }
 
 /**
@@ -307,7 +278,13 @@ export async function detectArchivedKeysViaSimulation(
     return extractArchivedKeys(response)
   }
 
-  return []
+  if (isSuccessResponse(response) || isErrorResponse(response)) {
+    return []
+  }
+  throw new IncompleteFootprintError(
+    'unrecognized-response',
+    'the RPC response is not a recognized success, error, or restore response.',
+  )
 }
 
 /**
@@ -347,7 +324,10 @@ export async function detectArchivedKeysViaDirect(
   }
 
   if (!isSuccessResponse(response)) {
-    throw new Error('Unexpected simulation response type')
+    throw new IncompleteFootprintError(
+      'unrecognized-response',
+      'the RPC response is not a recognized success, error, or restore response.',
+    )
   }
 
   const { readWrite } = extractFootprintFromSuccess(response)

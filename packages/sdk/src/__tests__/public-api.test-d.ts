@@ -79,6 +79,10 @@ type PublicExports =
   | 'SorobanResurrectSimulator'
   | 'SorobanResurrectExecutor'
   | 'queryLedgerTTL'
+  | 'RESTORE_TX_LEDGER_BOUNDS_WINDOW'
+  | 'checkNetworkCapabilities'
+  | 'MIN_RESTORE_PROTOCOL_VERSION'
+  | 'IncompleteFootprintError'
   | 'queryLedgerEntryTTL'
   | 'getExpiringSoonEntries'
   | 'getArchivedEntries'
@@ -105,6 +109,11 @@ type PublicExports =
   | 'createRequestId'
   | 'LoggingRpcClient'
   | 'withRpcLogging'
+  | 'NetworkCapabilityCheck'
+  | 'NetworkCapabilityStatus'
+  | 'NetworkCompatibilityStatus'
+  | 'SorobanNetworkCapabilityReport'
+  | 'IncompleteFootprintCondition'
 
 test('all documented public exports are present on the barrel', () => {
   expectTypeOf<PublicExports>().toMatchTypeOf<keyof typeof sdk>()

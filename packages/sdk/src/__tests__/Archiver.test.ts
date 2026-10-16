@@ -96,56 +96,54 @@ describe('Archiver', () => {
   })
 
   describe('extractArchivedKeys', () => {
-    it('returns empty array when footprint has no readWrite entries', () => {
-      const keys = extractArchivedKeys(makeMockRestoreResponse())
-      expect(keys).toEqual([])
+    it('rejects an empty restore readWrite footprint', () => {
+      expect(() => extractArchivedKeys(makeMockRestoreResponse())).toThrow(
+        /empty-read-write-footprint/,
+      )
     })
 
-    it('returns empty array gracefully on parse failure', () => {
+    it('reports a footprint parse failure', () => {
       const response = makeMockRestoreResponse()
       Object.defineProperty(response.transactionData, 'getFootprint', {
         value: () => {
           throw new Error('bad data')
         },
       })
-      expect(extractArchivedKeys(response)).toEqual([])
+      expect(() => extractArchivedKeys(response)).toThrow(/invalid-footprint.*bad data/)
     })
 
-    it('returns empty array for an explicitly empty readWrite array', () => {
+    it('reports an explicitly empty readWrite array', () => {
       const response = makeMockRestoreResponse()
       Object.defineProperty(response.transactionData, 'getFootprint', {
         value: () => ({ readOnly: () => [], readWrite: () => [] }),
       })
-      expect(extractArchivedKeys(response)).toEqual([])
+      expect(() => extractArchivedKeys(response)).toThrow(/empty-read-write-footprint/)
     })
 
-    it('returns empty array when the footprint itself is undefined', () => {
+    it('reports when the footprint itself is undefined', () => {
       const response = makeMockRestoreResponse()
       Object.defineProperty(response.transactionData, 'getFootprint', {
         value: () => undefined,
       })
-      expect(extractArchivedKeys(response)).toEqual([])
+      expect(() => extractArchivedKeys(response)).toThrow(/missing-footprint/)
     })
 
-    it('returns empty array when readWrite() returns undefined', () => {
+    it('reports when readWrite() returns undefined', () => {
       const response = makeMockRestoreResponse()
       Object.defineProperty(response.transactionData, 'getFootprint', {
         value: () => ({ readOnly: () => [], readWrite: () => undefined }),
       })
-      expect(extractArchivedKeys(response)).toEqual([])
+      expect(() => extractArchivedKeys(response)).toThrow(/missing-read-write-entries/)
     })
 
-    it('returns empty array for a malformed response missing transactionData', () => {
+    it('reports a malformed response missing transactionData', () => {
       const response = { ...makeMockRestoreResponse(), transactionData: undefined } as never
-      expect(extractArchivedKeys(response)).toEqual([])
+      expect(() => extractArchivedKeys(response)).toThrow(/missing-transaction-data/)
     })
 
-    it('warns and returns empty array when the response has _parsed=false', () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    it('reports when the response has _parsed=false', () => {
       const response = { ...makeMockRestoreResponse(), _parsed: false } as never
-      expect(extractArchivedKeys(response)).toEqual([])
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('_parsed=false'))
-      warnSpy.mockRestore()
+      expect(() => extractArchivedKeys(response)).toThrow(/unparsed-response/)
     })
 
     it('ignores readOnly entries and only extracts readWrite keys', () => {
@@ -228,16 +226,14 @@ describe('Archiver', () => {
       expect(result.readWrite).toEqual([])
     })
 
-    it('returns empty on parse failure', () => {
+    it('reports a parse failure', () => {
       const response = makeMockSuccessResponse()
       Object.defineProperty(response.transactionData, 'getFootprint', {
         value: () => {
           throw new Error('bad')
         },
       })
-      const result = extractFootprintFromSuccess(response)
-      expect(result.readOnly).toEqual([])
-      expect(result.readWrite).toEqual([])
+      expect(() => extractFootprintFromSuccess(response)).toThrow(/invalid-footprint.*bad/)
     })
   })
 

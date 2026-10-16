@@ -15,6 +15,10 @@ import { calculateRestoreFee } from './feeCalculation.js'
 import { isErrorResponse } from './Archiver.js'
 import { DEFAULT_NETWORK_PASSPHRASE } from './constants.js'
 import { asXdrBase64, asTxHash } from './branded-types.js'
+import {
+  assertRestoreTransactionFresh,
+  RESTORE_TX_LEDGER_BOUNDS_WINDOW,
+} from './Restorer.js'
 
 /** Options for {@link watchTTL}. */
 export interface TTLWatchOptions {
@@ -104,6 +108,7 @@ async function buildRestoreTxForKeys(
     .addOperation(Operation.restoreFootprint({}))
     .setSorobanData(draftData)
     .setTimeout(30)
+    .setLedgerbounds(sim.latestLedger, sim.latestLedger + RESTORE_TX_LEDGER_BOUNDS_WINDOW)
     .build()
 
   const sim = await server.simulateTransaction(draftTx)
@@ -203,6 +208,8 @@ export function watchTTL(
       if (!(signedTx instanceof Transaction)) {
         throw new Error('Failed to parse signed TTL auto-extend transaction')
       }
+
+      await assertRestoreTransactionFresh(server, signedTx, restoreTx)
 
       const sent = await server.sendTransaction(signedTx)
       const hash = asTxHash(sent.hash)

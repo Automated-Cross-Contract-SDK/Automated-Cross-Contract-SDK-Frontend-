@@ -144,6 +144,19 @@ export {
 } from './TTLHelpers.js'
 export { fetchLedgerEntriesChunked } from './ledgerChunks.js'
 export type { ChunkedFetchOptions } from './ledgerChunks.js'
+export { RESTORE_TX_LEDGER_BOUNDS_WINDOW } from './Restorer.js'
+export {
+  checkNetworkCapabilities,
+  MIN_RESTORE_PROTOCOL_VERSION,
+} from './NetworkCapabilities.js'
+export { IncompleteFootprintError } from './SimulationFootprint.js'
+export type { IncompleteFootprintCondition } from './SimulationFootprint.js'
+export type {
+  NetworkCapabilityCheck,
+  NetworkCapabilityStatus,
+  NetworkCompatibilityStatus,
+  SorobanNetworkCapabilityReport,
+} from './NetworkCapabilities.js'
 
 // ---------------------------------------------------------------------------
 // Proactive TTL watching (resurrect.watchTTL)

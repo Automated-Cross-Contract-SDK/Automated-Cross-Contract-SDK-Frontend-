@@ -4,6 +4,7 @@ import { SimulationCache } from './SimulationCache.js'
 import { isRestoreResponse, isSuccessResponse, isErrorResponse, extractArchivedKeys } from './Archiver.js'
 import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
 import type { ISorobanRpcClient } from './RpcClient.js'
+import { IncompleteFootprintError, readSimulationFootprint } from './SimulationFootprint.js'
 
 /**
  * Handles transaction simulation and archived-entry detection for a single
@@ -108,6 +109,9 @@ export class SorobanResurrectSimulator {
       }
       return await this._detectViaSimulation(transaction)
     } catch (err) {
+      if (err instanceof IncompleteFootprintError) {
+        throw err
+      }
       console.warn('SorobanResurrect: archive detection error:', err)
       return []
     }
@@ -142,11 +146,23 @@ export class SorobanResurrectSimulator {
   private async _detectViaSimulation(transaction: Transaction): Promise<ArchivedLedgerEntry[]> {
     const response = await this.simulate(transaction)
 
+    if (response._parsed !== true) {
+      throw new IncompleteFootprintError(
+        'unparsed-response',
+        'the RPC response has _parsed=false, so archive status cannot be determined safely.',
+      )
+    }
+
     if (isRestoreResponse(response)) {
       return extractArchivedKeys(response)
     }
 
-    if (isSuccessResponse(response) || isErrorResponse(response)) {
+    if (isSuccessResponse(response)) {
+      readSimulationFootprint(response)
+      return []
+    }
+
+    if (isErrorResponse(response)) {
       return []
     }
 
