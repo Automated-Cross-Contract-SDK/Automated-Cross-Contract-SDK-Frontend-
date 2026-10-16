@@ -11,6 +11,12 @@
 // Main class
 // ---------------------------------------------------------------------------
 export { SorobanResurrect } from './SorobanResurrect.js'
+export { getEffectiveConfig } from './SorobanResurrectConfig.js'
+export type { EffectiveSorobanResurrectConfig } from './SorobanResurrectConfig.js'
+export type {
+  SubmitWithRestoreConfigOverrides,
+  SubmitWithRestoreRequestOptions,
+} from './RequestConfigOverrides.js'
 
 // ---------------------------------------------------------------------------
 // Network presets / switching helper

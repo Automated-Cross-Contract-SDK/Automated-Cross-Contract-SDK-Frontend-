@@ -12,101 +12,108 @@ and behaves exactly like a built-in one.
 
 ```ts
 interface WalletAdapter {
-  /** Stable identifier, usually a `KnownWallet` value. */
-  readonly id: string;
-  /** Human-readable name shown in the UI. */
-  readonly name: string;
-  /** Capabilities this adapter supports. */
-  readonly capabilities: WalletCapabilities;
-  /** Connect and return the active account. */
-  connect(): Promise<WalletAccount>;
-  /** Disconnect and release any transport/resources. */
-  disconnect(): Promise<void>;
-  /** Sign a transaction or message payload. */
-  sign(payload: SignPayload): Promise<SignedPayload>;
+  readonly capabilities?: WalletCapabilities;
+  isConnected(): Promise<boolean>;
+  getPublicKey(): Promise<string>;
+  signTransaction(
+    tx: string,
+    opts?: { networkPassphrase?: string; network?: string },
+  ): Promise<string>;
+  signAuthEntry?(
+    authEntryXdr: string,
+    opts?: { networkPassphrase?: string; address?: string },
+  ): Promise<string>;
 }
 ```
 
 ## The `createAdapter` factory
 
-`createAdapter` is the public entry point for constructing an adapter. It
-normalises the wallet id, validates the requested capabilities, and wires up the
-correct concrete implementation (including hardware transports).
+`createAdapter` lazily loads a browser adapter or constructs a hardware adapter.
+The returned promise resolves to a ready-to-connect `WalletAdapter`.
 
 ```ts
-import { createAdapter, KnownWallet } from '@your-sdk/wallets';
+import { createAdapter } from '@soroban-resurrect/sdk';
 
-const adapter = createAdapter({
-  wallet: KnownWallet.Phantom,
-  // Optional: restrict or extend the capabilities the adapter advertises.
-  capabilities: { signTransaction: true, signMessage: true },
+const adapter = await createAdapter('freighter');
+
+const publicKey = await adapter.getPublicKey();
+const signedXdr = await adapter.signTransaction(transaction.toXDR(), {
+  networkPassphrase,
 });
-
-await adapter.connect();
-const signed = await adapter.sign({ transaction });
 ```
 
 ### `KnownWallet` values
 
-`KnownWallet` enumerates every wallet the SDK ships an adapter for. The same
+`KnownWallet` is a string union of every adapter the SDK can load. The same
 values are exposed at runtime through `SUPPORTED_WALLETS`.
 
-| `KnownWallet` value | Wallet | Notes |
-| --- | --- | --- |
-| `KnownWallet.Phantom` | Phantom | Browser extension / mobile |
-| `KnownWallet.Solflare` | Solflare | Browser extension / mobile |
-| `KnownWallet.Backpack` | Backpack | Browser extension |
-| `KnownWallet.Glow` | Glow | Browser extension |
-| `KnownWallet.Ledger` | Ledger | Hardware, requires transport + manifest |
-| `KnownWallet.Trezor` | Trezor | Hardware, requires transport + manifest |
+## Wallet compatibility matrix
+
+All adapters sign complete Stellar transaction envelopes with
+`signTransaction`. CAP-0046 authorization-entry signing is only available where
+the table says so. A wallet's own network selection must match the SDK's
+`networkPassphrase`; only adapters that explicitly accept and use that option
+can pass it through to the wallet.
+
+| Wallet / adapter | Signing behavior and required options | Known limitations | Tested adapter / provider API version |
+| --- | --- | --- | --- |
+| Freighter (`freighter`) | Signs envelopes and supports `signAuthEntry`; accepts `networkPassphrase`. No constructor options. | Does not submit transactions; the app submits the returned signed XDR. Its `network` option is not used. | Adapter `0.1.0`; `@stellar/freighter-api` `3.1.0` (mocked API tests). |
+| xBull (`xbull`) | Signs envelopes; connect before signing. For signing, `networkPassphrase` is forwarded as the connector's `network`. | No CAP-0046 signing. The separate `network` option is ignored. | Adapter `0.1.0`; `@creit.tech/xbull-wallet-connect` `0.4.0` (mocked API tests). |
+| Albedo (`albedo`) | Signs envelopes; no constructor options. Accepts `network` (defaults to `testnet`) and `networkPassphrase`. | No CAP-0046 signing. Configure `network` for the Albedo network and keep it consistent with the SDK passphrase. | Adapter `0.1.0`; `@albedo-link/intent` `0.11.2` (mocked API tests). |
+| LOBSTR (`lobstr`) | Signs envelopes; connect the extension and select the target network there. | The signer API accepts only XDR, so the adapter cannot forward network options. No CAP-0046 signing. | Adapter `0.1.0`; `@lobstrco/signer-extension-api` `2.1.0` (mocked API tests). |
+| Rabet (`rabet`) | Signs envelopes; accepts an optional injected `rabet` API for non-browser use and tests. | Maps the public-network passphrase to Rabet's `mainnet`; all other passphrases map to `testnet` (no Futurenet distinction). No CAP-0046 signing. | Adapter `0.1.0`; injected API mock (Rabet extension version is not pinned). |
+| WalletConnect (`walletconnect`) | Signs envelopes with `stellar_signXDR`; requires an approved `client`, `session`, and `networkPassphrase`. The session must grant an account on the matching Stellar chain. | Supports Testnet and Public only; no Futurenet mapping, CAP-0046 signing, or adapter-managed pairing lifecycle. | Adapter `0.1.0`; structural mocked client (WalletConnect SignClient version is app-selected). |
+| Stellar Wallets Kit (`walletkit`) | Signs envelopes through the currently selected Kit signer; requires a configured `kit` instance. | No CAP-0046 signing. Hardware support depends on the selected signer. The app owns wallet selection and Kit setup. | Adapter `0.1.0`; `@creit.tech/stellar-wallets-kit` peer `>=1.0.0` (no pinned version). |
+| Ledger (`ledger`) | Signs envelopes on-device; requires a transport and a connected Stellar app. `accountIndex` defaults to `0`; `networkPassphrase` defaults to Testnet. | No CAP-0046 signing. Requires `@ledgerhq/hw-app-str` and a compatible transport supplied by the app; physical confirmation is required. | SDK adapter `0.1.0`; optional device packages are app-supplied and not pinned. |
+| Trezor (`trezor`) | Signs envelopes on-device; requires `trezorConnect` and a manifest (`email`, `appUrl`). `accountIndex` defaults to `0`; `networkPassphrase` defaults to Testnet. | No CAP-0046 signing. Requires `@trezor/connect-web` (or compatible Connect instance); physical confirmation is required. | SDK adapter `0.1.0`; optional Connect package is app-supplied and not pinned. |
+
+The provider versions above are the versions in this repository's lockfile at
+the time of testing. Adapter unit tests use mocks where a test suite is
+available; CI does not claim to test specific browser-extension releases,
+mobile wallet releases, device firmware, or hardware transports. Pin and test
+those separately in the consuming app.
+`walletkit` and `walletconnect` are optional integration layers and do not
+install or select a wallet provider on the application's behalf.
 
 ```ts
-import { SUPPORTED_WALLETS } from '@your-sdk/wallets';
+import { SUPPORTED_WALLETS } from '@soroban-resurrect/sdk';
 
 // Iterate every wallet the SDK can build an adapter for.
 for (const wallet of SUPPORTED_WALLETS) {
-  console.log(wallet.id, wallet.name, wallet.capabilities);
+  console.log(wallet);
 }
 ```
 
 ## Capability flags
 
-Each adapter advertises a `capabilities` object. The SDK checks these flags
-before dispatching work, so an unsupported call fails fast instead of silently
-misbehaving.
+Each adapter advertises a `capabilities` object. The SDK uses
+`signAuthEntry`, `feeBump`, and `hardware` to select or reject workflow paths.
+An omitted flag means the adapter does not declare that capability.
 
-| Flag | Meaning | SDK behaviour that depends on it |
+| Flag | Meaning | SDK behavior |
 | --- | --- | --- |
-| `signTransaction` | Can sign transactions. | Required by `sign({ transaction })`; the SDK throws if a transaction is submitted to an adapter without it. |
-| `signMessage` | Can sign arbitrary messages. | Gates `sign({ message })` and any message-based auth flow. |
-| `signAndSendTransaction` | Can sign and broadcast in one step. | Enables the one-shot send path; otherwise the SDK signs then broadcasts separately. |
-| `hardware` | Backed by a physical device. | Switches the SDK into hardware UX: it prompts for device confirmation and can warn about blind signing. |
-| `blindSigning` | Device may sign payloads it cannot fully display. | When `hardware` is set and the payload is not fully parseable, the SDK emits a blind-signing warning before proceeding. |
+| `signAuthEntry` | Can sign CAP-0046 authorization entries. | Enables address-credential signing when the simulated transaction requires it. |
+| `feeBump` | Can sign a fee-bump envelope. | Required when `feeBumpConfig` is supplied to the workflow. |
+| `hardware` | Signs through a physical device. | Identifies adapters that require device interaction; the adapter does not infer blind-signing support. |
 
 ## Hardware wallets
 
-Hardware adapters (`LedgerWalletAdapter`, `TrezorWalletAdapter`) need two extra
-pieces beyond a normal adapter: a **transport** to talk to the device and a
-**manifest** so the device can show the requesting app to the user.
+Ledger needs a **transport** to talk to the device. Trezor needs a
+**TrezorConnect instance** and a **manifest** so the device can show the
+requesting app to the user.
 
 ### Ledger
 
 ```bash
-npm install @ledgerhq/hw-transport-webhid @ledgerhq/hw-app-solana
+npm install @ledgerhq/hw-transport-webusb @ledgerhq/hw-app-str
 ```
 
 ```ts
-import { createAdapter, KnownWallet } from '@your-sdk/wallets';
-import type { LedgerAdapterConfig } from '@your-sdk/wallets';
+import TransportWebUSB from '@ledgerhq/hw-transport-webusb';
+import { createAdapter } from '@soroban-resurrect/sdk';
 
-const config: LedgerAdapterConfig = {
-  // A transport factory, e.g. WebHID in the browser.
-  transport: () => TransportWebHID.create(),
-  // Optional derivation path; defaults to the standard Solana path.
-  derivationPath: "44'/501'/0'/0'",
-};
-
-const adapter = createAdapter({ wallet: KnownWallet.Ledger, config });
+const transport = await TransportWebUSB.create();
+const adapter = await createAdapter('ledger', { transport, accountIndex: 0 });
 await adapter.connect();
 ```
 
@@ -117,19 +124,17 @@ npm install @trezor/connect-web
 ```
 
 ```ts
-import { createAdapter, KnownWallet } from '@your-sdk/wallets';
-import type { TrezorAdapterConfig } from '@your-sdk/wallets';
+import TrezorConnect from '@trezor/connect-web';
+import { createAdapter } from '@soroban-resurrect/sdk';
 
-const config: TrezorAdapterConfig = {
-  // Trezor Connect manifest is required by the device.
+const adapter = await createAdapter('trezor', {
+  trezorConnect: TrezorConnect,
   manifest: {
     email: 'dev@example.com',
     appUrl: 'https://example.com',
   },
-  derivationPath: "44'/501'/0'/0'",
-};
-
-const adapter = createAdapter({ wallet: KnownWallet.Trezor, config });
+  accountIndex: 0,
+});
 await adapter.connect();
 ```
 
@@ -142,41 +147,37 @@ wallets:
   round-trips and on-device confirmation. Software wallets typically sign in
   well under a second.
 - **Confirmation.** The user must physically approve each signature on the
-device. The SDK surfaces a pending state while it waits.
-- **Blind signing.** If the device cannot fully display the payload, the SDK
-  warns the user before signing (see the `blindSigning` capability).
+  device. The SDK surfaces a pending state while it waits.
+- **Transaction display.** Device display and blind-signing behavior depend on
+  the installed Stellar app, firmware, and transaction contents; verify the
+  current device behavior before production use.
 - **Connection.** The transport can drop (device unplugged, tab backgrounded).
   Handle `disconnect()` and reconnect rather than assuming a persistent session.
 
 ## Custom adapters
 
-Implement `WalletAdapter` and pass it through `createAdapter` to integrate a
-wallet the SDK does not ship.
+Implement `WalletAdapter` to integrate a wallet the SDK does not ship, then
+pass that instance to `submitWithRestore`.
 
 ```ts
-import { createAdapter, type WalletAdapter } from '@your-sdk/wallets';
+import type { WalletAdapter } from '@soroban-resurrect/sdk';
 
 const myAdapter: WalletAdapter = {
-  id: 'my-wallet',
-  name: 'My Wallet',
   capabilities: {
-    signTransaction: true,
-    signMessage: true,
-    signAndSendTransaction: false,
+    signAuthEntry: false,
+    feeBump: false,
     hardware: false,
-    blindSigning: false,
   },
-  async connect() {
-    // Establish a session and return the active account.
-    return { address: await myWallet.requestAccount() };
+  async isConnected() {
+    return myWallet.isConnected();
   },
-  async disconnect() {
-    await myWallet.close();
+  async getPublicKey() {
+    return myWallet.getPublicKey();
   },
-  async sign(payload) {
-    return myWallet.sign(payload);
+  async signTransaction(tx, opts) {
+    return myWallet.signTransaction(tx, opts);
   },
 };
 
-const adapter = createAdapter({ adapter: myAdapter });
+await sr.submitWithRestore({ transaction, wallet: myAdapter });
 ```

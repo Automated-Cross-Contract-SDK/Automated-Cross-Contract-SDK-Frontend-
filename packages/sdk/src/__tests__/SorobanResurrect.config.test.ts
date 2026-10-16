@@ -11,6 +11,8 @@ import {
 } from '@stellar/stellar-sdk'
 import type { SorobanResurrectConfig } from '../types.js'
 import { RESTORE_FEE_MULTIPLIER, KNOWN_NETWORK_PASSPHRASES } from '../constants.js'
+import { getEffectiveConfig } from '../SorobanResurrectConfig.js'
+import { resolveSubmitConfig } from '../RequestConfigOverrides.js'
 
 function makeSampleTx(): Transaction {
   const kp = Keypair.random()
@@ -25,7 +27,59 @@ function makeSampleTx(): Transaction {
 }
 
 describe('SorobanResurrect — config change reactivity', () => {
+  describe('getEffectiveConfig', () => {
+    it('returns a validated snapshot with defaults and no runtime clients', () => {
+      const settings = getEffectiveConfig({
+        rpcUrl: 'https://soroban-testnet.stellar.org',
+      })
+
+      expect(settings).toMatchObject({
+        rpcUrl: 'https://soroban-testnet.stellar.org',
+        networkPassphrase: Networks.TESTNET,
+        pollIntervalMs: 1000,
+        pollTimeoutMs: 60_000,
+        restoreFeeMultiplier: RESTORE_FEE_MULTIPLIER,
+        maxRestoreFeeStroops: 10_000_000,
+        maxSequenceRetries: 3,
+        archiveDetectionChunkSize: 50,
+        archiveDetectionConcurrency: 4,
+        ttlWatchThreshold: 100,
+      })
+      expect(settings).not.toHaveProperty('rpcClient')
+      expect(Object.isFrozen(settings)).toBe(true)
+    })
+
+    it('preserves explicit effective settings and rejects invalid configuration', () => {
+      const settings = getEffectiveConfig({
+        rpcUrl: 'https://custom.example.com',
+        networkPassphrase: Networks.PUBLIC,
+        pollIntervalMs: 250,
+        restoreFeeMultiplier: 7,
+      })
+
+      expect(settings.networkPassphrase).toBe(Networks.PUBLIC)
+      expect(settings.pollIntervalMs).toBe(250)
+      expect(settings.restoreFeeMultiplier).toBe(7)
+      expect(() => getEffectiveConfig({ rpcUrl: 'ftp://custom.example.com' })).toThrow(
+        'Invalid config.rpcUrl',
+      )
+    })
+  })
+
   describe('config snapshot isolation', () => {
+    it('exposes the resolved instance config as an immutable snapshot', () => {
+      const resurrect = new SorobanResurrect({
+        rpcUrl: 'https://soroban-testnet.stellar.org',
+        restoreFeeMultiplier: 5,
+      })
+
+      expect(Object.isFrozen(resurrect.config)).toBe(true)
+      expect(() => {
+        ;(resurrect.config as { restoreFeeMultiplier: number }).restoreFeeMultiplier = 3
+      }).toThrow(TypeError)
+      expect(resurrect.config.restoreFeeMultiplier).toBe(5)
+    })
+
     it('is not affected by mutating the config object passed to the constructor after construction', () => {
       const inputConfig: SorobanResurrectConfig = {
         rpcUrl: 'https://soroban-testnet.stellar.org',
@@ -105,7 +159,7 @@ describe('SorobanResurrect — config change reactivity', () => {
         useSSE: false,
       })
 
-      expect(resurrect.config).toEqual({
+      expect(resurrect.config).toMatchObject({
         rpcUrl: 'https://custom.example.com',
         networkPassphrase: Networks.PUBLIC,
         pollIntervalMs: 250,
@@ -125,7 +179,7 @@ describe('SorobanResurrect — config change reactivity', () => {
           rpcUrl: 'https://soroban-testnet.stellar.org',
           networkPassphrase: 'Some Made Up Network ; 2024',
         }),
-      ).toThrow(/Invalid network passphrase/)
+      ).toThrow(/Invalid config\.networkPassphrase/)
     })
 
     it.each(KNOWN_NETWORK_PASSPHRASES)('does not warn for known network passphrase %s', (passphrase) => {
@@ -141,8 +195,60 @@ describe('SorobanResurrect — config change reactivity', () => {
     })
   })
 
-  describe('reactivity to config mutated after initialization', () => {
-    it('reflects a post-construction change to restoreFeeMultiplier in subsequent buildRestoreTx calls', async () => {
+  describe('request-specific config overrides', () => {
+    it('applies overrides to a frozen request snapshot without mutating instance config', () => {
+      const baseConfig = {
+        rpcUrl: 'https://soroban-testnet.stellar.org',
+        pollIntervalMs: 1000,
+        pollTimeoutMs: 60_000,
+        restoreFeeMultiplier: 3,
+        restoreTxMemoText: '',
+      } as SorobanResurrectConfig
+      const options = {
+        configOverrides: {
+          pollTimeoutMs: 12_000,
+          restoreFeeMultiplier: 7,
+          restoreTxMemoText: 'one request only',
+        },
+      }
+
+      const effectiveConfig = resolveSubmitConfig(baseConfig, options)
+
+      expect(effectiveConfig.pollTimeoutMs).toBe(12_000)
+      expect(effectiveConfig.restoreFeeMultiplier).toBe(7)
+      expect(effectiveConfig.restoreTxMemoText).toBe('one request only')
+      expect(baseConfig.pollTimeoutMs).toBe(60_000)
+      expect(baseConfig.restoreFeeMultiplier).toBe(3)
+      expect(Object.isFrozen(effectiveConfig)).toBe(true)
+    })
+
+    it('keeps legacy top-level memo options ahead of config overrides', () => {
+      const effectiveConfig = resolveSubmitConfig(
+        {
+          rpcUrl: 'https://soroban-testnet.stellar.org',
+          restoreTxMemoText: 'instance',
+        } as SorobanResurrectConfig,
+        {
+          configOverrides: { restoreTxMemoText: 'nested' },
+          restoreTxMemoText: 'legacy',
+        },
+      )
+
+      expect(effectiveConfig.restoreTxMemoText).toBe('legacy')
+    })
+
+    it('validates request-specific overrides before recording or executing a workflow', () => {
+      expect(() =>
+        resolveSubmitConfig(
+          { rpcUrl: 'https://soroban-testnet.stellar.org' } as SorobanResurrectConfig,
+          { configOverrides: { pollTimeoutMs: 0 } },
+        ),
+      ).toThrow('Invalid config.pollTimeoutMs')
+    })
+  })
+
+  describe('immutable config remains stable through transaction construction', () => {
+    it('keeps the configured restore multiplier after an attempted external mutation', async () => {
       const resurrect = new SorobanResurrect({
         rpcUrl: 'https://soroban-testnet.stellar.org',
       })
@@ -178,16 +284,16 @@ describe('SorobanResurrect — config change reactivity', () => {
       )
       expect(txWithDefaultMultiplier.fee).toBe((10 * RESTORE_FEE_MULTIPLIER).toString())
 
-      // Mutate config after initialization — the class currently has no
-      // guard preventing this, and reads `this.config` fresh on every call.
-      ;(resurrect.config as { restoreFeeMultiplier: number }).restoreFeeMultiplier = 3
+      expect(() => {
+        ;(resurrect.config as { restoreFeeMultiplier: number }).restoreFeeMultiplier = 3
+      }).toThrow(TypeError)
 
       const txWithMutatedMultiplier = await resurrect.buildRestoreTx(
         Keypair.random().publicKey(),
         makeSampleTx(),
         simulationResponse as never,
       )
-      expect(txWithMutatedMultiplier.fee).toBe('30')
+      expect(txWithMutatedMultiplier.fee).toBe((10 * RESTORE_FEE_MULTIPLIER).toString())
     })
   })
 })

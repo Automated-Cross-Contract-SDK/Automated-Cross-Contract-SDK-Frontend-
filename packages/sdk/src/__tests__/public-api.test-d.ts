@@ -32,6 +32,9 @@ import type {
   TransactionHistoryEntry,
   LedgerEntryTTLInfo,
   RestoreCostEstimate,
+  EffectiveSorobanResurrectConfig,
+  SubmitWithRestoreConfigOverrides,
+  SubmitWithRestoreRequestOptions,
 } from '../index.js'
 
 /**
@@ -40,6 +43,7 @@ import type {
  */
 type PublicExports =
   | 'SorobanResurrect'
+  | 'getEffectiveConfig'
   | 'SorobanResurrectNetwork'
   | 'NETWORK_PRESETS'
   | 'ResurrectError'
@@ -156,6 +160,18 @@ test('SorobanResurrectConfig and result types keep their shape', () => {
   expectTypeOf<FeeBumpSponsor>().toHaveProperty('signFeeBump')
   expectTypeOf<DryRunResult>().toHaveProperty('wouldNeedRestore')
   expectTypeOf<TxDiagnostics>().toHaveProperty('events')
+})
+
+test('getEffectiveConfig is a public settings-only helper', () => {
+  expectTypeOf(sdk.getEffectiveConfig).toBeFunction()
+  expectTypeOf<EffectiveSorobanResurrectConfig>().toHaveProperty('rpcUrl')
+  expectTypeOf<ReturnType<typeof sdk.getEffectiveConfig>>().not.toHaveProperty('rpcClient')
+})
+
+test('request-specific config overrides are part of the stable public type surface', () => {
+  expectTypeOf<SubmitWithRestoreConfigOverrides>().toHaveProperty('restoreFeeMultiplier')
+  expectTypeOf<SubmitWithRestoreConfigOverrides>().toHaveProperty('pollTimeoutMs')
+  expectTypeOf<SubmitWithRestoreRequestOptions>().toHaveProperty('configOverrides')
 })
 
 test('RestoreState union and typed events are pinned', () => {
