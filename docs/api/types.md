@@ -36,6 +36,11 @@ interface SorobanResurrectConfig {
   enableSimulationCache?: boolean
   simulationCacheTtlMs?: number
   simulationCacheMaxSize?: number
+  restoreTxMemo?: Memo
+  restoreTxMemoText?: string
+  maxRestoreTxSizeBytes?: number
+  restoreSizeWarnRatio?: number
+  throwOnRestoreSizeLimit?: boolean
 }
 ```
 
@@ -64,13 +69,18 @@ interface SorobanResurrectConfig {
 | `enableSimulationCache`      | Enables simulation response caching. |
 | `simulationCacheTtlMs`       | Cache lifetime; must be finite and greater than zero. |
 | `simulationCacheMaxSize`     | Cache capacity; must be a positive safe integer. |
+| `restoreTxMemo`              | Explicit memo attached to restore transactions. |
+| `restoreTxMemoText`          | Text memo fallback for restore transactions. |
+| `maxRestoreTxSizeBytes`      | Restore-transaction size limit in bytes; must be a positive safe integer. |
+| `restoreSizeWarnRatio`       | Fraction of the size limit that triggers a warning; must be greater than `0` and at most `1`. |
+| `throwOnRestoreSizeLimit`    | Throws rather than warning when a restore transaction exceeds the size limit. |
 
 The constructor validates URL protocols (`http:` or `https:`), numeric ranges,
 boolean and string fields, and the network passphrase before initializing the
 RPC client. Invalid settings throw an error naming the field, for example
 `Invalid config.rpcTimeoutMs`. Fee multipliers must be finite and at least `1`;
 fee caps must be non-negative safe integers or decimal integer strings. The
-`archiveDetectionFallback` option is invalid with
+`archiveDetectionFallback: true` is invalid with
 `archiveDetectionMethod: 'direct'` because the fallback only applies to
 simulation-based detection.
 
@@ -94,6 +104,34 @@ console.log(settings.restoreFeeMultiplier) // 3
 
 The helper applies the same validation as `new SorobanResurrect(config)` and
 throws the same field-specific errors for invalid values.
+
+## Request-specific workflow configuration
+
+`SorobanResurrect.config` is a frozen snapshot. To vary supported restore
+settings for one transaction, pass `configOverrides` in the request; this does
+not mutate the instance configuration.
+
+```typescript
+const result = await sdk.submitWithRestore({
+  transaction,
+  wallet,
+  configOverrides: {
+    restoreFeeMultiplier: 5,
+    maxRestoreFeeStroops: '2500000',
+    pollTimeoutMs: 90_000,
+    maxSequenceRetries: 1,
+  },
+})
+```
+
+The supported fields are `pollIntervalMs`, `pollTimeoutMs`,
+`restoreFeeMultiplier`, `maxRestoreFeeStroops`, `maxSequenceRetries`,
+`restoreTxMemo`, and `restoreTxMemoText`. Overrides are validated before a
+workflow is recorded or executed. Existing top-level `restoreTxMemo` and
+`restoreTxMemoText` request options remain supported and take precedence over
+the same fields in `configOverrides`. For `submitBatchWithRestore`, any
+per-request override switches the batch to sequential per-transaction
+workflows so each request keeps its own fee and timeout settings.
 
 ## `SorobanResurrectNetwork`
 

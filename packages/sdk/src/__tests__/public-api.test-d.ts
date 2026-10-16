@@ -33,6 +33,8 @@ import type {
   LedgerEntryTTLInfo,
   RestoreCostEstimate,
   EffectiveSorobanResurrectConfig,
+  SubmitWithRestoreConfigOverrides,
+  SubmitWithRestoreRequestOptions,
 } from '../index.js'
 
 /**
@@ -164,6 +166,12 @@ test('getEffectiveConfig is a public settings-only helper', () => {
   expectTypeOf(sdk.getEffectiveConfig).toBeFunction()
   expectTypeOf<EffectiveSorobanResurrectConfig>().toHaveProperty('rpcUrl')
   expectTypeOf<ReturnType<typeof sdk.getEffectiveConfig>>().not.toHaveProperty('rpcClient')
+})
+
+test('request-specific config overrides are part of the stable public type surface', () => {
+  expectTypeOf<SubmitWithRestoreConfigOverrides>().toHaveProperty('restoreFeeMultiplier')
+  expectTypeOf<SubmitWithRestoreConfigOverrides>().toHaveProperty('pollTimeoutMs')
+  expectTypeOf<SubmitWithRestoreRequestOptions>().toHaveProperty('configOverrides')
 })
 
 test('RestoreState union and typed events are pinned', () => {

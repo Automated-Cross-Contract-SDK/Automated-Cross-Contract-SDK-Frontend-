@@ -76,9 +76,17 @@ describe('SorobanResurrect — invalid config handling', () => {
     ['rpcTimeoutMs', Number.POSITIVE_INFINITY],
     ['ttlWatchIntervalMs', -1],
     ['rpcRetryCount', 1.5],
+    ['rpcRetryBackoffMs', -1],
+    ['rpcCircuitBreakerThreshold', 0],
+    ['rpcCircuitBreakerCooldownMs', -1],
+    ['ttlWatchThreshold', -1],
     ['maxSequenceRetries', -1],
     ['archiveDetectionChunkSize', 0],
     ['archiveDetectionConcurrency', 1.5],
+    ['simulationCacheTtlMs', 0],
+    ['simulationCacheMaxSize', 0],
+    ['maxRestoreTxSizeBytes', 1.5],
+    ['restoreSizeWarnRatio', 1.1],
   ])('identifies invalid timing or retry field %s', (field, value) => {
     expect(
       () =>

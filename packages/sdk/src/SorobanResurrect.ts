@@ -7,10 +7,10 @@ import type {
   RestoreStateInfo,
   ArchivedLedgerEntry,
   ResurrectResult,
-  SubmitWithRestoreOptions,
   RestoreKeysOptions,
   SorobanResurrectEvents,
 } from './types.js'
+import type { SubmitWithRestoreRequestOptions } from './RequestConfigOverrides.js'
 import type { ISorobanRpcClient } from './RpcClient.js'
 import type { StellarPublicKey } from './branded-types.js'
 import { resolveConfig } from './SorobanResurrectConfig.js'
@@ -140,7 +140,9 @@ export class SorobanResurrect {
   }
 
   /** Resolved configuration with defaults applied. Re-bound in place by {@link switchNetwork}. */
-  get config(): Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & { rpcClient: ISorobanRpcClient } {
+  get config(): Readonly<
+    Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & { rpcClient: ISorobanRpcClient }
+  > {
     return this._config
   }
 
@@ -516,7 +518,7 @@ export class SorobanResurrect {
    * This method never throws — all failures are returned as
    * `ResurrectResult { success: false, error: ... }`.
    *
-   * @param options - See {@link SubmitWithRestoreOptions}.
+   * @param options - See {@link SubmitWithRestoreRequestOptions}.
    * @returns {@link ResurrectResult} describing the outcome.
    *
    * @example
@@ -531,7 +533,7 @@ export class SorobanResurrect {
    * }
    * ```
    */
-  async submitWithRestore(options: SubmitWithRestoreOptions): Promise<ResurrectResult> {
+  async submitWithRestore(options: SubmitWithRestoreRequestOptions): Promise<ResurrectResult> {
     this._requestId = createRequestId()
     this.logger.info('submitWithRestore: start', { requestId: this._requestId })
     try {
@@ -573,10 +575,12 @@ export class SorobanResurrect {
    * sequence-number races) and every returned result carries the same
    * `restoreTxHash`.
    *
-   * @param items - Array of `SubmitWithRestoreOptions`, one per transaction.
+   * @param items - Array of request options, one per transaction.
    * @returns Array of results in the same order as the input.
    */
-  async submitBatchWithRestore(items: SubmitWithRestoreOptions[]): Promise<ResurrectResult[]> {
+  async submitBatchWithRestore(
+    items: SubmitWithRestoreRequestOptions[],
+  ): Promise<ResurrectResult[]> {
     return this._executor.submitBatchWithRestore(items)
   }
 

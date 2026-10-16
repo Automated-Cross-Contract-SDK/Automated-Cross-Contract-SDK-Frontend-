@@ -3,9 +3,10 @@ import {
   ArchivedLedgerEntry,
   ResurrectResult,
   RestoreKeysOptions,
-  SubmitWithRestoreOptions,
   WalletAdapter,
 } from './types.js'
+import type { SubmitWithRestoreRequestOptions } from './RequestConfigOverrides.js'
+import { resolveSubmitConfig } from './RequestConfigOverrides.js'
 import type { ISorobanRpcClient } from './RpcClient.js'
 import { executeWithRestore, sendTransaction as _sendTransaction } from './Executor.js'
 import {
@@ -293,10 +294,10 @@ export class SorobanResurrectExecutor {
    * the expected order. This method never throws — all failures are returned
    * as `ResurrectResult { success: false, error: ... }`.
    *
-   * @param options - See {@link SubmitWithRestoreOptions}.
+   * @param options - See {@link SubmitWithRestoreRequestOptions}.
    * @returns {@link ResurrectResult} with outcome, hashes, and `historyId`.
    */
-  async submitWithRestore(options: SubmitWithRestoreOptions): Promise<ResurrectResult> {
+  async submitWithRestore(options: SubmitWithRestoreRequestOptions): Promise<ResurrectResult> {
     const {
       transaction,
       wallet,
@@ -310,19 +311,10 @@ export class SorobanResurrectExecutor {
       onRestoreFailed,
     } = options
 
+    const effectiveConfig = resolveSubmitConfig(this._config, options)
     const historyId = this._history.add(transaction)
     const stateMgr = this._stateMgr
     const emitter = stateMgr.emitter
-
-    // Per-call restore-tx memo override (falls back to instance config).
-    const effectiveConfig =
-      options.restoreTxMemo !== undefined || options.restoreTxMemoText !== undefined
-        ? {
-            ...this._config,
-            restoreTxMemo: options.restoreTxMemo ?? this._config.restoreTxMemo,
-            restoreTxMemoText: options.restoreTxMemoText ?? this._config.restoreTxMemoText,
-          }
-        : this._config
 
     const result = await executeWithRestore({
       server: this._server,
@@ -499,14 +491,29 @@ export class SorobanResurrectExecutor {
    * ones once past the shared restore step; if the shared restore itself
    * fails, every item in the batch fails with that error.
    *
-   * @param items - Array of `SubmitWithRestoreOptions`, one per transaction.
+   * @param items - Array of request options, one per transaction.
    *   All items must share the same source account (the restore transaction
    *   is built and paid for by `items[0].wallet`).
    * @returns Array of results in the same order as the input.
    */
-  async submitBatchWithRestore(items: SubmitWithRestoreOptions[]): Promise<ResurrectResult[]> {
+  async submitBatchWithRestore(items: SubmitWithRestoreRequestOptions[]): Promise<ResurrectResult[]> {
     if (items.length === 0) return []
     if (items.length === 1) return [await this.submitWithRestore(items[0])]
+
+    if (
+      items.some(
+        (item) =>
+          item.configOverrides !== undefined ||
+          item.restoreTxMemo !== undefined ||
+          item.restoreTxMemoText !== undefined,
+      )
+    ) {
+      const results: ResurrectResult[] = []
+      for (const item of items) {
+        results.push(await this.submitWithRestore(item))
+      }
+      return results
+    }
 
     const wallet = items[0].wallet
     const transactions = items.map((item) => item.transaction)

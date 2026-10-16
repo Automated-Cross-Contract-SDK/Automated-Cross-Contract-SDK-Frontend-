@@ -68,14 +68,15 @@ can pass it through to the wallet.
 | Trezor (`trezor`) | Signs envelopes on-device; requires `trezorConnect` and a manifest (`email`, `appUrl`). `accountIndex` defaults to `0`; `networkPassphrase` defaults to Testnet. | No CAP-0046 signing. Requires `@trezor/connect-web` (or compatible Connect instance); physical confirmation is required. | SDK adapter `0.1.0`; optional Connect package is app-supplied and not pinned. |
 
 The provider versions above are the versions in this repository's lockfile at
-the time of testing. Adapter tests use mocked APIs; CI does not claim to test
-specific browser-extension releases, mobile wallet releases, device firmware,
-or hardware transports. Pin and test those separately in the consuming app.
+the time of testing. Adapter unit tests use mocks where a test suite is
+available; CI does not claim to test specific browser-extension releases,
+mobile wallet releases, device firmware, or hardware transports. Pin and test
+those separately in the consuming app.
 `walletkit` and `walletconnect` are optional integration layers and do not
 install or select a wallet provider on the application's behalf.
 
 ```ts
-import { SUPPORTED_WALLETS } from '@your-sdk/wallets';
+import { SUPPORTED_WALLETS } from '@soroban-resurrect/sdk';
 
 // Iterate every wallet the SDK can build an adapter for.
 for (const wallet of SUPPORTED_WALLETS) {
@@ -97,9 +98,9 @@ An omitted flag means the adapter does not declare that capability.
 
 ## Hardware wallets
 
-Hardware adapters (`LedgerWalletAdapter`, `TrezorWalletAdapter`) need two extra
-pieces beyond a normal adapter: a **transport** to talk to the device and a
-**manifest** so the device can show the requesting app to the user.
+Ledger needs a **transport** to talk to the device. Trezor needs a
+**TrezorConnect instance** and a **manifest** so the device can show the
+requesting app to the user.
 
 ### Ledger
 

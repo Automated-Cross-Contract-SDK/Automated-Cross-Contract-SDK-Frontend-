@@ -1,20 +1,19 @@
 ## Summary
 
-- Standardized wallet adapter errors with typed `WalletError` codes and actionable user-rejection messages.
-- Added optional wallet network detection and fail-fast network mismatch validation before signing.
-- Added Freighter CAP-0046 `signAuthEntry` support and capability declaration.
-- Added Playwright wallet extension E2E coverage with nightly/manual CI execution, artifacts, and contributor documentation.
+This PR addresses four wallet and SDK API issues:
+
+- Publish a compatibility matrix for all supported wallet adapters, including signing behavior, required setup/options, limitations, and the locked provider API versions.
+- Validate SDK URLs, timing values, fee settings, and incompatible archive-detection options at construction time with field-specific errors.
+- Add `getEffectiveConfig()` to return validated settings with defaults applied, without constructing runtime RPC/cache resources.
+- Add validated per-request restore workflow overrides while keeping the instance configuration frozen and unchanged.
+
+## Behavior notes
+
+- `submitWithRestore` supports request overrides for polling intervals/timeouts, restore fee multiplier/cap, sequence retries, and restore memos.
+- Overrides are validated before a request is recorded. Batched requests with per-request overrides run sequentially so each transaction uses its own settings.
+- `SorobanResurrect.config` and the settings returned by `getEffectiveConfig()` are frozen snapshots.
 
 ## Validation
 
-- Synced and rebased onto the latest `main`.
-- Resolved all merge conflicts.
-- `git diff --check` passed.
-- Prettier checks passed.
-- GitHub Actions workflow YAML parsed successfully.
-- Full typecheck and test suite could not run locally because dependencies are unavailable; the lockfile currently references unavailable `@lobstrco/signer-extension-api@^1.0.2`.
-
-Closes #265
-Closes #264
-Closes #263
-Closes #262
+- Focused configuration-resolution tests pass.
+- The SDK-wide test and typecheck suites are currently blocked by pre-existing SDK source issues on `main` (including invalid syntax in `Executor.ts` and missing exports from `types.ts`).
