@@ -1,4 +1,4 @@
-import { rpc, Transaction, xdr } from '@stellar/stellar-sdk'
+import { rpc, Transaction, TransactionBuilder, xdr } from '@stellar/stellar-sdk'
 import type { ISorobanRpcClient } from './RpcClient.js'
 import type {
   SorobanResurrectConfig,
@@ -19,8 +19,9 @@ import type { StellarPublicKey } from './branded-types.js'
 import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
 import { SorobanResurrectSimulator } from './SorobanResurrectSimulation.js'
 import { SorobanResurrectExecutor } from './SorobanResurrectExecution.js'
-import { isRestoreResponse, extractArchivedKeys } from './Archiver.js'
+import { isErrorResponse, isRestoreResponse, isSuccessResponse, extractArchivedKeys } from './Archiver.js'
 import { buildRestoreCostEstimate, type RestoreCostEstimate } from './feeCalculation.js'
+import type { RestorePlan } from './RestorePlan.js'
 import type { TransactionHistoryEntry } from './TransactionHistory.js'
 import {
   queryLedgerTTL,
@@ -69,6 +70,8 @@ export class SorobanResurrect {
   private readonly _simulator: SorobanResurrectSimulator
   private readonly _executor: SorobanResurrectExecutor
   private readonly _ttlWatches = new Set<TTLWatchHandle>()
+  private _activeOperations = 0
+  private readonly _submitControllers = new Set<AbortController>()
 
   // Last set of archived keys from a standalone detectArchivedKeys() call.
   // The FSM context already stores archivedKeys for the full submit workflow;
@@ -189,9 +192,11 @@ export class SorobanResurrect {
    * Re-binds the RPC client and network passphrase in place — no need to
    * construct a new `SorobanResurrect` instance to switch networks.
    *
-   * History, registered listeners, and the internal state machine instance
-   * are all kept intact; only the underlying RPC client and resolved config
-   * are swapped. Emits a `networkChanged` event once the switch completes.
+   * Registered listeners and transaction history are kept intact. Network-
+   * scoped state, simulation/ledger caches, and TTL watches are cleared. An
+   * in-flight workflow must finish before switching. Changing `rpcUrl`
+   * constructs a fresh RPC client unless a replacement `rpcClient` is
+   * explicitly supplied.
    *
    * @param presetOrConfig - Either a well-known network name (`'testnet'`,
    *   `'mainnet'`, `'futurenet'`) or a partial config overriding the current
@@ -209,6 +214,13 @@ export class SorobanResurrect {
   switchNetwork(
     presetOrConfig: SorobanNetworkName | (Partial<SorobanResurrectConfig> & { rpcUrl: string }),
   ): void {
+    if (
+      this._activeOperations > 0 ||
+      [...this._ttlWatches].some((handle) => handle.inFlight)
+    ) {
+      throw new Error('Cannot switch networks while an SDK operation or TTL watch cycle is in progress')
+    }
+
     const overrideConfig: SorobanResurrectConfig =
       typeof presetOrConfig === 'string'
         ? {
@@ -217,15 +229,24 @@ export class SorobanResurrect {
             networkPassphrase: NETWORK_PRESETS[presetOrConfig].networkPassphrase,
             rpcClient: undefined,
           }
-        : { ...this._config, ...presetOrConfig }
+        : {
+            ...this._config,
+            ...presetOrConfig,
+            rpcClient:
+              presetOrConfig.rpcClient ??
+              (presetOrConfig.rpcUrl !== this._config.rpcUrl ? undefined : this._server),
+          }
 
     const resolved = resolveConfig(overrideConfig)
 
     invalidateLatestLedgerCache(this._server)
+    for (const handle of [...this._ttlWatches]) handle.stop()
     this._server = resolved.server
     this._config = resolved.config
+    this._standaloneArchivedKeys = []
     this._simulator.rebind(resolved.server, resolved.config, resolved.simulationCache)
     this._executor.rebind(resolved.server, resolved.config)
+    this._stateMgr.reset()
 
     this._stateMgr.emitter.emit('networkChanged', {
       rpcUrl: resolved.config.rpcUrl,
@@ -352,7 +373,7 @@ export class SorobanResurrect {
    * @see {@link detectArchivedKeys} for a higher-level check.
    */
   async simulate(transaction: Transaction): Promise<rpc.Api.SimulateTransactionResponse> {
-    return this._simulator.simulate(transaction)
+    return this._trackOperation(() => this._simulator.simulate(transaction))
   }
 
   /**
@@ -374,9 +395,11 @@ export class SorobanResurrect {
    * ```
    */
   async detectArchivedKeys(transaction: Transaction): Promise<ArchivedLedgerEntry[]> {
-    const keys = await this._simulator.detectArchivedKeys(transaction)
-    this._standaloneArchivedKeys = keys
-    return keys
+    return this._trackOperation(async () => {
+      const keys = await this._simulator.detectArchivedKeys(transaction)
+      this._standaloneArchivedKeys = keys
+      return keys
+    })
   }
 
   /**
@@ -394,7 +417,7 @@ export class SorobanResurrect {
    * ```
    */
   async needsRestore(transaction: Transaction): Promise<boolean> {
-    return this._simulator.needsRestore(transaction)
+    return this._trackOperation(() => this._simulator.needsRestore(transaction))
   }
 
   /**
@@ -405,7 +428,9 @@ export class SorobanResurrect {
    * @returns Array of archived-key arrays, one entry per transaction.
    */
   async detectArchivedKeysBatch(transactions: Transaction[]): Promise<ArchivedLedgerEntry[][]> {
-    return Promise.all(transactions.map((tx) => this._simulator.detectArchivedKeys(tx)))
+    return this._trackOperation(() =>
+      Promise.all(transactions.map((tx) => this._simulator.detectArchivedKeys(tx))),
+    )
   }
 
   /**
@@ -429,15 +454,82 @@ export class SorobanResurrect {
    * ```
    */
   async estimateRestoreCost(transaction: Transaction): Promise<RestoreCostEstimate> {
-    const response = await this._simulator.simulate(transaction)
+    return this._trackOperation(async () => {
+      const response = await this._simulator.simulate(transaction)
 
-    if (isRestoreResponse(response)) {
-      const archivedKeys = extractArchivedKeys(response)
-      const minResourceFee = parseInt(response.minResourceFee, 10)
-      return buildRestoreCostEstimate(minResourceFee, archivedKeys.length, this._config)
-    }
+      if (isRestoreResponse(response)) {
+        const archivedKeys = extractArchivedKeys(response)
+        const minResourceFee = parseInt(response.minResourceFee, 10)
+        return buildRestoreCostEstimate(minResourceFee, archivedKeys.length, this._config)
+      }
 
-    return buildRestoreCostEstimate(0, 0, this._config)
+      /**
+       * Simulates a copy of `transaction` and returns a serializable restore plan
+       * for application review. This method does not mutate the original
+       * transaction, update workflow state or history, call the wallet, or submit
+       * any transaction.
+       *
+       * @throws {Error} If simulation fails or returns an unrecognized response.
+       */
+      async previewRestore(transaction: Transaction): Promise<RestorePlan> {
+        return this._trackOperation(async () => {
+          const transactionXdr = transaction.toXDR()
+          const simulationTx = TransactionBuilder.fromXDR(
+            transactionXdr,
+            this._config.networkPassphrase,
+          )
+          if (!(simulationTx instanceof Transaction)) {
+            throw new Error('Cannot preview a fee-bump transaction')
+          }
+
+          const response = await this._server.simulateTransaction(simulationTx)
+          if (isErrorResponse(response)) {
+            throw new Error(`Transaction simulation failed: ${response.error}`)
+          }
+          if (!isRestoreResponse(response) && !isSuccessResponse(response)) {
+            throw new Error('Transaction simulation returned an unrecognized response')
+          }
+
+          let archivedKeys: string[] = []
+          let minResourceFee = 0
+          if (isRestoreResponse(response)) {
+            if (!response._parsed) {
+              throw new Error('Transaction simulation returned an unparsed restore plan')
+            }
+            archivedKeys = response.transactionData
+              .getFootprint()
+              .readWrite()
+              .map((key) => key.toXDR('base64'))
+            minResourceFee = Number.parseInt(response.minResourceFee, 10)
+            if (!Number.isSafeInteger(minResourceFee) || minResourceFee < 0) {
+              throw new Error(`Invalid minimum restore resource fee: ${response.minResourceFee}`)
+            }
+          }
+
+          const estimate = buildRestoreCostEstimate(minResourceFee, archivedKeys.length, this._config)
+          return {
+            transaction: {
+              xdr: transactionXdr,
+              sourceAccount: transaction.source,
+              sequence: transaction.sequence,
+              fee: transaction.fee,
+              operationCount: transaction.operations.length,
+            },
+            network: {
+              rpcUrl: this._config.rpcUrl,
+              networkPassphrase: this._config.networkPassphrase,
+            },
+            wouldNeedRestore: estimate.wouldNeedRestore,
+            archivedKeys,
+            minResourceFee: estimate.minResourceFee,
+            feeMultiplier: estimate.multiplier,
+            estimatedRestoreFee: estimate.estimatedFee,
+          }
+        })
+      }
+
+      return buildRestoreCostEstimate(0, 0, this._config)
+    })
   }
 
   // ---------------------------------------------------------------------------
@@ -464,7 +556,9 @@ export class SorobanResurrect {
     transaction: Transaction,
     simulationResponse?: rpc.Api.SimulateTransactionRestoreResponse,
   ): Promise<Transaction> {
-    return this._executor.buildRestoreTx(sourcePublicKey, transaction, simulationResponse)
+    return this._trackOperation(() =>
+      this._executor.buildRestoreTx(sourcePublicKey, transaction, simulationResponse),
+    )
   }
 
   /**
@@ -491,7 +585,7 @@ export class SorobanResurrect {
     sourcePublicKey: StellarPublicKey | string,
     transactions: Transaction[],
   ): Promise<Transaction | null> {
-    return this._executor.buildBatchRestoreTx(sourcePublicKey, transactions)
+    return this._trackOperation(() => this._executor.buildBatchRestoreTx(sourcePublicKey, transactions))
   }
 
   /**
@@ -503,7 +597,25 @@ export class SorobanResurrect {
    * @returns Result with transaction hash on success.
    */
   async sendTransaction(transaction: Transaction, wallet: WalletAdapter): Promise<ResurrectResult> {
-    return this._executor.sendTransaction(transaction, wallet)
+    return this._trackOperation(() => this._executor.sendTransaction(transaction, wallet))
+  }
+
+  /**
+   * Cancels active `submitWithRestore` workflows. Transactions already
+   * submitted to the network cannot be retracted; cancellation prevents
+   * subsequent signing/submission steps and stops confirmation polling.
+   *
+   * @returns `true` if at least one active workflow was cancelled.
+   */
+  cancel(): boolean {
+    let cancelled = false
+    for (const controller of this._submitControllers) {
+      if (!controller.signal.aborted) {
+        controller.abort()
+        cancelled = true
+      }
+    }
+    return cancelled
   }
 
   /**
@@ -531,23 +643,42 @@ export class SorobanResurrect {
    * }
    * ```
    */
-  async submitWithRestore(options: SubmitWithRestoreOptions): Promise<ResurrectResult> {
-    this._requestId = createRequestId()
-    this.logger.info('submitWithRestore: start', { requestId: this._requestId })
-    try {
-      const result = await this._executor.submitWithRestore(options)
-      this.logger[result.success ? 'info' : 'error']('submitWithRestore: finished', {
-        requestId: this._requestId,
-        success: result.success,
-        archivedKeysDetected: result.archivedKeysDetected,
-        restoreTxHash: result.restoreTxHash,
-        originalTxHash: result.originalTxHash,
-        error: result.error,
-      })
-      return result
-    } finally {
-      this._requestId = undefined
-    }
+  async submitWithRestore(
+    options: SubmitWithRestoreOptions & { signal?: AbortSignal },
+  ): Promise<ResurrectResult> {
+    const controller = new AbortController()
+    const externalSignal = options.signal
+    const abortFromCaller = () => controller.abort()
+    if (externalSignal?.aborted) controller.abort()
+    else externalSignal?.addEventListener('abort', abortFromCaller, { once: true })
+    this._submitControllers.add(controller)
+    return this._trackOperation(async () => {
+      try {
+        this._requestId = createRequestId()
+        this.logger.info('submitWithRestore: start', { requestId: this._requestId })
+        try {
+          const executionOptions: SubmitWithRestoreOptions & { signal: AbortSignal } = {
+            ...options,
+            signal: controller.signal,
+          }
+          const result = await this._executor.submitWithRestore(executionOptions)
+          this.logger[result.success ? 'info' : 'error']('submitWithRestore: finished', {
+            requestId: this._requestId,
+            success: result.success,
+            archivedKeysDetected: result.archivedKeysDetected,
+            restoreTxHash: result.restoreTxHash,
+            originalTxHash: result.originalTxHash,
+            error: result.error,
+          })
+          return result
+        } finally {
+          this._requestId = undefined
+        }
+      } finally {
+        this._submitControllers.delete(controller)
+        externalSignal?.removeEventListener('abort', abortFromCaller)
+      }
+    })
   }
 
   /**
@@ -559,7 +690,7 @@ export class SorobanResurrect {
    * @throws {Error} If no history entry exists for `entryId`.
    */
   async retry(entryId: string, wallet: WalletAdapter): Promise<ResurrectResult> {
-    return this._executor.retry(entryId, wallet)
+    return this._trackOperation(() => this._executor.retry(entryId, wallet))
   }
 
   /**
@@ -577,7 +708,7 @@ export class SorobanResurrect {
    * @returns Array of results in the same order as the input.
    */
   async submitBatchWithRestore(items: SubmitWithRestoreOptions[]): Promise<ResurrectResult[]> {
-    return this._executor.submitBatchWithRestore(items)
+    return this._trackOperation(() => this._executor.submitBatchWithRestore(items))
   }
 
   /**
@@ -606,7 +737,16 @@ export class SorobanResurrect {
     wallet: WalletAdapter,
     opts?: RestoreKeysOptions,
   ): Promise<ResurrectResult> {
-    return this._executor.restoreKeys(keys, wallet, opts)
+    return this._trackOperation(() => this._executor.restoreKeys(keys, wallet, opts))
+  }
+
+  private async _trackOperation<T>(run: () => Promise<T>): Promise<T> {
+    this._activeOperations++
+    try {
+      return await run()
+    } finally {
+      this._activeOperations--
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -629,11 +769,16 @@ export class SorobanResurrect {
     keys: xdr.LedgerKey[],
     opts: QueryLedgerTTLOptions = {},
   ): Promise<TTLQueryResult> {
-    const cfg = this._config as { archiveDetectionChunkSize?: number; archiveDetectionConcurrency?: number }
-    return queryLedgerTTL(this._server, keys, {
-      chunkSize: cfg.archiveDetectionChunkSize,
-      concurrency: cfg.archiveDetectionConcurrency,
-      ...opts,
+    return this._trackOperation(() => {
+      const cfg = this._config as {
+        archiveDetectionChunkSize?: number
+        archiveDetectionConcurrency?: number
+      }
+      return queryLedgerTTL(this._server, keys, {
+        chunkSize: cfg.archiveDetectionChunkSize,
+        concurrency: cfg.archiveDetectionConcurrency,
+        ...opts,
+      })
     })
   }
 
@@ -650,7 +795,7 @@ export class SorobanResurrect {
    * ```
    */
   async queryLedgerEntryTTL(key: xdr.LedgerKey): Promise<LedgerEntryTTLInfo> {
-    return queryLedgerEntryTTL(this._server, key)
+    return this._trackOperation(() => queryLedgerEntryTTL(this._server, key))
   }
 
   /**
@@ -671,6 +816,6 @@ export class SorobanResurrect {
     keys: xdr.LedgerKey[],
     ledgersThreshold = 100_000,
   ): Promise<LedgerEntryTTLInfo[]> {
-    return getExpiringSoonEntries(this._server, keys, ledgersThreshold)
+    return this._trackOperation(() => getExpiringSoonEntries(this._server, keys, ledgersThreshold))
   }
 }

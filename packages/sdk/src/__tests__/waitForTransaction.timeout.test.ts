@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { rpc } from '@stellar/stellar-sdk'
-import { waitForTransaction } from '../Restorer.js'
+import { waitForTransaction, waitForTransactionSSE } from '../Restorer.js'
 
 function makeMockServer(): rpc.Server {
   return {
@@ -15,7 +15,21 @@ describe('waitForTransaction — timeout and retry behavior', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    vi.unstubAllGlobals()
     vi.restoreAllMocks()
+  })
+
+  it('falls back to RPC polling when TextDecoder is unavailable', async () => {
+    const server = makeMockServer()
+    vi.mocked(server.getTransaction)
+      .mockResolvedValueOnce({ status: rpc.Api.GetTransactionStatus.NOT_FOUND } as never)
+      .mockResolvedValueOnce({ status: rpc.Api.GetTransactionStatus.SUCCESS } as never)
+    vi.stubGlobal('TextDecoder', undefined)
+
+    const result = await waitForTransactionSSE(server, 'hash', 1000, 'https://rpc.example')
+
+    expect(result.status).toBe(rpc.Api.GetTransactionStatus.SUCCESS)
+    expect(server.getTransaction).toHaveBeenCalledTimes(2)
   })
 
   describe('NOT_FOUND for extended period', () => {

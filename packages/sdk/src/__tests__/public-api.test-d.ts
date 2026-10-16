@@ -22,6 +22,7 @@ import type {
   HardwareWalletAdapter,
   FeeBumpSponsor,
   DryRunResult,
+  RestorePlan,
   TxDiagnostics,
   ISorobanRpcClient,
   KnownWallet,
@@ -151,10 +152,17 @@ test('SorobanResurrectConfig and result types keep their shape', () => {
 
   expectTypeOf<SubmitWithRestoreOptions>().toHaveProperty('transaction')
   expectTypeOf<SubmitWithRestoreOptions>().toHaveProperty('wallet')
+  type SubmitOptions = Parameters<
+    InstanceType<typeof sdk.SorobanResurrect>['submitWithRestore']
+  >[0]
+  expectTypeOf<SubmitOptions['signal']>().toEqualTypeOf<AbortSignal | undefined>()
+  expectTypeOf<InstanceType<typeof sdk.SorobanResurrect>>().toHaveProperty('cancel')
   expectTypeOf<ArchivedLedgerEntry>().toHaveProperty('keyBase64')
 
   expectTypeOf<FeeBumpSponsor>().toHaveProperty('signFeeBump')
   expectTypeOf<DryRunResult>().toHaveProperty('wouldNeedRestore')
+  expectTypeOf<RestorePlan>().toHaveProperty('transaction')
+  expectTypeOf<RestorePlan['archivedKeys']>().toEqualTypeOf<string[]>()
   expectTypeOf<TxDiagnostics>().toHaveProperty('events')
 })
 

@@ -18,7 +18,12 @@ npm install @soroban-resurrect/react-hook
 
 ## Requirements
 
-- Node.js 18+
+- Node.js 20+
+- Current and previous major releases of Chrome, Edge, Firefox, and Safari.
+  The browser SDK build targets ES2022 and requires `fetch`, `AbortController`,
+  `TextEncoder`, and `TextDecoder`; SSE additionally requires a streaming
+  `Response.body`. When SSE streaming is unavailable, transaction confirmation
+  falls back to RPC polling.
 - A Soroban RPC endpoint (Testnet, Futurenet, or Mainnet)
 - A wallet that can sign Soroban transaction XDR (Freighter, xBull, or a custom signer)
 

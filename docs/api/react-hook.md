@@ -30,6 +30,7 @@ function useSorobanResurrectContext(): {
   state: RestoreStateInfo
   isProcessing: boolean
   submitWithRestore(tx: Transaction, wallet: WalletAdapter): Promise<ResurrectResult>
+  cancel(): boolean
   detectArchivedKeys(tx: Transaction): Promise<ArchivedLedgerEntry[]>
   reset(): void
   on<K extends keyof SorobanResurrectEvents>(
@@ -44,6 +45,7 @@ Hook to access the `SorobanResurrect` API from within a `<SorobanResurrectProvid
 - `isProcessing` is `true` while `state.state` is any of: `simulating`, `signing_restore`, `submitting_restore`, `confirming_restore`, `signing_original`, `submitting_original`.
 - `submitWithRestore` and `detectArchivedKeys` are safe to call before the underlying instance mounts — they return an idle-shaped fallback (`{ success: false, error: 'Not initialized' }` / `[]`) rather than throwing.
 - `on` subscribes to a typed lifecycle event on the current SDK instance and returns an unsubscribe function. See [Lifecycle Events](#lifecycle-events) below.
+- `cancel()` aborts active provider workflows. It cannot dismiss an in-flight wallet prompt or retract a transaction already submitted to the network. Provider unmount also cancels active workflows.
 
 #### `isProcessing` contract
 
@@ -80,10 +82,23 @@ Creates and manages its own `SorobanResurrect` instance — no provider needed. 
 | `state`                | `RestoreStateInfo`                                                  | Current workflow state snapshot.                |
 | `isProcessing`         | `boolean`                                                           | Whether a restore/submit operation is running.  |
 | `submitWithRestore`    | `(transaction: Transaction, wallet: WalletAdapter) => Promise<ResurrectResult>` | Submit with automatic restoration. |
+| `cancel`               | `() => boolean`                                                     | Cancel active workflows; returns `true` if any were newly cancelled. |
 | `detectArchivedKeys`   | `(transaction: Transaction) => Promise<ArchivedLedgerEntry[]>`     | Check for archived entries.                     |
 | `reset`                | `() => void`                                                        | Reset state back to idle.                       |
 | `on`                    | `<K>(event: K, listener: (payload) => void) => () => void`         | Subscribe to a lifecycle event. See below.      |
 | `resurrect`            | `SorobanResurrect`                                                  | The underlying SDK instance.                    |
+
+The standalone hook cancels active workflows when its owning component
+unmounts. Both the context hook and standalone hook expose `cancel()`.
+
+## Mutation and watcher hooks
+
+`useSorobanResurrectSubmit()` returns a `cancel()` method that aborts workflows
+started by that hook. It also aborts them on unmount and suppresses late state
+updates and callbacks. `useRestoreWatcher()` returns `cancel()` for an active
+fallback extension; its interval polling is stopped on unmount, and any
+fallback extension is aborted as well. Cancellation cannot undo a transaction
+already submitted to the network.
 
 ## Lifecycle Events
 

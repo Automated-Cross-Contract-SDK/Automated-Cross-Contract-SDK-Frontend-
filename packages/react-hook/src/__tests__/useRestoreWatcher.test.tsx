@@ -172,7 +172,35 @@ describe('useRestoreWatcher', () => {
     expect(fake.submitWithRestore).toHaveBeenCalledWith({
       transaction: { id: 'tx' },
       wallet: { id: 'w' },
+      signal: expect.any(AbortSignal),
     })
     expect(returned).toEqual(okResult)
+  })
+
+  it('aborts an active fallback extension when unmounted', async () => {
+    let resolveSubmit!: (value: { success: boolean; archivedKeysDetected: number }) => void
+    const fake = makeFake()
+    fake.submitWithRestore.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveSubmit = resolve
+        }),
+    )
+    const { result, unmount } = renderHook(() =>
+      useRestoreWatcher(NO_KEYS, { resurrect: fake as never, autoStart: false }),
+    )
+
+    let extension!: Promise<unknown>
+    await act(async () => {
+      extension = result.current.extend({ id: 'tx' } as never, { id: 'wallet' } as never)
+      await Promise.resolve()
+    })
+    const signal = fake.submitWithRestore.mock.calls[0][0].signal as AbortSignal
+    unmount()
+
+    expect(signal.aborted).toBe(true)
+    resolveSubmit({ success: true, archivedKeysDetected: 0 })
+    await extension
+    expect(fake.getExpiringSoonEntries).not.toHaveBeenCalled()
   })
 })

@@ -7,6 +7,7 @@ const mockOnStateChange = vi.fn()
 const mockReset = vi.fn()
 const mockDetectArchivedKeys = vi.fn()
 const mockSubmitWithRestore = vi.fn()
+const mockCancel = vi.fn()
 
 vi.mock('@soroban-resurrect/sdk', () => ({
   isProcessingState: (state: string) =>
@@ -16,6 +17,7 @@ vi.mock('@soroban-resurrect/sdk', () => ({
     reset: mockReset,
     detectArchivedKeys: mockDetectArchivedKeys,
     submitWithRestore: mockSubmitWithRestore,
+    cancel: mockCancel,
     config: { rpcUrl: 'https://test' },
     state: 'idle',
   })),
@@ -26,6 +28,7 @@ const testConfig = { rpcUrl: 'https://soroban-testnet.stellar.org' }
 describe('useSorobanResurrect', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockCancel.mockReturnValue(false)
     mockOnStateChange.mockReturnValue(vi.fn())
   })
 
@@ -48,6 +51,14 @@ describe('useSorobanResurrect', () => {
     const { unmount } = renderHook(() => useSorobanResurrect({ config: testConfig }))
     unmount()
     expect(unsubscribe).toHaveBeenCalledTimes(1)
+    expect(mockCancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('exposes cancel for active SDK workflows', () => {
+    mockCancel.mockReturnValue(true)
+    const { result } = renderHook(() => useSorobanResurrect({ config: testConfig }))
+    expect(result.current.cancel()).toBe(true)
+    expect(mockCancel).toHaveBeenCalledTimes(1)
   })
 
   it('updates state when listener fires', async () => {
