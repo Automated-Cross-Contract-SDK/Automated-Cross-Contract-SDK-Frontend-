@@ -41,6 +41,9 @@ export interface ResolvedConfig {
   simulationCache: SimulationCache | undefined
 }
 
+/** Configuration settings after defaults and validation, without an RPC client. */
+export type EffectiveSorobanResurrectConfig = Required<Omit<SorobanResurrectConfig, 'rpcClient'>>
+
 const ARCHIVE_DETECTION_METHODS = ['simulation', 'direct'] as const
 
 /**
@@ -273,9 +276,37 @@ export function validateConfigShape(config: SorobanResurrectConfig): void {
  * ```
  */
 export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
-  validateConfigShape(config)
-
+  const effectiveConfig = resolveEffectiveSettings(config)
   const server = config.rpcClient ?? new SorobanRpcClient(config.rpcUrl)
+
+  // A fresh cache is built on every resolve, so switchNetwork() never reuses
+  // stale entries. Keep the TTL short relative to the ledger close time
+  // (~5s): a replayed cached restore response can report "restore needed"
+  // after the entry was already restored (or miss a newly archived entry),
+  // which at worst causes a redundant restore or a failed submission.
+  const simulationCache = effectiveConfig.enableSimulationCache
+    ? new SimulationCache({
+        ttlMs: effectiveConfig.simulationCacheTtlMs,
+        maxSize: effectiveConfig.simulationCacheMaxSize,
+      })
+    : undefined
+
+  const resolved = { ...effectiveConfig, rpcClient: server }
+
+  return { server, config: resolved, simulationCache }
+}
+
+/**
+ * Returns a fresh, validated configuration snapshot with SDK defaults applied.
+ * Unlike {@link resolveConfig}, this helper does not construct an RPC client
+ * or simulation cache, so it can be used to display or log effective settings.
+ */
+export function getEffectiveConfig(config: SorobanResurrectConfig): EffectiveSorobanResurrectConfig {
+  return Object.freeze({ ...resolveEffectiveSettings(config) })
+}
+
+function resolveEffectiveSettings(config: SorobanResurrectConfig): EffectiveSorobanResurrectConfig {
+  validateConfigShape(config)
 
   const networkPassphrase =
     config.networkPassphrase ??
@@ -291,19 +322,7 @@ export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
     )
   }
 
-  // A fresh cache is built on every resolve, so switchNetwork() never reuses
-  // stale entries. Keep the TTL short relative to the ledger close time
-  // (~5s): a replayed cached restore response can report "restore needed"
-  // after the entry was already restored (or miss a newly archived entry),
-  // which at worst causes a redundant restore or a failed submission.
-  const simulationCache = config.enableSimulationCache
-    ? new SimulationCache({
-        ttlMs: config.simulationCacheTtlMs ?? SIMULATION_CACHE_TTL_MS,
-        maxSize: config.simulationCacheMaxSize ?? SIMULATION_CACHE_MAX_SIZE,
-      })
-    : undefined
-
-  const resolved: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & { rpcClient: ISorobanRpcClient } = {
+  return {
     rpcUrl: config.rpcUrl,
     networkPassphrase,
     pollIntervalMs: config.pollIntervalMs ?? POLL_INTERVAL_MS,
@@ -321,8 +340,5 @@ export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
     enableSimulationCache: config.enableSimulationCache ?? false,
     simulationCacheTtlMs: config.simulationCacheTtlMs ?? SIMULATION_CACHE_TTL_MS,
     simulationCacheMaxSize: config.simulationCacheMaxSize ?? SIMULATION_CACHE_MAX_SIZE,
-    rpcClient: server,
   }
-
-  return { server, config: resolved, simulationCache }
 }

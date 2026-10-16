@@ -11,6 +11,7 @@ import {
 } from '@stellar/stellar-sdk'
 import type { SorobanResurrectConfig } from '../types.js'
 import { RESTORE_FEE_MULTIPLIER, KNOWN_NETWORK_PASSPHRASES } from '../constants.js'
+import { getEffectiveConfig } from '../SorobanResurrectConfig.js'
 
 function makeSampleTx(): Transaction {
   const kp = Keypair.random()
@@ -25,6 +26,40 @@ function makeSampleTx(): Transaction {
 }
 
 describe('SorobanResurrect — config change reactivity', () => {
+  describe('getEffectiveConfig', () => {
+    it('returns a validated snapshot with defaults and no runtime clients', () => {
+      const settings = getEffectiveConfig({
+        rpcUrl: 'https://soroban-testnet.stellar.org',
+      })
+
+      expect(settings).toMatchObject({
+        rpcUrl: 'https://soroban-testnet.stellar.org',
+        networkPassphrase: Networks.TESTNET,
+        pollIntervalMs: 1000,
+        pollTimeoutMs: 60_000,
+        restoreFeeMultiplier: RESTORE_FEE_MULTIPLIER,
+      })
+      expect(settings).not.toHaveProperty('rpcClient')
+      expect(Object.isFrozen(settings)).toBe(true)
+    })
+
+    it('preserves explicit effective settings and rejects invalid configuration', () => {
+      const settings = getEffectiveConfig({
+        rpcUrl: 'https://custom.example.com',
+        networkPassphrase: Networks.PUBLIC,
+        pollIntervalMs: 250,
+        restoreFeeMultiplier: 7,
+      })
+
+      expect(settings.networkPassphrase).toBe(Networks.PUBLIC)
+      expect(settings.pollIntervalMs).toBe(250)
+      expect(settings.restoreFeeMultiplier).toBe(7)
+      expect(() => getEffectiveConfig({ rpcUrl: 'ftp://custom.example.com' })).toThrow(
+        'Invalid config.rpcUrl',
+      )
+    })
+  })
+
   describe('config snapshot isolation', () => {
     it('is not affected by mutating the config object passed to the constructor after construction', () => {
       const inputConfig: SorobanResurrectConfig = {

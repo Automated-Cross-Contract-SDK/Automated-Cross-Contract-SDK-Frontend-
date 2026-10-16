@@ -32,6 +32,7 @@ import type {
   TransactionHistoryEntry,
   LedgerEntryTTLInfo,
   RestoreCostEstimate,
+  EffectiveSorobanResurrectConfig,
 } from '../index.js'
 
 /**
@@ -40,6 +41,7 @@ import type {
  */
 type PublicExports =
   | 'SorobanResurrect'
+  | 'getEffectiveConfig'
   | 'SorobanResurrectNetwork'
   | 'NETWORK_PRESETS'
   | 'ResurrectError'
@@ -156,6 +158,12 @@ test('SorobanResurrectConfig and result types keep their shape', () => {
   expectTypeOf<FeeBumpSponsor>().toHaveProperty('signFeeBump')
   expectTypeOf<DryRunResult>().toHaveProperty('wouldNeedRestore')
   expectTypeOf<TxDiagnostics>().toHaveProperty('events')
+})
+
+test('getEffectiveConfig is a public settings-only helper', () => {
+  expectTypeOf(sdk.getEffectiveConfig).toBeFunction()
+  expectTypeOf<EffectiveSorobanResurrectConfig>().toHaveProperty('rpcUrl')
+  expectTypeOf<ReturnType<typeof sdk.getEffectiveConfig>>().not.toHaveProperty('rpcClient')
 })
 
 test('RestoreState union and typed events are pinned', () => {

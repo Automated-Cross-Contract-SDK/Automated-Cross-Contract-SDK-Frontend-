@@ -46,7 +46,7 @@ interface SorobanResurrectConfig {
 | `pollIntervalMs`           | Polling interval in ms when waiting for transaction confirmation.              |
 | `pollTimeoutMs`             | Timeout in ms when waiting for transaction confirmation.                       |
 | `restoreFeeMultiplier`     | Multiplier applied to `minResourceFee` when building a restore transaction.    |
-| `maxRestoreFeeStroops`     | Upper bound on the restore fee. Accepts a branded `FeeStroops` or a plain numeric stroop string, which is branded at the config boundary. |
+| `maxRestoreFeeStroops`     | Upper bound on the restore fee; accepts a non-negative safe integer or decimal integer string. |
 | `maxSequenceRetries`       | Number of times a restore transaction is retried after a sequence-number failure. |
 | `archiveDetectionMethod`   | Method for detecting archived keys: `'simulation'` (default) or `'direct'`.    |
 | `archiveDetectionChunkSize` | Ledger keys per `getLedgerEntries` request during `'direct'` detection.       |
@@ -73,6 +73,27 @@ fee caps must be non-negative safe integers or decimal integer strings. The
 `archiveDetectionFallback` option is invalid with
 `archiveDetectionMethod: 'direct'` because the fallback only applies to
 simulation-based detection.
+
+### Reading effective settings
+
+Use `getEffectiveConfig()` when an application needs validated settings and
+resolved defaults without constructing an SDK instance or RPC client. It
+returns a frozen, fresh settings snapshot and excludes runtime dependencies
+such as `rpcClient` and the simulation cache.
+
+```typescript
+import { getEffectiveConfig } from '@soroban-resurrect/sdk'
+
+const settings = getEffectiveConfig({
+  rpcUrl: 'https://soroban-testnet.stellar.org',
+})
+
+console.log(settings.pollIntervalMs) // 1000
+console.log(settings.restoreFeeMultiplier) // 3
+```
+
+The helper applies the same validation as `new SorobanResurrect(config)` and
+throws the same field-specific errors for invalid values.
 
 ## `SorobanResurrectNetwork`
 

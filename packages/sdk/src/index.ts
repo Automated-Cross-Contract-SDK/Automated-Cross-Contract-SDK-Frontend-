@@ -11,6 +11,8 @@
 // Main class
 // ---------------------------------------------------------------------------
 export { SorobanResurrect } from './SorobanResurrect.js'
+export { getEffectiveConfig } from './SorobanResurrectConfig.js'
+export type { EffectiveSorobanResurrectConfig } from './SorobanResurrectConfig.js'
 
 // ---------------------------------------------------------------------------
 // Network presets / switching helper
