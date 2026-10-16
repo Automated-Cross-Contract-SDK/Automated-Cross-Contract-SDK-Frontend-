@@ -18,11 +18,24 @@ interface SorobanResurrectConfig {
   pollIntervalMs?: number // default: 1000
   pollTimeoutMs?: number // default: 60000
   restoreFeeMultiplier?: number // default: 3 — see "Choosing restoreFeeMultiplier" below
-  maxRestoreFeeStroops?: FeeStroops | string // plain stroop strings are branded at the config boundary
+  maxRestoreFeeStroops?: number | string // non-negative safe integer or decimal integer string
   maxSequenceRetries?: number // default: 3 — retries when a restore tx fails on sequence number
   archiveDetectionMethod?: 'simulation' | 'direct' // default: 'simulation'
   archiveDetectionChunkSize?: number // default: 50
   archiveDetectionConcurrency?: number // default: 4
+  archiveDetectionFallback?: boolean
+  rpcTimeoutMs?: number
+  rpcRetryCount?: number
+  rpcRetryBackoffMs?: number
+  rpcCircuitBreakerThreshold?: number
+  rpcCircuitBreakerCooldownMs?: number
+  ttlWatchIntervalMs?: number
+  ttlWatchThreshold?: number
+  ttlWatchAutoExtend?: boolean
+  useSSE?: boolean
+  enableSimulationCache?: boolean
+  simulationCacheTtlMs?: number
+  simulationCacheMaxSize?: number
 }
 ```
 
@@ -38,6 +51,28 @@ interface SorobanResurrectConfig {
 | `archiveDetectionMethod`   | Method for detecting archived keys: `'simulation'` (default) or `'direct'`.    |
 | `archiveDetectionChunkSize` | Ledger keys per `getLedgerEntries` request during `'direct'` detection.       |
 | `archiveDetectionConcurrency` | Chunk requests kept in flight at once during `'direct'` detection.          |
+| `archiveDetectionFallback` | Whether unclassifiable simulation responses may fall back to direct detection. Only applies when `archiveDetectionMethod` is `'simulation'`. |
+| `rpcTimeoutMs`             | Timeout for an individual RPC request; must be finite and greater than zero. |
+| `rpcRetryCount`             | Retry count; must be a non-negative integer. |
+| `rpcRetryBackoffMs`         | Base delay between retries; must be a non-negative integer. |
+| `rpcCircuitBreakerThreshold` | Consecutive failures before opening the circuit; must be a positive integer. |
+| `rpcCircuitBreakerCooldownMs` | Circuit-breaker cooldown; must be a non-negative integer. |
+| `ttlWatchIntervalMs`        | TTL watcher interval; must be finite and greater than zero. |
+| `ttlWatchThreshold`          | TTL warning threshold in ledgers; must be a non-negative integer. |
+| `ttlWatchAutoExtend`         | Enables automatic extension by TTL watchers. |
+| `useSSE`                     | Uses the RPC event stream when waiting for transaction confirmation. |
+| `enableSimulationCache`      | Enables simulation response caching. |
+| `simulationCacheTtlMs`       | Cache lifetime; must be finite and greater than zero. |
+| `simulationCacheMaxSize`     | Cache capacity; must be a positive safe integer. |
+
+The constructor validates URL protocols (`http:` or `https:`), numeric ranges,
+boolean and string fields, and the network passphrase before initializing the
+RPC client. Invalid settings throw an error naming the field, for example
+`Invalid config.rpcTimeoutMs`. Fee multipliers must be finite and at least `1`;
+fee caps must be non-negative safe integers or decimal integer strings. The
+`archiveDetectionFallback` option is invalid with
+`archiveDetectionMethod: 'direct'` because the fallback only applies to
+simulation-based detection.
 
 ## `SorobanResurrectNetwork`
 

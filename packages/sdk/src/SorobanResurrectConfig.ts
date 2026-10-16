@@ -14,7 +14,7 @@ import {
   KNOWN_NETWORK_PASSPHRASES,
   resolveNetworkPassphrase,
   TTL_WATCH_INTERVAL_MS,
-  TTL_WATCH_THRESHOLD_LEDGERS,
+  TTL_WATCH_THRESHOLD,
 } from './constants.js'
 import { SimulationCache } from './SimulationCache.js'
 
@@ -44,16 +44,41 @@ export interface ResolvedConfig {
 const ARCHIVE_DETECTION_METHODS = ['simulation', 'direct'] as const
 
 /**
- * Validates a numeric config field, throwing a descriptive error if it is
- * not a finite number or falls outside the allowed range.
+ * Validates a numeric config field and includes its public field name in errors.
  */
-function validateNumber(field: string, value: unknown, minimum: number, exclusive: boolean): void {
-  const valid = typeof value === 'number' && Number.isFinite(value) && (exclusive ? value > minimum : value >= minimum)
+function validateNumber(
+  field: string,
+  value: unknown,
+  minimum: number,
+  exclusive: boolean,
+  integer = false,
+): void {
+  const valid =
+    typeof value === 'number' &&
+    Number.isFinite(value) &&
+    (exclusive ? value > minimum : value >= minimum) &&
+    (!integer || Number.isSafeInteger(value))
   if (!valid) {
     throw new Error(
-      `Invalid ${field}: ${JSON.stringify(value)}. Must be a finite number ${exclusive ? '>' : '>='} ${minimum}.`,
+      `Invalid config.${field}: expected a finite number ${exclusive ? 'greater than' : 'at least'} ${minimum}` +
+        `${integer ? ' and a safe integer' : ''}; received ${JSON.stringify(value)}.`,
     )
   }
+}
+
+function validateFeeCap(value: unknown): void {
+  const validNumber = typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+  const validString = typeof value === 'string' && /^\d+$/.test(value)
+  if (!validNumber && !validString) {
+    throw new Error(
+      `Invalid config.maxRestoreFeeStroops: expected a non-negative safe integer or decimal integer string; ` +
+        `received ${JSON.stringify(value)}.`,
+    )
+  }
+}
+
+function validateInteger(field: string, value: unknown, minimum: number): void {
+  validateNumber(field, value, minimum, false, true)
 }
 
 /**
@@ -61,7 +86,7 @@ function validateNumber(field: string, value: unknown, minimum: number, exclusiv
  */
 function validateBoolean(field: string, value: unknown): void {
   if (typeof value !== 'boolean') {
-    throw new Error(`Invalid ${field}: ${JSON.stringify(value)}. Must be a boolean.`)
+    throw new Error(`Invalid config.${field}: expected a boolean; received ${JSON.stringify(value)}.`)
   }
 }
 
@@ -83,12 +108,25 @@ export const SIMULATION_CACHE_MAX_SIZE = 50
  */
 export function validateConfigShape(config: SorobanResurrectConfig): void {
   if (typeof config.rpcUrl !== 'string' || config.rpcUrl.length === 0) {
-    throw new Error(`Invalid rpcUrl: ${JSON.stringify(config.rpcUrl)}. Must be a non-empty string.`)
+    throw new Error(`Invalid config.rpcUrl: expected a non-empty URL string; received ${JSON.stringify(config.rpcUrl)}.`)
   }
+  if (config.networkPassphrase !== undefined &&
+      (typeof config.networkPassphrase !== 'string' || config.networkPassphrase.length === 0)) {
+    throw new Error(
+      `Invalid config.networkPassphrase: expected a non-empty string; ` +
+        `received ${JSON.stringify(config.networkPassphrase)}.`,
+    )
+  }
+  let rpcUrl: URL
   try {
-    new URL(config.rpcUrl)
+    rpcUrl = new URL(config.rpcUrl)
   } catch {
-    throw new Error(`Invalid rpcUrl: ${JSON.stringify(config.rpcUrl)}. Must be a valid URL.`)
+    throw new Error(`Invalid config.rpcUrl: expected an absolute HTTP(S) URL; received ${JSON.stringify(config.rpcUrl)}.`)
+  }
+  if (!['http:', 'https:'].includes(rpcUrl.protocol) || !rpcUrl.hostname) {
+    throw new Error(
+      `Invalid config.rpcUrl: expected an absolute HTTP(S) URL; received ${JSON.stringify(config.rpcUrl)}.`,
+    )
   }
 
   if (config.pollIntervalMs !== undefined) {
@@ -103,13 +141,72 @@ export function validateConfigShape(config: SorobanResurrectConfig): void {
     validateNumber('restoreFeeMultiplier', config.restoreFeeMultiplier, 1, false)
   }
 
+  if (config.maxRestoreFeeStroops !== undefined) {
+    validateFeeCap(config.maxRestoreFeeStroops)
+  }
+
+  if (config.rpcTimeoutMs !== undefined) {
+    validateNumber('rpcTimeoutMs', config.rpcTimeoutMs, 0, true)
+  }
+
+  if (config.rpcRetryCount !== undefined) {
+    validateInteger('rpcRetryCount', config.rpcRetryCount, 0)
+  }
+
+  if (config.rpcRetryBackoffMs !== undefined) {
+    validateInteger('rpcRetryBackoffMs', config.rpcRetryBackoffMs, 0)
+  }
+
+  if (config.rpcCircuitBreakerThreshold !== undefined) {
+    validateInteger('rpcCircuitBreakerThreshold', config.rpcCircuitBreakerThreshold, 1)
+  }
+
+  if (config.rpcCircuitBreakerCooldownMs !== undefined) {
+    validateInteger('rpcCircuitBreakerCooldownMs', config.rpcCircuitBreakerCooldownMs, 0)
+  }
+
+  if (config.ttlWatchIntervalMs !== undefined) {
+    validateNumber('ttlWatchIntervalMs', config.ttlWatchIntervalMs, 0, true)
+  }
+
+  if (config.ttlWatchThreshold !== undefined) {
+    validateInteger('ttlWatchThreshold', config.ttlWatchThreshold, 0)
+  }
+
+  if (config.ttlWatchAutoExtend !== undefined) {
+    validateBoolean('ttlWatchAutoExtend', config.ttlWatchAutoExtend)
+  }
+
+  if (config.maxSequenceRetries !== undefined) {
+    validateInteger('maxSequenceRetries', config.maxSequenceRetries, 0)
+  }
+
+  if (config.archiveDetectionChunkSize !== undefined) {
+    validateInteger('archiveDetectionChunkSize', config.archiveDetectionChunkSize, 1)
+  }
+
+  if (config.archiveDetectionConcurrency !== undefined) {
+    validateInteger('archiveDetectionConcurrency', config.archiveDetectionConcurrency, 1)
+  }
+
   if (
     config.archiveDetectionMethod !== undefined &&
     !ARCHIVE_DETECTION_METHODS.includes(config.archiveDetectionMethod)
   ) {
     throw new Error(
-      `Invalid archiveDetectionMethod: ${JSON.stringify(config.archiveDetectionMethod)}. ` +
+      `Invalid config.archiveDetectionMethod: ${JSON.stringify(config.archiveDetectionMethod)}. ` +
         `Must be one of: ${ARCHIVE_DETECTION_METHODS.map((m) => `"${m}"`).join(', ')}.`,
+    )
+  }
+
+  if (config.archiveDetectionFallback !== undefined) {
+    validateBoolean('archiveDetectionFallback', config.archiveDetectionFallback)
+  }
+
+  if (config.archiveDetectionMethod === 'direct' && config.archiveDetectionFallback !== undefined) {
+    throw new Error(
+      'Invalid config.archiveDetectionFallback: this option only applies when ' +
+        'archiveDetectionMethod is "simulation".',
     )
   }
 
@@ -126,11 +223,18 @@ export function validateConfigShape(config: SorobanResurrectConfig): void {
   }
 
   if (config.simulationCacheMaxSize !== undefined) {
-    if (!Number.isInteger(config.simulationCacheMaxSize) || config.simulationCacheMaxSize < 1) {
+    if (!Number.isSafeInteger(config.simulationCacheMaxSize) || config.simulationCacheMaxSize < 1) {
       throw new Error(
-        `Invalid simulationCacheMaxSize: ${JSON.stringify(config.simulationCacheMaxSize)}. Must be a positive integer.`,
+        `Invalid config.simulationCacheMaxSize: expected a positive safe integer; ` +
+          `received ${JSON.stringify(config.simulationCacheMaxSize)}.`,
       )
     }
+  }
+
+  if (config.restoreTxMemoText !== undefined && typeof config.restoreTxMemoText !== 'string') {
+    throw new Error(
+      `Invalid config.restoreTxMemoText: expected a string; received ${JSON.stringify(config.restoreTxMemoText)}.`,
+    )
   }
 }
 
@@ -181,7 +285,7 @@ export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
   if (!KNOWN_NETWORK_PASSPHRASES.includes(networkPassphrase)) {
     const knownNetworks = KNOWN_NETWORK_PASSPHRASES.map((p) => `"${p}"`).join(', ')
     throw new Error(
-      `Invalid network passphrase: "${networkPassphrase}". ` +
+      `Invalid config.networkPassphrase: "${networkPassphrase}". ` +
         `Must be one of: ${knownNetworks}. ` +
         `A typo in the passphrase will cause cryptic transaction failures.`,
     )
@@ -211,19 +315,12 @@ export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
     rpcCircuitBreakerThreshold: config.rpcCircuitBreakerThreshold ?? RPC_CIRCUIT_BREAKER_THRESHOLD,
     rpcCircuitBreakerCooldownMs: config.rpcCircuitBreakerCooldownMs ?? RPC_CIRCUIT_BREAKER_COOLDOWN_MS,
     ttlWatchIntervalMs: config.ttlWatchIntervalMs ?? TTL_WATCH_INTERVAL_MS,
-    ttlWatchThresholdLedgers: config.ttlWatchThresholdLedgers ?? TTL_WATCH_THRESHOLD_LEDGERS,
+    ttlWatchThreshold: config.ttlWatchThreshold ?? TTL_WATCH_THRESHOLD,
     archiveDetectionMethod: config.archiveDetectionMethod ?? 'simulation',
     useSSE: config.useSSE ?? false,
     enableSimulationCache: config.enableSimulationCache ?? false,
     simulationCacheTtlMs: config.simulationCacheTtlMs ?? SIMULATION_CACHE_TTL_MS,
     simulationCacheMaxSize: config.simulationCacheMaxSize ?? SIMULATION_CACHE_MAX_SIZE,
-    rpcTimeoutMs: config.rpcTimeoutMs ?? RPC_TIMEOUT_MS,
-    rpcRetryCount: config.rpcRetryCount ?? RPC_RETRY_COUNT,
-    rpcRetryBackoffMs: config.rpcRetryBackoffMs ?? RPC_RETRY_BACKOFF_MS,
-    rpcCircuitBreakerThreshold: config.rpcCircuitBreakerThreshold ?? RPC_CIRCUIT_BREAKER_THRESHOLD,
-    rpcCircuitBreakerCooldownMs: config.rpcCircuitBreakerCooldownMs ?? RPC_CIRCUIT_BREAKER_COOLDOWN_MS,
-    ttlWatchIntervalMs: config.ttlWatchIntervalMs ?? TTL_WATCH_INTERVAL_MS,
-    ttlWatchThresholdLedgers: config.ttlWatchThresholdLedgers ?? TTL_WATCH_THRESHOLD_LEDGERS,
     rpcClient: server,
   }
 
