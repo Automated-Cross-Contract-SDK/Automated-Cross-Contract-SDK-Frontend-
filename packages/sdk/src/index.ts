@@ -238,3 +238,31 @@ export type {
   AttachHistoryPersistenceOptions,
 } from './HistoryPersistence.js'
 export type { MinimalHistoryEntry } from './TransactionHistory.js'
+
+// ---------------------------------------------------------------------------
+// Result and Option helpers
+// ---------------------------------------------------------------------------
+export type { Result, Option } from './result.js'
+export {
+  Ok,
+  Err,
+  Some,
+  None,
+  ok,
+  err,
+  some,
+  none,
+  isOk,
+  isErr,
+  isSome,
+  isNone,
+  isResurrectSuccess,
+  isResurrectFailure,
+  matchResurrectResult,
+  toError,
+  toResult,
+  toResultAsync,
+  fromNullable,
+  extractArchivedKeysSafe,
+  extractFootprintFromSuccessSafe,
+} from './result.js'
