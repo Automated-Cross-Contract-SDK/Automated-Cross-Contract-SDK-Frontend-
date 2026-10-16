@@ -395,9 +395,6 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
           error: err,
           sequenceRetries,
         }
-
-        originalHash = asTxHash(originalResult.hash)
-        break
       }
 
       const originalHash = asTxHash(originalResult!.hash)
@@ -409,16 +406,6 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
         restoreTxHash: restoreHash,
         archivedKeysDetected: archivedKeys.length,
         sequenceRetries,
-      }
-
-      const originalResult = await server.sendTransaction(signedOriginalTx)
-      onOriginalSubmitted?.(originalResult.hash)
-
-      return {
-        success: true,
-        originalTxHash: originalResult.hash,
-        restoreTxHash: restoreResult.hash,
-        archivedKeysDetected: archivedKeys.length,
       }
     }
 

@@ -45,8 +45,7 @@
   },
   "dependencies": {
     "@stellar/stellar-sdk": "12.3.0",
-    "@xstate/fsm": "2.0.1",
-    "@soroban-resurrect/core": "0.1.0"
+    "@xstate/fsm": "2.0.1"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "5.0.2",
