@@ -30,10 +30,10 @@ const mockSignTransaction = vi.mocked(freighterSignTransaction)
 
 const ADDRESS = 'GABC00000000000000000000000000000000000000000000000FREIGHTER'
 const TEST_ACCOUNT = Keypair.random()
-const SIGNED_XDR = new TransactionBuilder(
-  new Account(TEST_ACCOUNT.publicKey(), '0'),
-  { fee: '100', networkPassphrase: Networks.TESTNET },
-)
+const SIGNED_XDR = new TransactionBuilder(new Account(TEST_ACCOUNT.publicKey(), '0'), {
+  fee: '100',
+  networkPassphrase: Networks.TESTNET,
+})
   .addOperation(
     Operation.payment({
       destination: TEST_ACCOUNT.publicKey(),
@@ -73,6 +73,15 @@ describe('FreighterAdapter', () => {
     mockIsConnected.mockResolvedValueOnce({ error: 'not installed' } as never)
     const adapter = new FreighterAdapter()
     expect(await adapter.isConnected()).toBe(false)
+  })
+
+  it('maps rejected connection checks to structured wallet errors', async () => {
+    mockIsConnected.mockRejectedValueOnce(new Error('Freighter is unavailable'))
+    const adapter = new FreighterAdapter()
+    await expect(adapter.isConnected()).rejects.toMatchObject({
+      code: 'NOT_CONNECTED',
+      message: 'Freighter: Freighter is unavailable',
+    })
   })
 
   it('getPublicKey returns the granted address', async () => {

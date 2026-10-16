@@ -30,8 +30,8 @@ account and calls Rabet's optional disconnect method.
 
 ## Constructor options
 
-| Option  | Type       | Default        | Description                                          |
-| ------- | ---------- | -------------- | ---------------------------------------------------- |
+| Option  | Type       | Default        | Description                                              |
+| ------- | ---------- | -------------- | -------------------------------------------------------- |
 | `rabet` | `RabetApi` | `window.rabet` | Override the Rabet API object (tests, custom injection). |
 
 No environment variables are required.
@@ -48,9 +48,10 @@ Connection and signing failures are reported as structured `WalletError`s:
 
 ## SSR / browser constraints
 
-The adapter reads `window.rabet`, so construct it only in the browser (e.g. inside
-`useEffect`, `onMounted`, or a client-only component). On the server — or when the
-extension is not installed — the constructor throws unless a `rabet` instance is passed.
+The adapter reads `window.rabet` when constructed in a browser, so create it only
+in a client-only component (e.g. inside `useEffect` or `onMounted`). On the
+server — or when the extension is not installed — adapter operations fail with
+`WalletError` code `NOT_CONNECTED` unless a `rabet` instance is passed.
 
 Capabilities are `{ signAuthEntry: false, feeBump: true, hardware: false }`.
 Rabet does not implement CAP-0046 authorization-entry signing; the SDK can

@@ -13,10 +13,7 @@ import { asStellarPublicKey, asXdrBase64 } from '@soroban-resurrect/sdk'
 export interface RabetApi {
   connect(): Promise<{ publicKey: string }>
   disconnect?(): Promise<void> | void
-  sign(
-    xdr: string,
-    network: string,
-  ): Promise<{ xdr: string }>
+  sign(xdr: string, network: string): Promise<{ xdr: string }>
   isUnlocked?(): Promise<boolean> | boolean
 }
 
@@ -172,10 +169,7 @@ export class RabetAdapter implements WalletAdapter {
     }
   }
 
-  async signTransaction(
-    tx: string,
-    opts?: { networkPassphrase?: string; network?: string },
-  ) {
+  async signTransaction(tx: string, opts?: { networkPassphrase?: string; network?: string }) {
     const api = this.getApi()
     try {
       const result = await api.sign(tx, toRabetNetwork(opts?.network, opts?.networkPassphrase))

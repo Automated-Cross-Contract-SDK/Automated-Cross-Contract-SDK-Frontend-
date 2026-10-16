@@ -33,6 +33,7 @@ export class AlbedoAdapter implements WalletAdapter {
       this.publicKey = result.pubkey
       return asStellarPublicKey(result.pubkey)
     } catch (error) {
+      this.publicKey = undefined
       throw normalizeError(error)
     }
   }

@@ -32,11 +32,15 @@ export class FreighterAdapter implements WalletAdapter {
   }
 
   async isConnected(): Promise<boolean> {
-    const result = await freighterIsConnected()
-    if ('error' in result && result.error) {
-      return false
+    try {
+      const result = await freighterIsConnected()
+      if ('error' in result && result.error) {
+        return false
+      }
+      return Boolean(result.isConnected)
+    } catch (error) {
+      throw normalizeError(error, 'NOT_CONNECTED')
     }
-    return Boolean(result.isConnected)
   }
 
   async getPublicKey() {

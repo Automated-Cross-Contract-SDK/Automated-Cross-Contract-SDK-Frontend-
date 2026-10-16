@@ -78,7 +78,10 @@ describe('AlbedoAdapter', () => {
 
   it('maps connection failures to structured wallet errors', async () => {
     mockPublicKey.mockRejectedValueOnce(new Error('wallet unavailable'))
+    mockPublicKey.mockResolvedValueOnce({ pubkey: PUBKEY } as never)
+    mockPublicKey.mockRejectedValueOnce(new Error('wallet unavailable'))
     const adapter = new AlbedoAdapter()
+    await adapter.getPublicKey()
 
     await expect(adapter.getPublicKey()).rejects.toMatchObject({
       name: 'WalletError',

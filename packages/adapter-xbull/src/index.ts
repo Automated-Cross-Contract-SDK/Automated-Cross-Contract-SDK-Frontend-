@@ -10,7 +10,10 @@ import { asStellarPublicKey, asXdrBase64 } from '@soroban-resurrect/sdk'
 const TESTNET_PASSPHRASE = 'Test SDF Network ; September 2015'
 const PUBLIC_PASSPHRASE = 'Public Global Stellar Network ; September 2015'
 
-function resolveNetwork(opts?: { networkPassphrase?: string; network?: string }): string | undefined {
+function resolveNetwork(opts?: {
+  networkPassphrase?: string
+  network?: string
+}): string | undefined {
   const network = opts?.network
   const networkPassphrase = opts?.networkPassphrase
   const expectedPassphrase =
@@ -72,8 +75,8 @@ export class XBullAdapter implements WalletAdapter {
   }
 
   async disconnect(): Promise<void> {
-    this.connector.closeWallet()
     this.publicKey = undefined
+    this.connector.closeWallet()
   }
 
   async getPublicKey() {
