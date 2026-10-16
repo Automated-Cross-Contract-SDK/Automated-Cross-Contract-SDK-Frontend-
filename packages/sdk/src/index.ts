@@ -11,6 +11,7 @@
 // Main class
 // ---------------------------------------------------------------------------
 export { SorobanResurrect } from './SorobanResurrect.js'
+export { SYSTEM_RUNTIME } from './runtime.js'
 
 // ---------------------------------------------------------------------------
 // Network presets / switching helper

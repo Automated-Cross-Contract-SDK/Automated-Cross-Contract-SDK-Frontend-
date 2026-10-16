@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { rpc } from '@stellar/stellar-sdk'
 import { waitForTransaction } from '../Restorer.js'
+import { SYSTEM_RUNTIME } from '../runtime.js'
 
 function makeMockServer(): rpc.Server {
   return {
@@ -16,6 +17,37 @@ describe('waitForTransaction — timeout and retry behavior', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it('uses an injected clock and scheduler without touching global timers', async () => {
+    const server = makeMockServer()
+    let now = 0
+    let calls = 0
+    vi.mocked(server.getTransaction).mockImplementation(async () => {
+      calls++
+      return {
+        status:
+          calls === 1
+            ? rpc.Api.GetTransactionStatus.NOT_FOUND
+            : rpc.Api.GetTransactionStatus.SUCCESS,
+      } as never
+    })
+    const runtime = {
+      ...SYSTEM_RUNTIME,
+      now: () => now,
+      random: () => 0,
+      setTimeout: (callback: () => void, delayMs: number) => {
+        now += delayMs
+        callback()
+        return 0 as ReturnType<typeof globalThis.setTimeout>
+      },
+    }
+
+    const result = await waitForTransaction(server, 'hash', 1_000, 1_000, runtime)
+
+    expect(result.status).toBe(rpc.Api.GetTransactionStatus.SUCCESS)
+    expect(calls).toBe(2)
+    expect(now).toBe(100)
   })
 
   describe('NOT_FOUND for extended period', () => {
@@ -45,9 +77,11 @@ describe('waitForTransaction — timeout and retry behavior', () => {
       } as never)
 
       const promise = waitForTransaction(server, 'hash', 100, 2000)
-      const assertion = expect(promise).rejects.toThrow(
-        'Transaction hash did not complete within 2000ms',
-      )
+      const assertion = expect(promise).rejects.toMatchObject({
+        name: 'ResurrectTimeoutError',
+        code: 'TIMEOUT',
+        message: 'Transaction hash did not complete within 2000ms',
+      })
       await vi.runAllTimersAsync()
       await assertion
 
