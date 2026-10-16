@@ -164,12 +164,18 @@ export async function getExpiringEntriesForContract(
 
   const { entries, currentLedger, queriedAt } = await queryLedgerTTL(server, keys, opts)
 
-  const expiringSoon = entries.filter((e) => !e.isArchived && e.ttlLedgers <= expiringWithinLedgers)
+  const expiringSoon = entries.filter(
+    (e) => !e.isArchived && e.ttlLedgers !== undefined && e.ttlLedgers <= expiringWithinLedgers,
+  )
   const archived: ArchivedLedgerEntry[] = entries
     .filter((e) => e.isArchived)
     .map((e) => ({
       key: xdr.LedgerKey.fromXDR(e.keyBase64, 'base64'),
       keyBase64: e.keyBase64,
+      entryType: e.entryType,
+      liveUntilLedger: e.liveUntilLedger,
+      currentLedger: e.currentLedger,
+      ttlLedgers: e.ttlLedgers,
     }))
 
   return { contractId, entries, expiringSoon, archived, currentLedger, queriedAt }
