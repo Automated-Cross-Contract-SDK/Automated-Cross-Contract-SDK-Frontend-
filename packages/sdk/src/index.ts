@@ -119,6 +119,8 @@ export type { KnownWallet, AdapterImporter, CreateAdapterOptions } from './creat
 // wallet libraries at the SDK boundary.
 // ---------------------------------------------------------------------------
 export { asStellarPublicKey, asXdrBase64 } from './branded-types.js'
+export type { XdrBase64 } from './branded-types.js'
+export { serializeLedgerKey } from './LedgerKey.js'
 
 // ---------------------------------------------------------------------------
 // On-chain failure parsing (populates ResurrectResult.onchainError)

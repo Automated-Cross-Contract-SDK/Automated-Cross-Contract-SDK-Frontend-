@@ -2,17 +2,24 @@ import { rpc, Transaction } from '@stellar/stellar-sdk'
 import { xdr } from '@stellar/stellar-sdk'
 import { ArchivedLedgerEntry, SimulateResponse } from './types.js'
 import {
-  asXdrBase64,
   asContractIdHex,
   type ContractIdHex,
   type HexString,
 } from './branded-types.js'
 import { extractArchivedKeysSafe, extractFootprintFromSuccessSafe } from './result.js'
 import type { ISorobanRpcClient } from './RpcClient.js'
+import { serializeLedgerKey } from './LedgerKey.js'
 import { createDebugger } from './Debug.js'
 import { LEDGER_ENTRY_CHUNK_SIZE, LEDGER_ENTRY_CONCURRENCY } from './constants.js'
 
 const debug = createDebugger('archiver')
+
+function compareArchivedEntries(
+  a: ArchivedLedgerEntry,
+  b: ArchivedLedgerEntry,
+): number {
+  return a.keyBase64 < b.keyBase64 ? -1 : a.keyBase64 > b.keyBase64 ? 1 : 0
+}
 
 /**
  * Type guard — returns true if the simulation response indicates archived
@@ -77,6 +84,8 @@ export function isErrorResponse(
  * @returns Array of {@link ArchivedLedgerEntry}. Empty if the response has
  *   `_parsed: false` or the footprint could not be read (a warning is
  *   logged via `console.warn` in the former case).
+ *   Results are sorted by serialized ledger-key XDR, independent of
+ *   footprint ordering.
  *
  * @example
  * ```ts
@@ -103,7 +112,7 @@ export function extractArchivedKeys(
     const readWrite = footprint.readWrite()
 
     for (const ledgerKey of readWrite) {
-      const keyBase64 = asXdrBase64(ledgerKey.toXDR('base64'))
+      const keyBase64 = serializeLedgerKey(ledgerKey)
       keys.push({
         key: ledgerKey,
         keyBase64,
@@ -113,6 +122,8 @@ export function extractArchivedKeys(
     debug('extractArchivedKeys: failed to read footprint', err)
     return keys
   }
+
+  keys.sort(compareArchivedEntries)
 
   debug('extractArchivedKeys: %d archived key(s) in restore footprint', keys.length)
   return keys
@@ -205,7 +216,7 @@ async function detectArchivedChunk(
       if (!knownKeys.has(keyXdr)) {
         archived.push({
           key,
-          keyBase64: keyXdr,
+          keyBase64: serializeLedgerKey(key),
         })
       }
     }
@@ -215,7 +226,7 @@ async function detectArchivedChunk(
     // On network error, conservatively treat all keys in chunk as archived
     return chunk.map((key) => ({
       key,
-      keyBase64: key.toXDR('base64'),
+      keyBase64: serializeLedgerKey(key),
     }))
   }
 }
@@ -237,8 +248,8 @@ async function detectArchivedChunk(
  *   chunk size and request concurrency.
  * @returns Array of {@link ArchivedLedgerEntry} for keys that are missing
  *   from `getLedgerEntries` results (i.e. archived), or that could not be
- *   verified due to a request error. Entries keep the relative order of
- *   `ledgerKeys` regardless of the order responses arrive in.
+ *   verified due to a request error. Entries are sorted by serialized
+ *   ledger-key XDR, independent of input and RPC response ordering.
  * @see {@link detectArchivedKeysViaDirect}, which wraps this with the
  *   simulate → extract-footprint steps.
  */
@@ -281,7 +292,7 @@ export async function detectArchivedEntries(
   const workerCount = Math.min(concurrency, chunks.length)
   await Promise.all(Array.from({ length: workerCount }, () => worker()))
 
-  const archived = results.flat()
+  const archived = results.flat().sort(compareArchivedEntries)
   debug('detectArchivedEntries: %d of %d key(s) archived', archived.length, ledgerKeys.length)
   return archived
 }

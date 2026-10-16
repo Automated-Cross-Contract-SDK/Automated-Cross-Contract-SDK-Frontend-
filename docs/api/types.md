@@ -274,11 +274,46 @@ const myWallet: WalletAdapter = {
 }
 ```
 
+## Stable ledger-key serialization
+
+Use `serializeLedgerKey` to obtain a deterministic base64 XDR identity for a
+ledger key. The result can be used as a cache key or included in diagnostics;
+it is XDR, not JSON, and should be decoded with the Stellar SDK when needed.
+
+```typescript
+import { xdr } from '@stellar/stellar-sdk'
+import { serializeLedgerKey } from '@soroban-resurrect/sdk'
+
+const cacheKey = serializeLedgerKey(ledgerKey)
+const restoredKey = xdr.LedgerKey.fromXDR(cacheKey, 'base64')
+```
+
+The serializer accepts any Stellar `LedgerKey` supported by the SDK, including
+`contractData` and `contractCode`. The encoded value is stable for that key
+under the SDK's XDR format; applications persisting it across Stellar SDK or
+protocol upgrades should retain that compatibility consideration.
+
 ## Contract and account scanning
 
 These APIs answer "what in my contract is about to expire?" **without submitting a
 transaction**. They read ledger entries directly, so they are safe to call on page
 load, in a background poll, or before you decide whether a restore is needed.
+
+### Contract code and contract data TTLs
+
+Soroban tracks a contract's Wasm code (`contractCode`) and its instance and
+storage (`contractData`) as separate ledger entries. Their TTLs are independent:
+restoring or extending one entry does not refresh the TTL of another. A contract
+can therefore have live storage while its code is archived, or live code while a
+data entry is archived.
+
+The SDK TTL helpers accept both key types and report each key's own
+`entryType`, `liveUntilLedger`, and `ttlLedgers`. To monitor both sides of a
+contract, include both its code key and the relevant contract-data keys in the
+same query. Contract-code entries are included in a contract scan by default
+when the contract instance can be read; contract storage keys must still be
+provided explicitly because Soroban does not expose a storage-key enumeration
+API.
 
 > **Important limitation — contract storage keys cannot be enumerated.**
 > Soroban does not expose a way to list the storage keys a contract holds. The
@@ -431,3 +466,8 @@ const account = await getExpiringEntriesForAccount(accountId, {
 Use the scan functions to build a dashboard or a pre-flight check. Use
 `detectArchivedKeys` when you have a specific transaction in hand and want to know
 whether its footprint touches archived entries.
+
+Detected archived-key arrays are normalized by ascending serialized ledger-key
+XDR. Their order is therefore stable even when footprint or RPC response ordering
+changes; callers can use `serializeLedgerKey` for the same identity format in
+caches and diagnostics.

@@ -8,6 +8,7 @@
  * Run with: `npm run test:types -w packages/sdk`
  */
 import { expectTypeOf, test } from 'vitest'
+import { xdr } from '@stellar/stellar-sdk'
 import * as sdk from '../index.js'
 import type {
   WalletAdapter,
@@ -32,6 +33,7 @@ import type {
   TransactionHistoryEntry,
   LedgerEntryTTLInfo,
   RestoreCostEstimate,
+  XdrBase64,
 } from '../index.js'
 
 /**
@@ -104,6 +106,7 @@ type PublicExports =
   | 'createRequestId'
   | 'LoggingRpcClient'
   | 'withRpcLogging'
+  | 'serializeLedgerKey'
 
 test('all documented public exports are present on the barrel', () => {
   expectTypeOf<PublicExports>().toMatchTypeOf<keyof typeof sdk>()
@@ -191,4 +194,10 @@ test('scan / multisig / history / TTL public types exist', () => {
   expectTypeOf<TransactionHistoryEntry>().not.toBeAny()
   expectTypeOf<LedgerEntryTTLInfo>().not.toBeAny()
   expectTypeOf<RestoreCostEstimate>().not.toBeAny()
+})
+
+test('ledger-key serializer is a typed public API', () => {
+  expectTypeOf(sdk.serializeLedgerKey).toBeFunction()
+  expectTypeOf(sdk.serializeLedgerKey).parameter(0).toEqualTypeOf<xdr.LedgerKey>()
+  expectTypeOf(sdk.serializeLedgerKey).returns.toEqualTypeOf<XdrBase64>()
 })
