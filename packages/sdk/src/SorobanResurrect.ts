@@ -207,6 +207,15 @@ export class SorobanResurrect {
     return this._config
   }
 
+  /**
+   * Checks whether the configured RPC client and network support the restore
+   * flow. The returned report distinguishes incompatible results from
+   * unknown results when the endpoint or a custom client cannot be probed.
+   */
+  checkNetworkCapabilities(): Promise<SorobanNetworkCapabilityReport> {
+    return checkNetworkCapabilities(this._server, this._config.networkPassphrase)
+  }
+
   // ---------------------------------------------------------------------------
   // State accessors
   // ---------------------------------------------------------------------------
@@ -732,12 +741,13 @@ export class SorobanResurrect {
    * Queries the current TTL information for one or more ledger keys.
    *
    * @param keys - Ledger keys to query.
+   * @param opts - Query options, including the `near-expiry` warning window.
    * @returns Aggregated TTL result with per-entry info and query metadata.
    *
    * @example
    * ```ts
    * const result = await resurrect.queryLedgerTTL([ledgerKey])
-   * console.log(result.entries[0].ttlLedgers)
+   * console.log(result.entries[0].status)
    * ```
    */
   async queryLedgerTTL(
@@ -767,8 +777,11 @@ export class SorobanResurrect {
    * if (info.ttlLedgers < 10_000) console.warn('Entry expiring soon!')
    * ```
    */
-  async queryLedgerEntryTTL(key: xdr.LedgerKey): Promise<LedgerEntryTTLInfo> {
-    return queryLedgerEntryTTL(this._server, key)
+  async queryLedgerEntryTTL(
+    key: xdr.LedgerKey,
+    opts: QueryLedgerTTLOptions = {},
+  ): Promise<LedgerEntryTTLInfo> {
+    return queryLedgerEntryTTL(this._server, key, opts)
   }
 
   /**

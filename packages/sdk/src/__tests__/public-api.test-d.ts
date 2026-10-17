@@ -36,6 +36,7 @@ import type {
   MultiSigConfig,
   TransactionHistoryEntry,
   LedgerEntryTTLInfo,
+  LedgerEntryStatus,
   RestoreCostEstimate,
   ConfirmationPolicy,
   ConfirmationTimeoutBehavior,
@@ -88,6 +89,10 @@ type PublicExports =
   | 'SorobanResurrectSimulator'
   | 'SorobanResurrectExecutor'
   | 'queryLedgerTTL'
+  | 'RESTORE_TX_LEDGER_BOUNDS_WINDOW'
+  | 'checkNetworkCapabilities'
+  | 'MIN_RESTORE_PROTOCOL_VERSION'
+  | 'IncompleteFootprintError'
   | 'queryLedgerEntryTTL'
   | 'getExpiringSoonEntries'
   | 'getArchivedEntries'
@@ -227,6 +232,10 @@ test('scan / multisig / history / TTL public types exist', () => {
   expectTypeOf<KnownWallet>().not.toBeAny()
   expectTypeOf<TransactionHistoryEntry>().not.toBeAny()
   expectTypeOf<LedgerEntryTTLInfo>().not.toBeAny()
+  expectTypeOf<LedgerEntryTTLInfo['status']>().toEqualTypeOf<LedgerEntryStatus>()
+  expectTypeOf<LedgerEntryStatus>().toEqualTypeOf<
+    'healthy' | 'near-expiry' | 'archived' | 'unknown'
+  >()
   expectTypeOf<RestoreCostEstimate>().not.toBeAny()
 })
 

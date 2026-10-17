@@ -133,6 +133,10 @@ function makeIntegrationServer(callLog: string[]) {
         callLog.push('sendTransaction:original')
         return { hash: 'original-tx-hash' }
       }),
+    getLatestLedger: vi.fn().mockImplementation(async () => {
+      callLog.push('getLatestLedger')
+      return { sequence: 100 }
+    }),
     getTransaction: vi.fn().mockImplementation(async () => {
       callLog.push('getTransaction')
       return { status: rpc.Api.GetTransactionStatus.SUCCESS }
@@ -194,6 +198,7 @@ describe('full restore workflow integration', () => {
     expect(callLog).toEqual([
       'simulateTransaction',
       'getAccount',
+      'getLatestLedger',
       'sendTransaction:restore',
       'getTransaction',
       'getAccount',
@@ -246,6 +251,22 @@ describe('full restore workflow integration', () => {
     expect(submittedCallOrder).toBeLessThan(confirmedCallOrder)
     expect(confirmedCallOrder).toBeLessThan(signingOriginalCallOrder)
     expect(signingOriginalCallOrder).toBeLessThan(originalSubmittedCallOrder)
+  })
+
+  it('does not submit a restore after wallet approval if its ledger bounds are stale', async () => {
+    const server = makeIntegrationServer(callLog)
+    vi.mocked(server.getLatestLedger).mockResolvedValue({ sequence: 130 } as never)
+
+    const result = await executeWithRestore({
+      server,
+      transaction: makeSampleTx(),
+      wallet: makeWallet(),
+      config: defaultConfig,
+    })
+
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('Restore preamble is stale')
+    expect(server.sendTransaction).not.toHaveBeenCalled()
   })
 
   it('propagates every workflow state transition through the SorobanResurrect facade', async () => {

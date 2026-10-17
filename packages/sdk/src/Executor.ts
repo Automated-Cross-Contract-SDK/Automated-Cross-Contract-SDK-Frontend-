@@ -20,6 +20,7 @@ import type {
   ConfirmationTimeoutBehavior,
 } from './types.js'
 import type { ResurrectErrorCode } from './errors.js'
+import { IncompleteFootprintError } from './SimulationFootprint.js'
 import {
   OriginalTransactionExpiredError,
   ResurrectError,
@@ -36,6 +37,7 @@ import {
   waitForTransaction,
   waitForTransactionSSE,
   buildOriginalAfterRestore,
+  assertRestoreTransactionFresh,
   buildFeeBumpTransaction,
   submitFeeBumpTransaction,
   isTxBadSeqError,
@@ -632,7 +634,9 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       }
     }
 
-    const err = 'Unexpected simulation response type'
+    const err =
+      'Cannot safely recover from simulation response (unrecognized-response): ' +
+      'the RPC response is not a recognized success, error, or restore response.'
     onRestoreFailed?.(err)
     return {
       success: false,

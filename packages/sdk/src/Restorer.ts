@@ -46,6 +46,8 @@ export interface BuildRestoreTxParams {
   transactionData: xdr.SorobanTransactionData
   /** Minimum resource fee from the simulation response. */
   minResourceFee: number
+  /** Latest ledger reported by the simulation that produced the restore preamble. */
+  latestLedger: number
   /** SDK configuration. */
   config: SorobanResurrectConfig
   /** Pre-fetched account (avoids sequence-number race when calling concurrently). */
@@ -122,6 +124,7 @@ export function resolveRestoreMemo(
  *   sourcePublicKey: publicKey,
  *   transactionData: simResponse.transactionData.build(),
  *   minResourceFee: parseInt(simResponse.minResourceFee, 10),
+ *   latestLedger: simResponse.latestLedger,
  *   config,
  * })
  * ```
@@ -157,12 +160,17 @@ export async function buildRestoreTransaction(params: BuildRestoreTxParams): Pro
     sourcePublicKey,
     transactionData,
     minResourceFee,
+    latestLedger,
     config,
     account: preFetched,
     sequenceNumber,
     signal,
   } = params
   throwIfAborted(signal)
+
+  if (!Number.isInteger(latestLedger) || latestLedger < 0) {
+    throw new Error('Cannot build restore transaction: simulation latestLedger must be a non-negative integer')
+  }
 
   const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
   let account = preFetched
@@ -190,6 +198,7 @@ export async function buildRestoreTransaction(params: BuildRestoreTxParams): Pro
     .addOperation(Operation.restoreFootprint({}))
     .setSorobanData(transactionData)
     .setTimeout(30)
+    .setLedgerbounds(latestLedger, latestLedger + RESTORE_TX_LEDGER_BOUNDS_WINDOW)
 
   const memo = resolveRestoreMemo(params.memo, config)
   if (memo) {
@@ -229,6 +238,48 @@ export async function buildRestoreTransaction(params: BuildRestoreTxParams): Pro
   }
 
   return tx
+}
+
+/**
+ * Checks that a signed restore transaction still matches its preamble and is
+ * within both its time and ledger bounds before sending it to the RPC.
+ */
+export async function assertRestoreTransactionFresh(
+  server: ISorobanRpcClient,
+  signedTransaction: Transaction,
+  expectedTransaction: Transaction,
+): Promise<void> {
+  const expectedLedgerBounds = expectedTransaction.ledgerBounds
+  if (!expectedLedgerBounds) {
+    throw new Error('Restore transaction is missing ledger bounds; rebuild it with a fresh simulation')
+  }
+
+  const signedBounds = signedTransaction.ledgerBounds
+  if (
+    !signedBounds ||
+    signedBounds.minLedger !== expectedLedgerBounds.minLedger ||
+    signedBounds.maxLedger !== expectedLedgerBounds.maxLedger
+  ) {
+    throw new Error('Signed restore transaction changed its ledger bounds; rebuild and sign it again')
+  }
+
+  const maxTime = Number(signedTransaction.timeBounds?.maxTime ?? 0)
+  if (maxTime > 0 && Math.floor(Date.now() / 1000) >= maxTime) {
+    throw new Error('Restore transaction expired during wallet approval; rebuild and sign it again')
+  }
+
+  const latestLedger = (await server.getLatestLedger()).sequence
+  if (latestLedger < signedBounds.minLedger) {
+    throw new Error(
+      `Restore transaction is not valid until ledger ${signedBounds.minLedger}; RPC is at ledger ${latestLedger}`,
+    )
+  }
+  if (latestLedger >= signedBounds.maxLedger) {
+    throw new Error(
+      `Restore preamble is stale: its max ledger is ${signedBounds.maxLedger}, ` +
+        `but the latest ledger is ${latestLedger}. Rebuild and request a new wallet signature.`,
+    )
+  }
 }
 
 /** Parameters for building a restore transaction from arbitrary ledger keys. */
@@ -1108,6 +1159,11 @@ export async function buildBatchRestoreTransaction(
     .addOperation(Operation.restoreFootprint({}))
     .setSorobanData(combinedSorobanData)
     .setTimeout(30)
+    .setLedgerbounds(
+      Math.min(...restoreResponses.map((response) => response.latestLedger)),
+      Math.min(...restoreResponses.map((response) => response.latestLedger)) +
+        RESTORE_TX_LEDGER_BOUNDS_WINDOW,
+    )
     .build()
 
   return { restoreTx, archivedKeysByTx }

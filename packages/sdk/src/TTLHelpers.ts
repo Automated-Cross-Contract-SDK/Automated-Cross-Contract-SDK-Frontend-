@@ -1,5 +1,5 @@
 import { rpc, xdr } from '@stellar/stellar-sdk'
-import { ArchivedLedgerEntry } from './types.js'
+import type { ArchivedLedgerEntry } from './types.js'
 import type { ISorobanRpcClient } from './RpcClient.js'
 import { asXdrBase64, type XdrBase64 } from './branded-types.js'
 import { fetchLedgerEntriesChunked } from './ledgerChunks.js'
@@ -11,6 +11,8 @@ export const LATEST_LEDGER_CACHE_MS = 1000
 export interface QueryLedgerTTLOptions {
   /** Known current ledger sequence; skips the `getLatestLedger` RPC call entirely. */
   currentLedger?: number
+  /** Remaining-ledger window for the `near-expiry` status (default 100). */
+  warningWindowLedgers?: number
   /** Window (ms) to reuse a cached latest ledger (default {@link LATEST_LEDGER_CACHE_MS}; `0` disables). */
   latestLedgerCacheMs?: number
   /** Keys per `getLedgerEntries` request. */
@@ -51,6 +53,8 @@ export function invalidateLatestLedgerCache(server: ISorobanRpcClient): void {
  * before a ledger entry expires.
  */
 export const LEDGER_CLOSE_TIME_SECONDS = 5
+/** Default remaining-TTL window for the `near-expiry` status. */
+export const DEFAULT_TTL_WARNING_WINDOW_LEDGERS = 100
 
 /**
  * The kind of ledger entry a TTL query was performed against.
@@ -169,12 +173,14 @@ function makeLiveInfo(
   liveUntilLedger: number,
   currentLedger: number,
   entryType: LedgerKeyEntryType,
+  warningWindowLedgers: number,
 ): LedgerEntryTTLInfo {
   const ttlLedgers = Math.max(0, liveUntilLedger - currentLedger)
   const isArchived = ttlLedgers === 0
   return {
     keyBase64,
     entryType,
+    status: isArchived ? 'archived' : ttlLedgers <= warningWindowLedgers ? 'near-expiry' : 'healthy',
     liveUntilLedger,
     currentLedger,
     ttlLedgers,
@@ -212,12 +218,19 @@ export async function queryLedgerTTL(
   opts: QueryLedgerTTLOptions = {},
 ): Promise<TTLQueryResult> {
   const queriedAt = Date.now()
+  const warningWindowLedgers = opts.warningWindowLedgers ?? DEFAULT_TTL_WARNING_WINDOW_LEDGERS
+  if (!Number.isInteger(warningWindowLedgers) || warningWindowLedgers < 0) {
+    throw new Error('warningWindowLedgers must be a non-negative integer')
+  }
 
   const currentLedger =
     opts.currentLedger ?? (await getCachedLatestLedger(server, opts.latestLedgerCacheMs))
 
   const failedChunks: TTLQueryResult['failedChunks'] = []
   const infoMap = new Map<string, LedgerEntryTTLInfo>()
+  const failedChunks: TTLQueryResult['failedChunks'] = []
+  const errorsByKey = new Map<string, unknown>()
+  const failedKeys = new Set<string>()
 
   // Establish an explicit unavailable result before the RPC lookup.
   for (const key of keys) {
@@ -277,8 +290,10 @@ export async function queryLedgerTTL(
   // Preserve original key order
   const entries: LedgerEntryTTLInfo[] = keys.map((key) => {
     const keyBase64 = asXdrBase64(key.toXDR('base64'))
-
-    return infoMap.get(keyBase64)!
+    const info = infoMap.get(keyBase64)!
+    if (!failedKeys.has(keyBase64)) return info
+    const error = errorsByKey.get(keyBase64)
+    return { ...info, status: 'unknown', isArchived: false, error }
   })
 
   return { entries, currentLedger, queriedAt, failedChunks, hasErrors: failedChunks.length > 0 }
@@ -294,8 +309,9 @@ export async function queryLedgerTTL(
 export async function queryLedgerEntryTTL(
   server: ISorobanRpcClient,
   key: xdr.LedgerKey,
+  opts: QueryLedgerTTLOptions = {},
 ): Promise<LedgerEntryTTLInfo> {
-  const result = await queryLedgerTTL(server, [key])
+  const result = await queryLedgerTTL(server, [key], opts)
   return result.entries[0]
 }
 

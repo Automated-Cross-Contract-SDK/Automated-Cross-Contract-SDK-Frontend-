@@ -182,6 +182,20 @@ export class LoggingRpcClient implements ISorobanRpcClient {
   ): ReturnType<ISorobanRpcClient['getLatestLedger']> {
     return this.timed('getLatestLedger', () => this.delegate.getLatestLedger(...args))
   }
+
+  getNetwork(): Promise<unknown> {
+    if (!this.delegate.getNetwork) {
+      return Promise.reject(new Error('The wrapped RPC client does not implement getNetwork().'))
+    }
+    return this.timed('getNetwork', () => this.delegate.getNetwork!())
+  }
+
+  getVersionInfo(): Promise<unknown> {
+    if (!this.delegate.getVersionInfo) {
+      return Promise.reject(new Error('The wrapped RPC client does not implement getVersionInfo().'))
+    }
+    return this.timed('getVersionInfo', () => this.delegate.getVersionInfo!())
+  }
 }
 
 function round(n: number): number {

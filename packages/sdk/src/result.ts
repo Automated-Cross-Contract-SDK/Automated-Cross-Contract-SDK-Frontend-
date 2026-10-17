@@ -231,21 +231,6 @@ export function extractFootprintFromSuccessSafe(
   response: rpc.Api.SimulateTransactionSuccessResponse,
 ): Result<{ readOnly: xdr.LedgerKey[]; readWrite: xdr.LedgerKey[] }, Error> {
   return toResult(() => {
-    if (!response._parsed) {
-      console.warn(
-        'SorobanResurrect: success simulation response has _parsed=false, cannot extract footprint',
-      )
-      return { readOnly: [], readWrite: [] }
-    }
-
-    try {
-      const footprint = response.transactionData.getFootprint()
-      return {
-        readOnly: footprint.readOnly() || [],
-        readWrite: footprint.readWrite() || [],
-      }
-    } catch {
-      return { readOnly: [], readWrite: [] }
-    }
+    return readSimulationFootprint(response)
   })
 }

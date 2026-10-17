@@ -5,6 +5,7 @@ import {
   getExpiringSoonEntries,
   getArchivedEntries,
   LEDGER_CLOSE_TIME_SECONDS,
+  DEFAULT_TTL_WARNING_WINDOW_LEDGERS,
 } from '../TTLHelpers.js'
 import type { ISorobanRpcClient } from '../RpcClient.js'
 
@@ -105,6 +106,7 @@ describe('queryLedgerTTL', () => {
     })
     expect(entries[2]).toMatchObject({
       isArchived: false,
+      status: 'near-expiry',
       ttlLedgers: 5,
       entryType: 'contractCode',
     })
@@ -159,11 +161,29 @@ describe('queryLedgerTTL', () => {
     })
   })
 
-  it('treats liveUntilLedger == currentLedger + 1 as live with 1 ledger left', async () => {
+  it('marks entries within the warning window as near-expiry', async () => {
     const k = dataKey(1)
     const { server } = mockServer(new Map([[b64(k), CURRENT_LEDGER + 1]]))
-    const { entries } = await queryLedgerTTL(server, [k])
-    expect(entries[0]).toMatchObject({ isArchived: false, ttlLedgers: 1 })
+    const { entries } = await queryLedgerTTL(server, [k], { warningWindowLedgers: 1 })
+    expect(entries[0]).toMatchObject({ status: 'near-expiry', isArchived: false, ttlLedgers: 1 })
+  })
+
+  it('marks entries beyond the warning window as healthy', async () => {
+    const k = dataKey(1)
+    const { server } = mockServer(new Map([[b64(k), CURRENT_LEDGER + 2]]))
+    const { entries } = await queryLedgerTTL(server, [k], { warningWindowLedgers: 1 })
+    expect(entries[0].status).toBe('healthy')
+  })
+
+  it('uses the default warning window and rejects invalid values', async () => {
+    const k = dataKey(1)
+    const { server } = mockServer(
+      new Map([[b64(k), CURRENT_LEDGER + DEFAULT_TTL_WARNING_WINDOW_LEDGERS]]),
+    )
+    expect((await queryLedgerTTL(server, [k])).entries[0].status).toBe('near-expiry')
+    await expect(queryLedgerTTL(server, [k], { warningWindowLedgers: -1 })).rejects.toThrow(
+      'warningWindowLedgers must be a non-negative integer',
+    )
   })
 
   it('splits requests into chunks of 50', async () => {

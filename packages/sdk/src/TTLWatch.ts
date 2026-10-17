@@ -274,6 +274,7 @@ async function buildRestoreTxForKeys(
     .addOperation(Operation.restoreFootprint({}))
     .setSorobanData(draftData)
     .setTimeout(30)
+    .setLedgerbounds(sim.latestLedger, sim.latestLedger + RESTORE_TX_LEDGER_BOUNDS_WINDOW)
     .build()
 
   const sim = await server.simulateTransaction(draftTx)
@@ -381,6 +382,8 @@ export function watchTTL(
         networkPassphrase,
         config,
       )
+
+      await assertRestoreTransactionFresh(server, signedTx, restoreTx)
 
       const sent = await server.sendTransaction(signedTx)
       const hash = asTxHash(sent.hash)

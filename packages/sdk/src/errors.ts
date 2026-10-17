@@ -82,6 +82,13 @@ export type ResurrectErrorCode =
   | 'UNEXPECTED_SIMULATION_RESPONSE'
 
   /**
+   * A restore response did not include a complete, usable footprint.
+   * Check `result.error` for the response condition; no restore transaction
+   * was constructed or submitted.
+   */
+  | 'INCOMPLETE_FOOTPRINT'
+
+  /**
    * The connected wallet declared that it does not support a required
    * capability (e.g. `capabilities.feeBump === false` or
    * `capabilities.signAuthEntry === false`). The caller should surface a

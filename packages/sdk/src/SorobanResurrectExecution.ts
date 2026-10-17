@@ -238,6 +238,7 @@ export class SorobanResurrectExecutor {
       sourcePublicKey,
       transactionData: response.transactionData.build(),
       minResourceFee: parseInt(response.minResourceFee, 10),
+      latestLedger: response.latestLedger,
       config: this._config,
       signal: options.signal,
     })
@@ -312,6 +313,8 @@ export class SorobanResurrectExecutor {
       if (!(signedTx instanceof Transaction)) {
         throw new Error('Failed to parse signed restore transaction')
       }
+
+      await assertRestoreTransactionFresh(this._server, signedTx, restoreTx)
 
       stateMgr.setState('submitting_restore', 'Submitting restore transaction...')
       opts?.onSubmittingRestore?.()
@@ -802,6 +805,8 @@ export class SorobanResurrectExecutor {
       if (!(signedTx instanceof Transaction)) {
         throw new Error('Failed to parse signed batch restore transaction')
       }
+
+      await assertRestoreTransactionFresh(this._server, signedTx, restoreTx)
 
       stateMgr.setState('submitting_restore', 'Submitting batch restore transaction...')
       const sent = await runWithSignal(() => this._server.sendTransaction(signedTx), sharedSignal)

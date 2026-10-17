@@ -340,8 +340,27 @@ describe('executeWithRestore', () => {
     })
 
     expect(result.success).toBe(false)
-    expect(result.error).toBe('Unexpected simulation response type')
-    expect(onRestoreFailed).toHaveBeenCalledWith('Unexpected simulation response type')
+    expect(result.error).toContain('(unrecognized-response)')
+    expect(onRestoreFailed).toHaveBeenCalledWith(result.error)
+  })
+
+  it('fails safely and reports the condition when restore footprint data is incomplete', async () => {
+    vi.mocked(server.simulateTransaction).mockResolvedValue({
+      ...makeRestoreResponse(),
+      transactionData: undefined,
+    } as never)
+
+    const result = await executeWithRestore({
+      server,
+      transaction: makeSampleTx(),
+      wallet: makeWallet(),
+      config: defaultConfig,
+    })
+
+    expect(result.success).toBe(false)
+    expect(result.errorCode).toBe('INCOMPLETE_FOOTPRINT')
+    expect(result.error).toContain('(missing-transaction-data)')
+    expect(server.sendTransaction).not.toHaveBeenCalled()
   })
 
   it('returns error when restore transaction fails on-chain', async () => {

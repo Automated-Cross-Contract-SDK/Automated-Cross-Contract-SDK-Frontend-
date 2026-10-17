@@ -125,6 +125,14 @@ export interface ISorobanRpcClient {
   getLatestLedger(): Promise<rpc.Api.GetLatestLedgerResponse>
 
   /**
+   * Optional network metadata probes used by `checkNetworkCapabilities`.
+   * Custom clients may omit these methods; compatibility is then reported
+   * as unknown rather than assumed.
+   */
+  getNetwork?(): Promise<unknown>
+  getVersionInfo?(): Promise<unknown>
+
+  /**
    * The base URL of the underlying RPC endpoint, if known.
    *
    * Used by {@link waitForTransactionSSE} in `Restorer.ts` to open an SSE
@@ -223,6 +231,14 @@ export class SorobanRpcClient implements ISorobanRpcClient {
 
   getLatestLedger(): Promise<rpc.Api.GetLatestLedgerResponse> {
     return this.ensureServer().getLatestLedger()
+  }
+
+  getNetwork(): Promise<unknown> {
+    return this.ensureServer().getNetwork()
+  }
+
+  getVersionInfo(): Promise<unknown> {
+    return this.ensureServer().getVersionInfo()
   }
 }
 
@@ -376,6 +392,20 @@ export class ResilientRpcClient implements ISorobanRpcClient {
 
   getLatestLedger(): Promise<rpc.Api.GetLatestLedgerResponse> {
     return this._call(() => this._inner.getLatestLedger())
+  }
+
+  getNetwork(): Promise<unknown> {
+    if (!this._inner.getNetwork) {
+      return Promise.reject(new Error('The wrapped RPC client does not implement getNetwork().'))
+    }
+    return this._call(() => this._inner.getNetwork!())
+  }
+
+  getVersionInfo(): Promise<unknown> {
+    if (!this._inner.getVersionInfo) {
+      return Promise.reject(new Error('The wrapped RPC client does not implement getVersionInfo().'))
+    }
+    return this._call(() => this._inner.getVersionInfo!())
   }
 
   private async _call<T>(fn: () => Promise<T>): Promise<T> {

@@ -185,11 +185,23 @@ export class SorobanResurrectSimulator {
   ): Promise<ArchivedLedgerEntry[]> {
     const response = await this.simulate(transaction, options)
 
+    if (response._parsed !== true) {
+      throw new IncompleteFootprintError(
+        'unparsed-response',
+        'the RPC response has _parsed=false, so archive status cannot be determined safely.',
+      )
+    }
+
     if (isRestoreResponse(response)) {
       return extractArchivedKeys(response)
     }
 
-    if (isSuccessResponse(response) || isErrorResponse(response)) {
+    if (isSuccessResponse(response)) {
+      readSimulationFootprint(response)
+      return []
+    }
+
+    if (isErrorResponse(response)) {
       return []
     }
 

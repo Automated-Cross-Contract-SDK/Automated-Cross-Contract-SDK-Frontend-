@@ -35,6 +35,7 @@ function makeMockServer(): rpc.Server {
     getAccount: vi.fn(),
     getTransaction: vi.fn(),
     simulateTransaction: vi.fn(),
+    getLatestLedger: vi.fn(),
   } as unknown as rpc.Server
 }
 
@@ -206,11 +207,54 @@ describe('Restorer', () => {
         sourcePublicKey: kp.publicKey(),
         transactionData: txData,
         minResourceFee: 100,
+        latestLedger: 100,
         config: { rpcUrl: 'https://test', networkPassphrase: Networks.TESTNET },
       })
 
       expect(tx).toBeInstanceOf(Transaction)
       expect(tx.operations.length).toBeGreaterThanOrEqual(1)
+      expect(tx.ledgerBounds).toEqual({
+        minLedger: 100,
+        maxLedger: 100 + RESTORE_TX_LEDGER_BOUNDS_WINDOW,
+      })
+    })
+  })
+
+  describe('assertRestoreTransactionFresh', () => {
+    it('allows a signed restore while the latest ledger is inside the bounds', async () => {
+      const server = makeMockServer()
+      const kp = Keypair.random()
+      const tx = await buildRestoreTransaction({
+        server,
+        sourcePublicKey: kp.publicKey(),
+        transactionData: new SorobanDataBuilder().build(),
+        minResourceFee: 100,
+        latestLedger: 100,
+        config: { rpcUrl: 'https://test', networkPassphrase: Networks.TESTNET },
+        account: new Account(kp.publicKey(), '1'),
+      })
+      vi.mocked(server.getLatestLedger).mockResolvedValue({ sequence: 129 } as never)
+
+      await expect(assertRestoreTransactionFresh(server, tx, tx)).resolves.toBeUndefined()
+    })
+
+    it('rejects a preamble once the current ledger reaches its exclusive max bound', async () => {
+      const server = makeMockServer()
+      const kp = Keypair.random()
+      const tx = await buildRestoreTransaction({
+        server,
+        sourcePublicKey: kp.publicKey(),
+        transactionData: new SorobanDataBuilder().build(),
+        minResourceFee: 100,
+        latestLedger: 100,
+        config: { rpcUrl: 'https://test', networkPassphrase: Networks.TESTNET },
+        account: new Account(kp.publicKey(), '1'),
+      })
+      vi.mocked(server.getLatestLedger).mockResolvedValue({ sequence: 130 } as never)
+
+      await expect(assertRestoreTransactionFresh(server, tx, tx)).rejects.toThrow(
+        'Restore preamble is stale',
+      )
     })
   })
 
