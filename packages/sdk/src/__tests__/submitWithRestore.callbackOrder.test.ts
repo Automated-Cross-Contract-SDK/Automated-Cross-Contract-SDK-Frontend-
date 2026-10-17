@@ -1,16 +1,22 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   rpc,
   TransactionBuilder,
   Account,
   Networks,
   Operation,
+  Asset,
   Keypair,
   Transaction,
   SorobanDataBuilder,
 } from '@stellar/stellar-sdk'
 import { SorobanResurrect } from '../SorobanResurrect.js'
-import type { WalletAdapter, SorobanResurrectConfig } from '../types.js'
+import { WalletError } from '../types.js'
+import type {
+  WalletAdapter,
+  SorobanResurrectConfig,
+  SubmitLifecycleEvent,
+} from '../types.js'
 
 function makeSampleTx(): Transaction {
   const kp = Keypair.random()
@@ -117,6 +123,10 @@ describe('SorobanResurrect.submitWithRestore — callback invocation ordering', 
     resurrect = new SorobanResurrect(testConfig)
   })
 
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('invokes callbacks in the documented order for the full restore-then-submit flow', async () => {
     vi.spyOn(resurrect.server, 'simulateTransaction')
       .mockResolvedValueOnce(makeRestoreResponse() as never)
@@ -150,6 +160,304 @@ describe('SorobanResurrect.submitWithRestore — callback invocation ordering', 
       'onOriginalSubmitted',
     ])
     expect(callbacks.onRestoreFailed).not.toHaveBeenCalled()
+  })
+
+  it('publishes typed lifecycle phases and a terminal completion event', async () => {
+    vi.spyOn(resurrect.server, 'simulateTransaction')
+      .mockResolvedValueOnce(makeRestoreResponse() as never)
+      .mockResolvedValueOnce(makeSuccessResponse() as never)
+    vi.spyOn(resurrect.server, 'getAccount').mockResolvedValue(
+      new Account(Keypair.random().publicKey(), '2') as never,
+    )
+    vi.spyOn(resurrect.server, 'sendTransaction')
+      .mockResolvedValueOnce({ hash: 'restore-hash' } as never)
+      .mockResolvedValueOnce({ hash: 'original-hash' } as never)
+    vi.spyOn(resurrect.server, 'getTransaction').mockResolvedValue({
+      status: rpc.Api.GetTransactionStatus.SUCCESS,
+    } as never)
+
+    const events: string[] = []
+    const listener = vi.fn((event: SubmitLifecycleEvent) => events.push(event.phase))
+    const callback = vi.fn()
+    const unsubscribe = resurrect.on('workflowLifecycle', listener)
+
+    const result = await resurrect.submitWithRestore({
+      transaction: makeSampleTx(),
+      wallet: makeWallet(),
+      requestId: 'withdrawal-42',
+      onLifecycleEvent: callback,
+    })
+
+    unsubscribe()
+    expect(result.success).toBe(true)
+    expect(events).toEqual([
+      'simulation_started',
+      'restore_preparation_started',
+      'restore_submission_started',
+      'restore_submitted',
+      'restore_confirmation_started',
+      'restore_confirmed',
+      'original_submission_started',
+      'original_submitted',
+      'original_confirmation_started',
+      'original_confirmed',
+      'completed',
+    ])
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({ phase: 'completed', requestId: 'withdrawal-42' }),
+    )
+    expect(callback).toHaveBeenCalledTimes(11)
+  })
+
+  it('shares only concurrent requests with the same logical requestId', async () => {
+    vi.spyOn(resurrect.server, 'simulateTransaction').mockResolvedValue(
+      makeSuccessResponse() as never,
+    )
+    vi.spyOn(resurrect.server, 'sendTransaction')
+      .mockResolvedValueOnce({ hash: 'same-request-hash' } as never)
+      .mockResolvedValueOnce({ hash: 'distinct-request-a' } as never)
+      .mockResolvedValueOnce({ hash: 'distinct-request-b' } as never)
+      .mockResolvedValueOnce({ hash: 'same-id-after-completion' } as never)
+    vi.spyOn(resurrect.server, 'getTransaction').mockResolvedValue({
+      status: rpc.Api.GetTransactionStatus.SUCCESS,
+    } as never)
+
+    const transaction = makeSampleTx()
+    const wallet = makeWallet()
+    const firstCallback = vi.fn()
+    const duplicateCallback = vi.fn()
+    const [first, duplicate] = await Promise.all([
+      resurrect.submitWithRestore({
+        transaction,
+        wallet,
+        requestId: 'order-17',
+        onLifecycleEvent: firstCallback,
+      }),
+      resurrect.submitWithRestore({
+        transaction,
+        wallet,
+        requestId: 'order-17',
+        onLifecycleEvent: duplicateCallback,
+      }),
+    ])
+
+    expect(first).toEqual(duplicate)
+    expect(first.originalTxHash).toBe('same-request-hash')
+    expect(resurrect.server.simulateTransaction).toHaveBeenCalledTimes(1)
+    expect(wallet.signTransaction).toHaveBeenCalledTimes(1)
+    expect(firstCallback).toHaveBeenCalled()
+    expect(duplicateCallback).not.toHaveBeenCalled()
+    expect(resurrect.history).toHaveLength(1)
+
+    const distinct = await Promise.all([
+      resurrect.submitWithRestore({ transaction, wallet, requestId: 'order-18' }),
+      resurrect.submitWithRestore({ transaction, wallet, requestId: 'order-19' }),
+    ])
+    expect(distinct.map((result) => result.originalTxHash).sort()).toEqual([
+      'distinct-request-a',
+      'distinct-request-b',
+    ])
+    expect(resurrect.server.simulateTransaction).toHaveBeenCalledTimes(3)
+    expect(resurrect.history).toHaveLength(3)
+
+    const later = await resurrect.submitWithRestore({
+      transaction,
+      wallet,
+      requestId: 'order-17',
+    })
+    expect(later.originalTxHash).toBe('same-id-after-completion')
+    expect(resurrect.server.simulateTransaction).toHaveBeenCalledTimes(4)
+    expect(resurrect.history).toHaveLength(4)
+  })
+
+  it('rejects an empty requestId without starting a workflow', async () => {
+    const result = await resurrect.submitWithRestore({
+      transaction: makeSampleTx(),
+      wallet: makeWallet(),
+      requestId: '   ',
+    })
+
+    expect(result).toMatchObject({
+      success: false,
+      error: 'requestId must be a non-empty string',
+    })
+    expect(resurrect.server.simulateTransaction).not.toHaveBeenCalled()
+    expect(resurrect.history).toHaveLength(0)
+  })
+
+  it('can return after original submission while still confirming a required restore', async () => {
+    vi.spyOn(resurrect.server, 'simulateTransaction')
+      .mockResolvedValueOnce(makeRestoreResponse() as never)
+      .mockResolvedValueOnce(makeSuccessResponse() as never)
+    vi.spyOn(resurrect.server, 'getAccount').mockResolvedValue(
+      new Account(Keypair.random().publicKey(), '2') as never,
+    )
+    vi.spyOn(resurrect.server, 'sendTransaction')
+      .mockResolvedValueOnce({ hash: 'restore-hash' } as never)
+      .mockResolvedValueOnce({ hash: 'original-hash' } as never)
+    vi.spyOn(resurrect.server, 'getTransaction').mockResolvedValue({
+      status: rpc.Api.GetTransactionStatus.SUCCESS,
+    } as never)
+
+    const result = await resurrect.submitWithRestore({
+      transaction: makeSampleTx(),
+      wallet: makeWallet(),
+      confirmationPolicy: 'return-on-submission',
+    })
+
+    expect(result).toMatchObject({
+      success: true,
+      originalTxHash: 'original-hash',
+      confirmationStatus: 'submitted',
+    })
+    expect(resurrect.server.getTransaction).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not submit the original transaction when restore confirmation remains pending', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(resurrect.server, 'simulateTransaction')
+      .mockResolvedValueOnce(makeRestoreResponse() as never)
+      .mockResolvedValueOnce(makeSuccessResponse() as never)
+    vi.spyOn(resurrect.server, 'getAccount').mockResolvedValue(
+      new Account(Keypair.random().publicKey(), '2') as never,
+    )
+    vi.spyOn(resurrect.server, 'sendTransaction').mockResolvedValue({
+      hash: 'restore-pending-hash',
+    } as never)
+    vi.spyOn(resurrect.server, 'getTransaction').mockResolvedValue({
+      status: rpc.Api.GetTransactionStatus.NOT_FOUND,
+    } as never)
+
+    const pendingPromise = resurrect.submitWithRestore({
+      transaction: makeSampleTx(),
+      wallet: makeWallet(),
+      confirmationTimeoutMs: 20,
+      confirmationTimeoutBehavior: 'return-pending',
+    })
+    await vi.runAllTimersAsync()
+    const result = await pendingPromise
+
+    expect(result).toMatchObject({
+      success: false,
+      restoreTxHash: 'restore-pending-hash',
+      confirmationStatus: 'pending',
+      errorCode: 'CONFIRMATION_TIMEOUT',
+    })
+    expect(resurrect.server.sendTransaction).toHaveBeenCalledTimes(1)
+  })
+
+  it('returns an explicit pending result or timeout error with the submitted hash', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(resurrect.server, 'simulateTransaction').mockResolvedValue(
+      makeSuccessResponse() as never,
+    )
+    vi.spyOn(resurrect.server, 'sendTransaction')
+      .mockResolvedValueOnce({ hash: 'pending-hash' } as never)
+      .mockResolvedValueOnce({ hash: 'timeout-hash' } as never)
+    vi.spyOn(resurrect.server, 'getTransaction').mockResolvedValue({
+      status: rpc.Api.GetTransactionStatus.NOT_FOUND,
+    } as never)
+
+    const pendingPromise = resurrect.submitWithRestore({
+      transaction: makeSampleTx(),
+      wallet: makeWallet(),
+      confirmationTimeoutMs: 20,
+      confirmationTimeoutBehavior: 'return-pending',
+    })
+    await vi.runAllTimersAsync()
+    const pending = await pendingPromise
+
+    expect(pending).toMatchObject({
+      success: false,
+      originalTxHash: 'pending-hash',
+      confirmationStatus: 'pending',
+      errorCode: 'CONFIRMATION_TIMEOUT',
+    })
+
+    const errorPromise = resurrect.submitWithRestore({
+      transaction: makeSampleTx(),
+      wallet: makeWallet(),
+      confirmationTimeoutMs: 20,
+    })
+    await vi.runAllTimersAsync()
+    const error = await errorPromise
+
+    expect(error).toMatchObject({
+      success: false,
+      originalTxHash: 'timeout-hash',
+      errorCode: 'CONFIRMATION_TIMEOUT',
+    })
+    expect(error.confirmationStatus).toBeUndefined()
+  })
+
+  it('reports terminal on-chain failure separately from a confirmation timeout', async () => {
+    vi.spyOn(resurrect.server, 'simulateTransaction').mockResolvedValue(
+      makeSuccessResponse() as never,
+    )
+    vi.spyOn(resurrect.server, 'sendTransaction').mockResolvedValue({
+      hash: 'failed-hash',
+    } as never)
+    vi.spyOn(resurrect.server, 'getTransaction').mockResolvedValue({
+      status: rpc.Api.GetTransactionStatus.FAILED,
+    } as never)
+
+    const result = await resurrect.submitWithRestore({
+      transaction: makeSampleTx(),
+      wallet: makeWallet(),
+    })
+
+    expect(result).toMatchObject({
+      success: false,
+      originalTxHash: 'failed-hash',
+      errorCode: 'ORIGINAL_TX_FAILED',
+      onchainError: {
+        txResultCode: 'unknown',
+        message: 'Transaction failed on-chain',
+      },
+    })
+  })
+
+  it('opts into transient RPC retries without repeating a wallet signature', async () => {
+    vi.spyOn(resurrect.server, 'simulateTransaction')
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce(makeSuccessResponse() as never)
+    vi.spyOn(resurrect.server, 'sendTransaction').mockResolvedValue({
+      hash: 'direct-hash',
+    } as never)
+    vi.spyOn(resurrect.server, 'getTransaction').mockResolvedValue({
+      status: rpc.Api.GetTransactionStatus.SUCCESS,
+    } as never)
+    const wallet = makeWallet()
+
+    const result = await resurrect.submitWithRestore({
+      transaction: makeSampleTx(),
+      wallet,
+      retry: { maxRetries: 1, baseDelayMs: 0, maxDelayMs: 0 },
+    })
+
+    expect(result.success).toBe(true)
+    expect(resurrect.server.simulateTransaction).toHaveBeenCalledTimes(2)
+    expect(wallet.signTransaction).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not retry wallet rejection when RPC retries are enabled', async () => {
+    vi.spyOn(resurrect.server, 'simulateTransaction').mockResolvedValue(
+      makeSuccessResponse() as never,
+    )
+    const wallet = makeWallet()
+    wallet.signTransaction = vi.fn().mockRejectedValue(
+      new WalletError('USER_REJECTED', 'Signature request declined'),
+    )
+
+    const result = await resurrect.submitWithRestore({
+      transaction: makeSampleTx(),
+      wallet,
+      retry: { maxRetries: 3, baseDelayMs: 0, maxDelayMs: 0 },
+    })
+
+    expect(result.success).toBe(false)
+    expect(result.error).toBe('Signature request declined')
+    expect(wallet.signTransaction).toHaveBeenCalledTimes(1)
   })
 
   it('invokes only onSigningOriginal then onOriginalSubmitted when no restore is needed', async () => {
@@ -300,7 +608,8 @@ describe('SorobanResurrect.submitWithRestore — callback invocation ordering', 
     })
 
     expect(result.success).toBe(false)
-    expect(result.error).toBe('Failed to parse signed original transaction')
+    expect(result.errorCode).toBe('UNEXPECTED_FEE_BUMP_ENVELOPE')
+    expect(result.error).toContain('fee-bump envelope')
     expect(order).toEqual([
       'onRestoreNeeded',
       'onSigningRestore',

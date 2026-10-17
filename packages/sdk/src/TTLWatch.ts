@@ -14,8 +14,10 @@ import { getExpiringSoonEntries, type LedgerEntryTTLInfo } from './TTLHelpers.js
 import { calculateRestoreFee } from './feeCalculation.js'
 import { isErrorResponse } from './Archiver.js'
 import { DEFAULT_NETWORK_PASSPHRASE } from './constants.js'
-import { asXdrBase64, asTxHash } from './branded-types.js'
-import { withPhaseTimeout } from './phaseTimeout.js'
+import { asTxHash } from './branded-types.js'
+import { signAndVerifyTransaction } from './signedTransaction.js'
+import { configForWalletRestore } from './memoValidation.js'
+import { resolveRestoreMemo } from './Restorer.js'
 
 /** Options for {@link watchTTL}. */
 export interface TTLWatchOptions {
@@ -281,14 +283,17 @@ async function buildRestoreTxForKeys(
 
   const restoreFee = calculateRestoreFee(parseInt(sim.minResourceFee, 10), config)
 
-  return new TransactionBuilder(new Account(sourcePublicKey, sequence), {
+  const builder = new TransactionBuilder(new Account(sourcePublicKey, sequence), {
     fee: restoreFee,
     networkPassphrase,
   })
     .addOperation(Operation.restoreFootprint({}))
     .setSorobanData(sim.transactionData.build())
     .setTimeout(30)
-    .build()
+
+  const memo = resolveRestoreMemo(undefined, config)
+  if (memo) builder.addMemo(memo)
+  return builder.build()
 }
 
 /**
@@ -323,7 +328,7 @@ export function watchTTL(
   opts: TTLWatchOptions = {},
 ): TTLWatchHandle {
   const intervalMs = opts.intervalMs ?? config.ttlWatchIntervalMs
-  const thresholdLedgers = opts.thresholdLedgers ?? config.ttlWatchThreshold
+  const thresholdLedgers = opts.thresholdLedgers ?? config.ttlWatchThresholdLedgers
   const autoExtend = opts.autoExtend ?? config.ttlWatchAutoExtend
 
   if (autoExtend && !opts.wallet) {
@@ -362,15 +367,20 @@ export function watchTTL(
       )
       const publicKey = await wallet.getPublicKey()
 
-      const restoreTx = await buildRestoreTxForKeys(server, publicKey, keysToRestore, config)
+      const restoreConfig = configForWalletRestore(config, wallet)
+      const restoreTx = await buildRestoreTxForKeys(
+        server,
+        publicKey,
+        keysToRestore,
+        restoreConfig,
+      )
       const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
-      const signedXdr = await wallet.signTransaction(asXdrBase64(restoreTx.toXDR()), {
+      const signedTx = await signAndVerifyTransaction(
+        restoreTx,
+        wallet,
         networkPassphrase,
-      })
-      const signedTx = TransactionBuilder.fromXDR(signedXdr, networkPassphrase)
-      if (!(signedTx instanceof Transaction)) {
-        throw new Error('Failed to parse signed TTL auto-extend transaction')
-      }
+        config,
+      )
 
       const sent = await server.sendTransaction(signedTx)
       const hash = asTxHash(sent.hash)

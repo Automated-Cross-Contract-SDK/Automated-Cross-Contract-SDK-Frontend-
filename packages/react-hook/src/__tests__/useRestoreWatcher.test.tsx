@@ -1,8 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
+import { StrictMode, createElement, type PropsWithChildren } from 'react'
 import { useRestoreWatcher } from '../useRestoreWatcher.js'
 
 const NO_KEYS = [] as never
+const StrictWrapper = ({ children }: PropsWithChildren) =>
+  createElement(StrictMode, null, children)
 
 function makeFake(entries: unknown[] = []) {
   return {
@@ -104,6 +107,25 @@ describe('useRestoreWatcher', () => {
       await vi.advanceTimersByTimeAsync(5000)
     })
     expect(fake.getExpiringSoonEntries.mock.calls.length).toBe(callsBefore)
+  })
+
+  it('does not retain duplicate polling intervals across Strict Mode remounts', () => {
+    const fake = makeFake([])
+    const renderWatcher = () =>
+      renderHook(
+        () => useRestoreWatcher(NO_KEYS, { resurrect: fake as never, intervalMs: 1000 }),
+        { wrapper: StrictWrapper },
+      )
+
+    const firstMount = renderWatcher()
+    expect(vi.getTimerCount()).toBe(1)
+    firstMount.unmount()
+    expect(vi.getTimerCount()).toBe(0)
+
+    const secondMount = renderWatcher()
+    expect(vi.getTimerCount()).toBe(1)
+    secondMount.unmount()
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it('honours autoStart:false and start()/stop()', async () => {

@@ -44,7 +44,9 @@ export function PersistHistoryScreen({ wallet }: { wallet: WalletAdapter }) {
   // Wait for the persisted history to hydrate before reading it. After an app
   // relaunch this repopulates `getHistory()` with prior attempts.
   useEffect(() => {
+    let mounted = true
     sdk.ready.then(() => {
+      if (!mounted) return
       setHydrated(true)
       setEntries(sdk.getHistory())
       const failed = sdk.getHistory().find((e) => e.status === 'failed')
@@ -53,6 +55,9 @@ export function PersistHistoryScreen({ wallet }: { wallet: WalletAdapter }) {
         append(`Recovered failed attempt ${failed.id} from storage — retry available`)
       }
     })
+    return () => {
+      mounted = false
+    }
   }, [])
 
   const submit = useCallback(async () => {

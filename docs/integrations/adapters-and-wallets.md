@@ -1,182 +1,118 @@
 # Adapters and wallets
 
-This guide covers the wallet adapter layer: the `WalletAdapter` contract, the
-`createAdapter` factory, the capability flags the SDK relies on, and the extra
-setup required for hardware wallets such as Ledger and Trezor.
+The SDK accepts a `WalletAdapter` for account lookup and transaction signing.
+Browser adapters are loaded on demand; Ledger and Trezor adapters are included
+in the SDK and accept their transport/client as configuration.
 
-## The `WalletAdapter` contract
+## Browser wallets
 
-Every wallet integration implements the same `WalletAdapter` interface. The SDK
-only ever talks to this interface, so a custom adapter is a first-class citizen
-and behaves exactly like a built-in one.
-
-```ts
-interface WalletAdapter {
-  /** Stable identifier, usually a `KnownWallet` value. */
-  readonly id: string;
-  /** Human-readable name shown in the UI. */
-  readonly name: string;
-  /** Capabilities this adapter supports. */
-  readonly capabilities: WalletCapabilities;
-  /** Connect and return the active account. */
-  connect(): Promise<WalletAccount>;
-  /** Disconnect and release any transport/resources. */
-  disconnect(): Promise<void>;
-  /** Sign a transaction or message payload. */
-  sign(payload: SignPayload): Promise<SignedPayload>;
-}
-```
-
-## The `createAdapter` factory
-
-`createAdapter` is the public entry point for constructing an adapter. It
-normalises the wallet id, validates the requested capabilities, and wires up the
-correct concrete implementation (including hardware transports).
+`createAdapter` accepts `freighter`, `albedo`, `lobstr`, `xbull`, `rabet`,
+`walletconnect`, `walletkit`, `ledger`, or `trezor`. Browser-wallet adapters
+are published as separate `@soroban-resurrect/adapter-*` packages and must be
+installed by applications that use them.
 
 ```ts
-import { createAdapter, KnownWallet } from '@your-sdk/wallets';
+import { createAdapter } from '@soroban-resurrect/sdk'
 
-const adapter = createAdapter({
-  wallet: KnownWallet.Phantom,
-  // Optional: restrict or extend the capabilities the adapter advertises.
-  capabilities: { signTransaction: true, signMessage: true },
-});
-
-await adapter.connect();
-const signed = await adapter.sign({ transaction });
+const wallet = await createAdapter('freighter')
+const publicKey = await wallet.getPublicKey()
 ```
-
-### `KnownWallet` values
-
-`KnownWallet` enumerates every wallet the SDK ships an adapter for. The same
-values are exposed at runtime through `SUPPORTED_WALLETS`.
-
-| `KnownWallet` value | Wallet | Notes |
-| --- | --- | --- |
-| `KnownWallet.Phantom` | Phantom | Browser extension / mobile |
-| `KnownWallet.Solflare` | Solflare | Browser extension / mobile |
-| `KnownWallet.Backpack` | Backpack | Browser extension |
-| `KnownWallet.Glow` | Glow | Browser extension |
-| `KnownWallet.Ledger` | Ledger | Hardware, requires transport + manifest |
-| `KnownWallet.Trezor` | Trezor | Hardware, requires transport + manifest |
-
-```ts
-import { SUPPORTED_WALLETS } from '@your-sdk/wallets';
-
-// Iterate every wallet the SDK can build an adapter for.
-for (const wallet of SUPPORTED_WALLETS) {
-  console.log(wallet.id, wallet.name, wallet.capabilities);
-}
-```
-
-## Capability flags
-
-Each adapter advertises a `capabilities` object. The SDK checks these flags
-before dispatching work, so an unsupported call fails fast instead of silently
-misbehaving.
-
-| Flag | Meaning | SDK behaviour that depends on it |
-| --- | --- | --- |
-| `signTransaction` | Can sign transactions. | Required by `sign({ transaction })`; the SDK throws if a transaction is submitted to an adapter without it. |
-| `signMessage` | Can sign arbitrary messages. | Gates `sign({ message })` and any message-based auth flow. |
-| `signAndSendTransaction` | Can sign and broadcast in one step. | Enables the one-shot send path; otherwise the SDK signs then broadcasts separately. |
-| `hardware` | Backed by a physical device. | Switches the SDK into hardware UX: it prompts for device confirmation and can warn about blind signing. |
-| `blindSigning` | Device may sign payloads it cannot fully display. | When `hardware` is set and the payload is not fully parseable, the SDK emits a blind-signing warning before proceeding. |
 
 ## Hardware wallets
 
-Hardware adapters (`LedgerWalletAdapter`, `TrezorWalletAdapter`) need two extra
-pieces beyond a normal adapter: a **transport** to talk to the device and a
-**manifest** so the device can show the requesting app to the user.
+Both hardware adapters declare `hardware: true`, `feeBump: true`, and
+`signAuthEntry: false`. They do not advertise `maxOperations`: the SDK has no
+reliable operation ceiling that applies to all supported device app and
+firmware versions.
 
 ### Ledger
 
-```bash
-npm install @ledgerhq/hw-transport-webhid @ledgerhq/hw-app-solana
+Install the Ledger transport and Stellar app packages:
+
+```sh
+npm install @ledgerhq/hw-transport-webusb @ledgerhq/hw-app-str
 ```
 
 ```ts
-import { createAdapter, KnownWallet } from '@your-sdk/wallets';
-import type { LedgerAdapterConfig } from '@your-sdk/wallets';
+import TransportWebUSB from '@ledgerhq/hw-transport-webusb'
+import { createLedgerAdapter } from '@soroban-resurrect/sdk'
 
-const config: LedgerAdapterConfig = {
-  // A transport factory, e.g. WebHID in the browser.
-  transport: () => TransportWebHID.create(),
-  // Optional derivation path; defaults to the standard Solana path.
-  derivationPath: "44'/501'/0'/0'",
-};
-
-const adapter = createAdapter({ wallet: KnownWallet.Ledger, config });
-await adapter.connect();
+const transport = await TransportWebUSB.create()
+const wallet = createLedgerAdapter({ transport, accountIndex: 0 })
+await wallet.connect()
 ```
+
+The adapter derives `m/44'/148'/accountIndex'`. It requests signing in the
+Ledger Stellar app and requires physical confirmation. It supports plain and
+fee-bump envelopes, but not CAP-0046 authorization-entry signing.
 
 ### Trezor
 
-```bash
+Install Trezor Connect and provide its required application manifest:
+
+```sh
 npm install @trezor/connect-web
 ```
 
 ```ts
-import { createAdapter, KnownWallet } from '@your-sdk/wallets';
-import type { TrezorAdapterConfig } from '@your-sdk/wallets';
+import TrezorConnect from '@trezor/connect-web'
+import { createTrezorAdapter } from '@soroban-resurrect/sdk'
 
-const config: TrezorAdapterConfig = {
-  // Trezor Connect manifest is required by the device.
+const wallet = createTrezorAdapter({
+  trezorConnect: TrezorConnect,
   manifest: {
     email: 'dev@example.com',
     appUrl: 'https://example.com',
   },
-  derivationPath: "44'/501'/0'/0'",
-};
-
-const adapter = createAdapter({ wallet: KnownWallet.Trezor, config });
-await adapter.connect();
+  accountIndex: 0,
+})
+await wallet.connect()
 ```
 
-### Latency and UX differences
+The adapter derives `m/44'/148'/accountIndex'/0/0`. It requests signing through
+Trezor Connect and requires physical confirmation. It supports plain and
+fee-bump envelopes, but not CAP-0046 authorization-entry signing.
 
-Hardware signing is intentionally slower and more interactive than software
-wallets:
+### Transaction display limitations
 
-- **Latency.** Expect roughly 1–5 seconds per signature, dominated by device
-  round-trips and on-device confirmation. Software wallets typically sign in
-  well under a second.
-- **Confirmation.** The user must physically approve each signature on the
-device. The SDK surfaces a pending state while it waits.
-- **Blind signing.** If the device cannot fully display the payload, the SDK
-  warns the user before signing (see the `blindSigning` capability).
-- **Connection.** The transport can drop (device unplugged, tab backgrounded).
-  Handle `disconnect()` and reconnect rather than assuming a persistent session.
+The SDK logs a warning through the configured `logger` before asking a
+hardware wallet to sign: transaction details may not be fully verifiable on
+the device.
+
+| Device | Signing prompt and display limits |
+| --- | --- |
+| Ledger Stellar app | This adapter sends the transaction hash to `signHash`; it does not send the operation or memo fields for the device to display. Users must verify transaction details in the trusted application before approving. |
+| Trezor via Trezor Connect | The adapter passes the transaction envelope to Trezor Connect, which presents the fields supported by the installed firmware. The complete Soroban restore footprint and ledger keys are not guaranteed to be inspectable on-device. |
+
+Prompts and supported fields vary with device app/firmware versions.
+
+Restore transactions signed by a hardware wallet include the configured
+`restoreTxMemo` or `restoreTxMemoText`. If neither is set, the SDK attaches the
+short text memo `Restore archived entries`. Trezor may display the memo when
+supported by the installed firmware; the Ledger hash-signing flow does not
+display memo fields. The memo remains part of the transaction and is limited
+to 28 UTF-8 bytes.
 
 ## Custom adapters
 
-Implement `WalletAdapter` and pass it through `createAdapter` to integrate a
-wallet the SDK does not ship.
+An adapter implements account lookup and transaction signing. Capabilities
+describe optional features the SDK may rely on:
 
 ```ts
-import { createAdapter, type WalletAdapter } from '@your-sdk/wallets';
+import type { WalletAdapter } from '@soroban-resurrect/sdk'
 
-const myAdapter: WalletAdapter = {
-  id: 'my-wallet',
-  name: 'My Wallet',
+const wallet: WalletAdapter = {
+  isConnected: async () => true,
+  getPublicKey: async () => 'G...',
+  signTransaction: async (xdr, options) => signWithMyWallet(xdr, options),
   capabilities: {
-    signTransaction: true,
-    signMessage: true,
-    signAndSendTransaction: false,
     hardware: false,
-    blindSigning: false,
+    feeBump: false,
+    signAuthEntry: false,
   },
-  async connect() {
-    // Establish a session and return the active account.
-    return { address: await myWallet.requestAccount() };
-  },
-  async disconnect() {
-    await myWallet.close();
-  },
-  async sign(payload) {
-    return myWallet.sign(payload);
-  },
-};
-
-const adapter = createAdapter({ adapter: myAdapter });
+}
 ```
+
+Set `hardware: true` for physical signing devices so the SDK can issue the
+hardware-signing warning. Only set `feeBump` or `signAuthEntry` when the
+adapter actually supports those envelope/signing modes.

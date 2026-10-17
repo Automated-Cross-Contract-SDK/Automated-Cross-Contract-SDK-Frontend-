@@ -126,10 +126,7 @@ export class SorobanResurrectNetwork {
    * Returns all available network presets as an array, suitable for
    * populating a network-selector UI.
    */
-  static listPresets(): Array<SorobanNetworkPreset & { name: SorobanNetworkName }> {
-    return (Object.keys(NETWORK_PRESETS) as SorobanNetworkName[]).map((name) => ({
-      name,
-      ...NETWORK_PRESETS[name],
-    }))
+  static listPresets(): SorobanNetworkPreset[] {
+    return Object.values(NETWORK_PRESETS)
   }
 }

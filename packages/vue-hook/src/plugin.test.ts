@@ -3,10 +3,11 @@ import { createApp, defineComponent, h } from 'vue'
 import { SorobanResurrectPlugin, injectSorobanResurrect } from './plugin.js'
 
 const instances: unknown[] = []
+const mockDispose = vi.fn()
 
 vi.mock('@soroban-resurrect/sdk', () => ({
   SorobanResurrect: vi.fn().mockImplementation((config: unknown) => {
-    const inst = { config, marker: 'sdk-instance' }
+    const inst = { config, marker: 'sdk-instance', dispose: mockDispose }
     instances.push(inst)
     return inst
   }),
@@ -40,6 +41,8 @@ describe('SorobanResurrectPlugin', () => {
     expect(a).toBeDefined()
     expect(a).toBe(b) // same instance across the tree
     expect(instances).toHaveLength(1) // constructed exactly once
+    app.unmount()
+    expect(mockDispose).toHaveBeenCalledTimes(1)
   })
 
   it('throws a helpful error when config is missing', () => {

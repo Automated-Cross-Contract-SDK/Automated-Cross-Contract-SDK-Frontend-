@@ -67,6 +67,29 @@ describe('SorobanResurrect', () => {
     })
   })
 
+  describe('dispose', () => {
+    it('stops TTL watches started by the instance', () => {
+      const rpcClient = {
+        getLatestLedger: vi.fn().mockResolvedValue({ sequence: 1 }),
+      }
+      const instance = new SorobanResurrect({ ...testConfig, rpcClient: rpcClient as never })
+      const timer = 123 as never
+      const setIntervalSpy = vi.spyOn(globalThis, 'setInterval').mockReturnValue(timer)
+      const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval').mockImplementation(() => {})
+
+      try {
+        instance.watchTTL([])
+        instance.dispose()
+
+        expect(setIntervalSpy).toHaveBeenCalledTimes(1)
+        expect(clearIntervalSpy).toHaveBeenCalledWith(timer)
+      } finally {
+        setIntervalSpy.mockRestore()
+        clearIntervalSpy.mockRestore()
+      }
+    })
+  })
+
   describe('state management', () => {
     it('starts in idle state', () => {
       expect(resurrect.state).toBe('idle')
@@ -95,6 +118,23 @@ describe('SorobanResurrect', () => {
   })
 
   describe('submitWithRestore', () => {
+    it('forwards an AbortSignal to the execution workflow', async () => {
+      vi.mocked(executeWithRestore).mockResolvedValue({
+        success: false,
+        archivedKeysDetected: 0,
+        error: 'Operation cancelled',
+      })
+      const controller = new AbortController()
+
+      await resurrect.submitWithRestore({
+        transaction: makeSampleTx(),
+        wallet: makeWallet(),
+        signal: controller.signal,
+      })
+
+      expect(vi.mocked(executeWithRestore).mock.calls[0][0].signal).toBe(controller.signal)
+    })
+
     it('returns result from executeWithRestore on success', async () => {
       const mockResult = {
         success: true,
@@ -112,7 +152,8 @@ describe('SorobanResurrect', () => {
         wallet: makeWallet(),
       })
 
-      expect(result).toEqual(mockResult)
+      expect(result).toEqual(expect.objectContaining(mockResult))
+      expect(result.historyId).toEqual(expect.any(String))
       expect(resurrect.state).toBe('success')
     })
 
@@ -241,8 +282,12 @@ describe('SorobanResurrect', () => {
       )
 
       const initialState = resurrect.state
-      await resurrect.buildRestoreTx(Keypair.random().publicKey(), makeSampleTx(), mockRestoreResponse as never)
-      
+      await resurrect.buildRestoreTx(
+        Keypair.random().publicKey(),
+        makeSampleTx(),
+        mockRestoreResponse as never,
+      )
+
       // When providing simulationResponse, state should not change to 'simulating'
       expect(resurrect.state).toBe(initialState)
     })
@@ -256,7 +301,10 @@ describe('SorobanResurrect', () => {
       const mainnet = new SorobanResurrect({ ...testConfig, networkPassphrase: Networks.PUBLIC })
       expect(mainnet.config.networkPassphrase).toBe(Networks.PUBLIC)
 
-      const futurenet = new SorobanResurrect({ ...testConfig, networkPassphrase: Networks.FUTURENET })
+      const futurenet = new SorobanResurrect({
+        ...testConfig,
+        networkPassphrase: Networks.FUTURENET,
+      })
       expect(futurenet.config.networkPassphrase).toBe(Networks.FUTURENET)
     })
 

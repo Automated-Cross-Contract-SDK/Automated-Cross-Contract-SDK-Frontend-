@@ -11,6 +11,8 @@
 // Main class
 // ---------------------------------------------------------------------------
 export { SorobanResurrect } from './SorobanResurrect.js'
+export { createSubscriptionStore } from './SubscriptionStore.js'
+export type { SubscriptionListener, SubscriptionStore } from './SubscriptionStore.js'
 
 // ---------------------------------------------------------------------------
 // Network presets / switching helper
@@ -33,8 +35,15 @@ export type {
   ArchiveDetectionOptions,
   SimulateResponse,
   ResurrectResult,
+  ResurrectFailure,
+  ResurrectFailureStage,
   TxDiagnostics,
   DryRunResult,
+  ConfirmationPolicy,
+  ConfirmationTimeoutBehavior,
+  SubmitRetryOptions,
+  SubmitLifecyclePhase,
+  SubmitLifecycleEvent,
   SubmitWithRestoreOptions,
   RestoreKeysOptions,
   RestoreState,
@@ -55,12 +64,18 @@ export type {
 export type { WalletErrorCode } from './types.js'
 export { WalletError } from './types.js'
 export { ResurrectError, RestoreFeeExceededError } from './errors.js'
+export type { AbortSignalOptions } from './AbortUtils.js'
 
 // ---------------------------------------------------------------------------
 // RPC abstraction layer (dependency injection / testing — see RpcClient.ts)
 // ---------------------------------------------------------------------------
-export type { ISorobanRpcClient } from './RpcClient.js'
-export { SorobanRpcClient, createRpcClient } from './RpcClient.js'
+export type { ISorobanRpcClient, RpcResilienceOptions } from './RpcClient.js'
+export {
+  SorobanRpcClient,
+  createRpcClient,
+  RpcTimeoutError,
+  RpcCircuitOpenError,
+} from './RpcClient.js'
 
 // ---------------------------------------------------------------------------
 // Observability — injectable logger + RPC call timings (#237)
@@ -160,23 +175,6 @@ export type {
 // Fee calculation (returned by SorobanResurrect.estimateRestoreCost)
 // ---------------------------------------------------------------------------
 export type { RestoreCostEstimate } from './feeCalculation.js'
-
-// ---------------------------------------------------------------------------
-// Network presets (used by SorobanResurrect.switchNetwork)
-// ---------------------------------------------------------------------------
-export type { SorobanNetworkName, SorobanNetworkPreset } from './constants.js'
-export { NETWORK_PRESETS } from './constants.js'
-
-// ---------------------------------------------------------------------------
-// RPC client abstraction (dependency injection / resilient transport)
-// ---------------------------------------------------------------------------
-export type { ISorobanRpcClient, RpcResilienceOptions } from './RpcClient.js'
-export {
-  SorobanRpcClient,
-  createRpcClient,
-  RpcTimeoutError,
-  RpcCircuitOpenError,
-} from './RpcClient.js'
 
 // ---------------------------------------------------------------------------
 // Transaction history (returned by SorobanResurrect.history / getHistory)
