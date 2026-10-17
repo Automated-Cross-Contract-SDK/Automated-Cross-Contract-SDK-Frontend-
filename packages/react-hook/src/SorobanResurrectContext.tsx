@@ -18,15 +18,15 @@ import {
   type ResurrectResult,
   type RestoreState,
   type SorobanResurrectEvents,
+  createSubscriptionStore,
+  type SubscriptionStore,
 } from '@soroban-resurrect/sdk'
 import type { Transaction } from '@stellar/stellar-sdk'
 
 /**
- * Shape of the value provided by `SorobanResurrectContext`. Not exported —
- * consumers should go through `useSorobanResurrectContext()` instead of
- * depending on this shape directly, since it may gain fields over time.
+ * Shape of the value provided by `SorobanResurrectContext`.
  */
-interface SorobanResurrectContextValue {
+export interface SorobanResurrectContextValue {
   /** The underlying SDK instance (null before first render). */
   resurrect: SorobanResurrect | null
   /** Configuration passed to the provider. */
@@ -83,6 +83,11 @@ interface SorobanResurrectStore {
   getSnapshot: () => SorobanResurrectContextValue
 }
 
+interface PendingEventSubscription {
+  attach: (instance: SorobanResurrect) => void
+  detach: () => void
+}
+
 const SorobanResurrectStoreContext = createContext<SorobanResurrectStore | null>(null)
 
 /** Props for the SorobanResurrectProvider component. */
@@ -96,7 +101,9 @@ export interface SorobanResurrectProviderProps {
 /**
  * React context provider that instantiates `SorobanResurrect` and
  * subscribes to its state changes. Children can access the API via
- * `useSorobanResurrectContext()`.
+ * `useSorobanResurrectContext()`. The SDK is initialized after commit rather
+ * than during render, so server rendering does not access browser storage or
+ * construct clients that are discarded by React's render checks.
  *
  * When the config prop changes, a new SDK instance is created and
  * state is reset to idle.
@@ -120,28 +127,27 @@ export interface SorobanResurrectProviderProps {
  */
 export function SorobanResurrectProvider({ config, children }: SorobanResurrectProviderProps) {
   const resurrectRef = useRef<SorobanResurrect | null>(null)
-  const prevConfigRef = useRef<SorobanResurrectConfig | null>(null)
+  const eventSubscriptionsRef = useRef<Set<PendingEventSubscription>>(new Set())
   const [state, setState] = useState<RestoreStateInfo>({
     state: 'idle',
     message: '',
   })
 
-  // Track config changes and reinitialize SDK when config updates
-  if (!prevConfigRef.current || JSON.stringify(config) !== JSON.stringify(prevConfigRef.current)) {
-    prevConfigRef.current = config
-    resurrectRef.current = new SorobanResurrect(config)
-  }
-
   useEffect(() => {
-    const r = resurrectRef.current
-    if (!r) return
-
+    const r = new SorobanResurrect(config)
+    resurrectRef.current = r
     setState({ state: 'idle', message: '' })
     const unsubscribe = r.onStateChange((info: RestoreStateInfo) => {
       setState(info)
     })
+    for (const subscription of eventSubscriptionsRef.current) subscription.attach(r)
 
-    return unsubscribe
+    return () => {
+      for (const subscription of eventSubscriptionsRef.current) subscription.detach()
+      unsubscribe()
+      r.dispose()
+      if (resurrectRef.current === r) resurrectRef.current = null
+    }
   }, [JSON.stringify(config)])
 
   const submitWithRestore = useCallback(
@@ -172,8 +178,22 @@ export function SorobanResurrectProvider({ config, children }: SorobanResurrectP
     event: K,
     listener: (payload: SorobanResurrectEvents[K]) => void,
   ) => {
-    const r = resurrectRef.current
-    return r ? r.on(event, listener) : () => {}
+    let unsubscribe: (() => void) | null = null
+    const subscription: PendingEventSubscription = {
+      attach(instance) {
+        unsubscribe = instance.on(event, listener)
+      },
+      detach() {
+        unsubscribe?.()
+        unsubscribe = null
+      },
+    }
+    eventSubscriptionsRef.current.add(subscription)
+    if (resurrectRef.current) subscription.attach(resurrectRef.current)
+    return () => {
+      subscription.detach()
+      eventSubscriptionsRef.current.delete(subscription)
+    }
   }, [])
 
   const isProcessing = isProcessingState(state.state)
@@ -189,23 +209,15 @@ export function SorobanResurrectProvider({ config, children }: SorobanResurrectP
     on,
   }
 
-  // External store plumbing for `useSorobanResurrectSelector`. `valueRef` always
-  // holds the latest context value; listeners are notified after every commit so
-  // selector subscribers can re-read their slice and bail out when it is
-  // unchanged.
-  const valueRef = useRef(value)
-  valueRef.current = value
-  const listenersRef = useRef<Set<() => void>>(new Set())
+  const storeRef = useRef<SubscriptionStore<SorobanResurrectContextValue> | null>(null)
+  if (storeRef.current === null) {
+    storeRef.current = createSubscriptionStore(value)
+  }
+  const store = storeRef.current
+
   useEffect(() => {
-    for (const listener of listenersRef.current) listener()
-  })
-  const store = useRef<SorobanResurrectStore>({
-    subscribe: (onStoreChange: () => void) => {
-      listenersRef.current.add(onStoreChange)
-      return () => listenersRef.current.delete(onStoreChange)
-    },
-    getSnapshot: () => valueRef.current,
-  }).current
+    store.setSnapshot(value)
+  }, [store, value])
 
   return (
     <SorobanResurrectStoreContext.Provider value={store}>

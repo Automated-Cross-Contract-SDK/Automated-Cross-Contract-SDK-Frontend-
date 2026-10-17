@@ -30,6 +30,7 @@ export default defineConfig({
           text: 'Guide',
           items: [
             { text: 'Getting Started', link: '/guide/getting-started' },
+            { text: 'Manual Flow vs. SDK', link: '/guide/comparison' },
             { text: 'Tutorial: Common Use Cases', link: '/guide/tutorial' },
             { text: 'Restore Fees and Limits', link: '/guide/restore-fees' },
             { text: 'History Persistence', link: '/guide/history-persistence' },

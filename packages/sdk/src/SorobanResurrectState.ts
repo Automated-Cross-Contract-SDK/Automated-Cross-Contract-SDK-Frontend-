@@ -4,7 +4,7 @@ import {
   RestoreStateInfo,
   SorobanResurrectEvents,
 } from './types.js'
-import { TypedEventEmitter } from './EventEmitter.js'
+import { TypedEventEmitter, type WithIndexSignature } from './EventEmitter.js'
 
 /**
  * Manages the observable workflow state for a `SorobanResurrect` instance.
@@ -158,6 +158,12 @@ export class SorobanResurrectStateManager {
     return () => {
       this._listeners = this._listeners.filter((l) => l !== listener)
     }
+  }
+
+  /** Remove every state and typed-event listener owned by this manager. */
+  dispose(): void {
+    this._listeners = []
+    this.emitter.removeAllListeners()
   }
 
   // ---------------------------------------------------------------------------

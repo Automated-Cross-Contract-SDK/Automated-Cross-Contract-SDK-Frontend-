@@ -67,6 +67,29 @@ describe('SorobanResurrect', () => {
     })
   })
 
+  describe('dispose', () => {
+    it('stops TTL watches started by the instance', () => {
+      const rpcClient = {
+        getLatestLedger: vi.fn().mockResolvedValue({ sequence: 1 }),
+      }
+      const instance = new SorobanResurrect({ ...testConfig, rpcClient: rpcClient as never })
+      const timer = 123 as never
+      const setIntervalSpy = vi.spyOn(globalThis, 'setInterval').mockReturnValue(timer)
+      const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval').mockImplementation(() => {})
+
+      try {
+        instance.watchTTL([])
+        instance.dispose()
+
+        expect(setIntervalSpy).toHaveBeenCalledTimes(1)
+        expect(clearIntervalSpy).toHaveBeenCalledWith(timer)
+      } finally {
+        setIntervalSpy.mockRestore()
+        clearIntervalSpy.mockRestore()
+      }
+    })
+  })
+
   describe('state management', () => {
     it('starts in idle state', () => {
       expect(resurrect.state).toBe('idle')
@@ -95,6 +118,23 @@ describe('SorobanResurrect', () => {
   })
 
   describe('submitWithRestore', () => {
+    it('forwards an AbortSignal to the execution workflow', async () => {
+      vi.mocked(executeWithRestore).mockResolvedValue({
+        success: false,
+        archivedKeysDetected: 0,
+        error: 'Operation cancelled',
+      })
+      const controller = new AbortController()
+
+      await resurrect.submitWithRestore({
+        transaction: makeSampleTx(),
+        wallet: makeWallet(),
+        signal: controller.signal,
+      })
+
+      expect(vi.mocked(executeWithRestore).mock.calls[0][0].signal).toBe(controller.signal)
+    })
+
     it('returns result from executeWithRestore on success', async () => {
       const mockResult = {
         success: true,

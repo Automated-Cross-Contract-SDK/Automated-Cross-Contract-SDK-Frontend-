@@ -112,6 +112,9 @@ export const ARCHIVE_DETECTION_CHUNK_SIZE = LEDGER_ENTRY_CHUNK_SIZE
  */
 export const ARCHIVE_DETECTION_CONCURRENCY = LEDGER_ENTRY_CONCURRENCY
 
+/** Default maximum number of transactions or keys accepted by batch APIs. */
+export const MAX_BATCH_SIZE = 100
+
 /**
  * Default upper bound (in stroops) on the total fee a restore transaction may
  * pay. Restores above this bound are rejected before signing. Configurable via

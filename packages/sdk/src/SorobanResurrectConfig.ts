@@ -15,9 +15,14 @@ import {
   KNOWN_NETWORK_PASSPHRASES,
   resolveNetworkPassphrase,
   TTL_WATCH_INTERVAL_MS,
-  TTL_WATCH_THRESHOLD_LEDGERS,
+  TTL_WATCH_THRESHOLD,
+  ARCHIVE_DETECTION_CHUNK_SIZE,
+  ARCHIVE_DETECTION_CONCURRENCY,
+  MAX_BATCH_SIZE,
 } from './constants.js'
 import { SimulationCache } from './SimulationCache.js'
+import { validateRestoreMemoConfig } from './memoValidation.js'
+import { NOOP_LOGGER } from './Logger.js'
 
 /**
  * Result of initialising the SDK configuration.
@@ -135,6 +140,26 @@ export function validateConfigShape(config: SorobanResurrectConfig): void {
       )
     }
   }
+
+  validateRestoreMemoConfig(config)
+
+  if (
+    config.maxBatchSize !== undefined &&
+    (!Number.isInteger(config.maxBatchSize) || config.maxBatchSize < 1)
+  ) {
+    throw new Error(
+      `Invalid maxBatchSize: ${JSON.stringify(config.maxBatchSize)}. Must be a positive integer.`,
+    )
+  }
+
+  for (const field of ['archiveDetectionChunkSize', 'archiveDetectionConcurrency'] as const) {
+    const value = config[field]
+    if (value !== undefined && (!Number.isInteger(value) || value < 1)) {
+      throw new Error(
+        `Invalid ${field}: ${JSON.stringify(value)}. Must be a positive integer.`,
+      )
+    }
+  }
 }
 
 /**
@@ -219,12 +244,20 @@ export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
     rpcCircuitBreakerCooldownMs:
       config.rpcCircuitBreakerCooldownMs ?? RPC_CIRCUIT_BREAKER_COOLDOWN_MS,
     ttlWatchIntervalMs: config.ttlWatchIntervalMs ?? TTL_WATCH_INTERVAL_MS,
-    ttlWatchThresholdLedgers: config.ttlWatchThresholdLedgers ?? TTL_WATCH_THRESHOLD_LEDGERS,
+    ttlWatchThreshold: config.ttlWatchThreshold ?? TTL_WATCH_THRESHOLD,
+    ttlWatchThresholdLedgers: config.ttlWatchThresholdLedgers ?? TTL_WATCH_THRESHOLD,
     archiveDetectionMethod: config.archiveDetectionMethod ?? 'simulation',
     useSSE: config.useSSE ?? false,
     enableSimulationCache: config.enableSimulationCache ?? false,
     simulationCacheTtlMs: config.simulationCacheTtlMs ?? SIMULATION_CACHE_TTL_MS,
     simulationCacheMaxSize: config.simulationCacheMaxSize ?? SIMULATION_CACHE_MAX_SIZE,
+    archiveDetectionChunkSize: config.archiveDetectionChunkSize ?? ARCHIVE_DETECTION_CHUNK_SIZE,
+    archiveDetectionConcurrency:
+      config.archiveDetectionConcurrency ?? ARCHIVE_DETECTION_CONCURRENCY,
+    maxBatchSize: config.maxBatchSize ?? MAX_BATCH_SIZE,
+    restoreTxMemo: config.restoreTxMemo,
+    restoreTxMemoText: config.restoreTxMemoText ?? '',
+    logger: config.logger ?? NOOP_LOGGER,
     rpcClient: server,
   }
 

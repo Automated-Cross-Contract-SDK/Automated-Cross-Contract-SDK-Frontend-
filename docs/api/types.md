@@ -23,6 +23,10 @@ interface SorobanResurrectConfig {
   archiveDetectionMethod?: 'simulation' | 'direct' // default: 'simulation'
   archiveDetectionChunkSize?: number // default: 50
   archiveDetectionConcurrency?: number // default: 4
+  maxBatchSize?: number // default: 100
+  restoreTxMemo?: Memo
+  restoreTxMemoText?: string // at most 28 UTF-8 bytes
+  logger?: Logger
 }
 ```
 
@@ -38,6 +42,149 @@ interface SorobanResurrectConfig {
 | `archiveDetectionMethod`   | Method for detecting archived keys: `'simulation'` (default) or `'direct'`.    |
 | `archiveDetectionChunkSize` | Ledger keys per `getLedgerEntries` request during `'direct'` detection.       |
 | `archiveDetectionConcurrency` | Chunk requests kept in flight at once during `'direct'` detection.          |
+| `maxBatchSize` | Maximum items accepted by `detectArchivedKeysBatch`, `submitBatchWithRestore`, and `restoreKeys`. Oversized batches fail with `BATCH_SIZE_EXCEEDED`. |
+| `restoreTxMemo` | Optional Stellar memo attached to restore transactions. Only text and none memo types are accepted; text is limited to 28 UTF-8 bytes. |
+| `restoreTxMemoText` | Convenience text memo for restore transactions, limited to 28 UTF-8 bytes (not 28 characters). May also be overridden per `submitWithRestore` call. |
+| `logger` | Optional logger. Hardware-signing warnings are sent through its `warn` method. |
+
+The memo limit is measured after UTF-8 encoding. For example, fourteen `é`
+characters use 28 bytes and fit, while fifteen use 30 bytes and are rejected
+during configuration resolution, before a wallet approval is requested.
+`submitBatchWithRestore` uses one shared restore transaction; when that
+transaction is needed, all per-item memo overrides must resolve to the same
+memo.
+
+## `SubmitWithRestoreOptions`
+
+`submitWithRestore(options)` accepts per-request recovery controls. Retry is
+**disabled by default**; opt in only for operations where repeating an RPC call
+is acceptable:
+
+```ts
+const result = await sr.submitWithRestore({
+  transaction,
+  wallet,
+  retry: {
+    maxRetries: 3, // retries after the first attempt
+    baseDelayMs: 250,
+    maxDelayMs: 5_000,
+  },
+})
+```
+
+The SDK retries transient transport errors, HTTP 408/425/429/5xx responses,
+known temporary network failures, and Soroban's explicit `TRY_AGAIN_LATER`
+submission response. Backoff is exponential with jitter and is capped by
+`maxDelayMs`. The retry wrapper applies only to RPC calls: it never repeats
+wallet prompts, wallet rejection, invalid transaction errors, simulation
+failures, on-chain failures, or deterministic contract errors. Because a
+transport failure during submission can occur after the server accepted the
+transaction, retries resend the same signed transaction bytes rather than
+rebuilding or re-signing it.
+
+| Option | Default when `retry` is supplied | Meaning |
+| --- | ---: | --- |
+| `maxRetries` | `3` | Number of additional RPC attempts; `0` disables retries for this request. |
+| `baseDelayMs` | `250` | Initial exponential-backoff delay. |
+| `maxDelayMs` | `5000` | Maximum delay between attempts. |
+
+### Lifecycle events
+
+`SubmitWithRestoreOptions.onLifecycleEvent` receives a discriminated
+`SubmitLifecycleEvent` for each phase. The identical events are available to
+instance subscribers through `sr.on('workflowLifecycle', listener)`:
+
+```ts
+const unsubscribe = sr.on('workflowLifecycle', (event) => {
+  switch (event.phase) {
+    case 'simulation_started':
+    case 'restore_preparation_started':
+    case 'restore_submission_started':
+    case 'restore_submitted':
+    case 'restore_confirmation_started':
+    case 'restore_confirmed':
+    case 'original_submission_started':
+    case 'original_submitted':
+    case 'original_confirmation_started':
+    case 'original_confirmed':
+    case 'completed':
+    case 'failed':
+      updateProgress(event)
+      break
+  }
+})
+```
+
+Every event may include the supplied `requestId`; transaction hashes, detected
+keys, terminal results, and errors are included when applicable. Call
+`unsubscribe()` when the listener is no longer needed. Existing stage-specific
+callbacks and events remain available.
+
+### Logical request deduplication
+
+Pass a stable, non-empty `requestId` to coalesce concurrent calls that represent
+the same logical operation:
+
+```ts
+const options = { transaction, wallet, requestId: `withdrawal:${userActionId}` }
+const [first, duplicate] = await Promise.all([
+  sr.submitWithRestore(options),
+  sr.submitWithRestore(options),
+])
+// Both callers receive the same result; only one restore/submission flow runs.
+```
+
+Deduplication is scoped to one SDK instance and only lasts while the request is
+in flight. A later call using the same id starts a new attempt. Different ids
+remain independent and may run concurrently. A coalesced caller receives the
+first call's result; callbacks are invoked only for the call that started the
+flow. Calls without `requestId` retain the prior, non-deduplicated behavior.
+An empty or whitespace-only id returns a validation error without starting a
+workflow.
+
+### Confirmation policy and timeout
+
+The default, `confirmationPolicy: 'wait-for-finality'`, waits until Soroban RPC
+reports a terminal `SUCCESS` or `FAILED` status for the original transaction.
+Successful results include `confirmationStatus: 'confirmed'`. This waits for
+the ledger outcome rather than merely the RPC submission acknowledgment; it can
+add polling latency and remains subject to the configured timeout.
+
+Set `confirmationPolicy: 'return-on-submission'` to return after the RPC accepts
+the original transaction. This yields `success: true` with
+`confirmationStatus: 'submitted'`; it does **not** establish whether the
+transaction later succeeds or fails. A required restore transaction is always
+confirmed before the original transaction is rebuilt and submitted.
+
+`confirmationTimeoutMs` overrides the configured `pollTimeoutMs` for restore
+and original transaction confirmation. On timeout the default behavior returns
+`success: false`, `errorCode: 'CONFIRMATION_TIMEOUT'`, and the submitted hash
+without claiming an on-chain failure. Set
+`confirmationTimeoutBehavior: 'return-pending'` to additionally report
+`confirmationStatus: 'pending'`:
+
+```ts
+const result = await sr.submitWithRestore({
+  transaction,
+  wallet,
+  confirmationTimeoutMs: 90_000,
+  confirmationTimeoutBehavior: 'return-pending',
+})
+
+if (result.confirmationStatus === 'pending') {
+  // The outcome is unknown; inspect the hash or resume polling.
+  console.log(result.originalTxHash ?? result.restoreTxHash)
+}
+```
+
+When RPC reports a terminal `FAILED` status, the result instead uses
+`ORIGINAL_TX_FAILED` (or `RESTORE_TX_FAILED` for a restore failure) and includes
+decoded `onchainError` information when available.
+
+Restore workflows now wait for the original transaction's terminal status
+before reporting success, correcting the former early-return behavior for that
+path. Applications that relied on the earlier return can opt into
+`return-on-submission`.
 
 ## `SorobanResurrectNetwork`
 

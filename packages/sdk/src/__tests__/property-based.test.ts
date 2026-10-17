@@ -13,6 +13,10 @@ import {
   Networks,
   Operation,
   TransactionBuilder,
+  Address,
+  StrKey,
+  nativeToScVal,
+  xdr,
   type Transaction,
 } from '@stellar/stellar-sdk'
 import { SimulationCache } from '../SimulationCache.js'
@@ -196,6 +200,69 @@ describe('branded-type guards (property-based)', () => {
           expect(isHexString(hex + bad + '0')).toBe(false)
         },
       ),
+    )
+  })
+})
+
+const ledgerKeyArb = fc.oneof(
+  fc
+    .uint8Array({ minLength: 32, maxLength: 32 })
+    .map((hash) =>
+      xdr.LedgerKey.contractCode(
+        new xdr.LedgerKeyContractCode({ hash: Buffer.from(hash) }),
+      ),
+    ),
+  fc
+    .record({
+      contractId: fc.uint8Array({ minLength: 32, maxLength: 32 }),
+      storageKey: fc.string({ minLength: 1, maxLength: 32 }),
+      durability: fc.constantFrom(
+        xdr.ContractDataDurability.persistent(),
+        xdr.ContractDataDurability.temporary(),
+      ),
+    })
+    .map(({ contractId, storageKey, durability }) =>
+      xdr.LedgerKey.contractData(
+        new xdr.LedgerKeyContractData({
+          contract: new Address(StrKey.encodeContract(Buffer.from(contractId))).toScAddress(),
+          key: nativeToScVal(storageKey),
+          durability,
+        }),
+      ),
+    ),
+)
+
+function normalizeLedgerKey(keyXdr: string): string {
+  return xdr.LedgerKey.fromXDR(keyXdr, 'base64').toXDR('base64')
+}
+
+describe('ledger-key XDR parsing and normalization (property-based)', () => {
+  it('round-trips supported key types to deterministic canonical XDR', () => {
+    fc.assert(
+      fc.property(ledgerKeyArb, (key) => {
+        const serialized = key.toXDR('base64')
+        const parsed = xdr.LedgerKey.fromXDR(serialized, 'base64')
+
+        expect(parsed.switch().name).toBe(key.switch().name)
+        expect(normalizeLedgerKey(serialized)).toBe(serialized)
+        expect(normalizeLedgerKey(normalizeLedgerKey(serialized))).toBe(serialized)
+      }),
+    )
+  })
+
+  it('rejects malformed XDR with an invalid ledger-key discriminant', () => {
+    const malformedKeyArb = fc
+      .uint8Array({ maxLength: 128 })
+      .map((payload) =>
+        Buffer.concat([Buffer.from([0xff, 0xff, 0xff, 0xff]), Buffer.from(payload)]).toString(
+          'base64',
+        ),
+      )
+
+    fc.assert(
+      fc.property(malformedKeyArb, (serialized) => {
+        expect(() => xdr.LedgerKey.fromXDR(serialized, 'base64')).toThrow()
+      }),
     )
   })
 })

@@ -6,6 +6,7 @@
   "restoreFeeMultiplier": 3,
   "archiveDetectionChunkSize": 100,
   "archiveDetectionConcurrency": 4,
+  "maxBatchSize": 100,
   "maxRestoreFeeStroops": 10000000,
   "rpcTimeoutMs": 30000,
   "rpcRetryCount": 3,
@@ -15,7 +16,6 @@
   "ttlWatchIntervalMs": 60000,
   "ttlWatchThreshold": 100,
   "ttlWatchAutoExtend": false,
-  "restoreTxMemo": "none",
   "restoreTxMemoText": "",
   "maxSequenceRetries": 3,
   "knownNetworkPassphrases": [
