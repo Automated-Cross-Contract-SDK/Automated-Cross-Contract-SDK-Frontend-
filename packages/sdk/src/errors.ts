@@ -36,6 +36,11 @@ export type ResurrectErrorCode =
   | 'SIMULATION_FAILED'
 
   /**
+   * The computed restore fee exceeds the configured fee cap.
+   */
+  | 'RESTORE_FEE_CAP_EXCEEDED'
+
+  /**
    * The restore transaction was signed but could not be parsed from XDR.
    * This is usually a wallet adapter bug or a network passphrase mismatch.
    */

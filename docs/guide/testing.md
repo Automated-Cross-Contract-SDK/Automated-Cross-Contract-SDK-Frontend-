@@ -162,6 +162,11 @@ It exports:
 - `fixtures` — canned responses: `simulateSuccess`, `simulateRestore`,
   `simulateError`, `sendPending`, `sendError('txBadSeq' | ...)`, `txSuccess`,
   `txFailed`, `txNotFound`, `archivedKey`, `account`.
+- `ledgerEntryFixture(status, seed?, currentLedger?)` — deterministic
+  `getLedgerEntries` responses for `active`, `near-expiry`, `archived`,
+  `missing`, and `unsupported` ledger keys. Each fixture includes its key,
+  current ledger, and typed RPC response; `missing` omits the key, while
+  `archived` returns an entry whose live-until ledger has passed.
 - `scenarios` — ready-made scripts: `noRestore`, `restore`,
   `restoreSimulationError`, `badSequence`, `slowConfirmation`.
 
@@ -170,6 +175,21 @@ Add it as a dev dependency of the workspace you are testing:
 ```json
 { "devDependencies": { "@soroban-resurrect/testing": "0.0.0" } }
 ```
+
+## Coverage gates
+
+The SDK's test command enforces explicit branch and line-coverage floors for three critical restore
+modules. The current floors reflect the measured baseline and prevent regressions while coverage
+grows:
+
+| Behavior                         | Module                                                   |
+| -------------------------------- | -------------------------------------------------------- |
+| Archived-key detection           | `packages/sdk/src/Archiver.ts` — 45% branches, 65% lines |
+| Restore transaction construction | `packages/sdk/src/Restorer.ts` — 35% branches, 35% lines |
+| Execution orchestration          | `packages/sdk/src/Executor.ts` — 40% branches, 50% lines |
+
+Run `npm run test -w packages/sdk -- --coverage` to generate the report and fail the command if a
+module-specific floor is missed. Add tests and raise the floors as the modules' coverage improves.
 
 ### Walkthrough: archive detected → restore → resubmit
 

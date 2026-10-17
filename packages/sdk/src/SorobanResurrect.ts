@@ -59,6 +59,7 @@ import type { AbortSignalOptions } from './AbortUtils.js'
  * ```
  */
 export class SorobanResurrect {
+  readonly ready: Promise<void>
   private _server: ISorobanRpcClient
   private _config: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & {
     rpcClient: ISorobanRpcClient
@@ -129,6 +130,67 @@ export class SorobanResurrect {
    */
   get server(): ISorobanRpcClient {
     return this._server
+  }
+
+  set server(server: ISorobanRpcClient) {
+    this._server = server
+    this._config.rpcClient = server
+    this._simulator.rebind(server, this._config, this._simulator.cache)
+    this._executor.rebind(server, this._config)
+  }
+
+  private buildConfigView(
+    config: SorobanResurrectConfig,
+  ): Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & { rpcClient: ISorobanRpcClient } {
+    const view = {} as Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & {
+      rpcClient: ISorobanRpcClient
+    }
+    const keys: Array<keyof SorobanResurrectConfig> = [
+      'rpcUrl',
+      'networkPassphrase',
+      'rpcClient',
+      'logger',
+      'pollIntervalMs',
+      'pollTimeoutMs',
+      'restoreFeeMultiplier',
+      'rpcTimeoutMs',
+      'rpcRetryCount',
+      'rpcRetryBackoffMs',
+      'rpcCircuitBreakerThreshold',
+      'rpcCircuitBreakerCooldownMs',
+      'ttlWatchIntervalMs',
+      'ttlWatchThresholdLedgers',
+      'archiveDetectionMethod',
+      'archiveDetectionChunkSize',
+      'archiveDetectionConcurrency',
+      'useSSE',
+      'enableSimulationCache',
+      'simulationCacheTtlMs',
+      'simulationCacheMaxSize',
+      'persistHistory',
+      'maxRestoreFeeStroops',
+      'maxRestoreTxSizeBytes',
+      'restoreSizeWarnRatio',
+      'throwOnRestoreSizeLimit',
+      'restoreTxMemo',
+      'restoreTxMemoText',
+      'ttlWatchAutoExtend',
+      'maxSequenceRetries',
+    ]
+
+    for (const key of keys) {
+      const provided = Object.prototype.hasOwnProperty.call(config, key)
+      Object.defineProperty(view, key, {
+        enumerable: provided,
+        configurable: true,
+        get: () => this._config[key as keyof typeof this._config],
+        set: (value) => {
+          ;(this._config as Record<string, unknown>)[key as string] = value
+        },
+      })
+    }
+
+    return view
   }
 
   /** Resolved configuration with defaults applied. Re-bound in place by {@link switchNetwork}. */
@@ -218,6 +280,7 @@ export class SorobanResurrect {
     invalidateLatestLedgerCache(this._server)
     this._server = resolved.server
     this._config = resolved.config
+    this._configView = this.buildConfigView(overrideConfig)
     this._simulator.rebind(resolved.server, resolved.config, resolved.simulationCache)
     this._executor.rebind(resolved.server, resolved.config)
 

@@ -152,7 +152,8 @@ describe('SorobanResurrect', () => {
         wallet: makeWallet(),
       })
 
-      expect(result).toEqual(mockResult)
+      expect(result).toEqual(expect.objectContaining(mockResult))
+      expect(result.historyId).toEqual(expect.any(String))
       expect(resurrect.state).toBe('success')
     })
 

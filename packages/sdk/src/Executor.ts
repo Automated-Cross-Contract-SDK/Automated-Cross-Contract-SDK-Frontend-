@@ -42,6 +42,7 @@ import {
   getExpiredTransactionInfo,
 } from './Restorer.js'
 import { SimulationCache } from './SimulationCache.js'
+import { ensureAddressAuthorization } from './Authorization.js'
 import {
   DEFAULT_NETWORK_PASSPHRASE,
   POLL_INTERVAL_MS,
@@ -546,12 +547,11 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       originalTxHash = asTxHash(originalResult!.hash)
       onOriginalSubmitted?.(originalTxHash)
 
-      return {
+      const result: ResurrectResult = {
         success: true,
         originalTxHash,
         restoreTxHash,
         archivedKeysDetected: archivedKeys.length,
-        sequenceRetries,
       }
     }
 

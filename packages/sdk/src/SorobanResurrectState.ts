@@ -34,7 +34,7 @@ export class SorobanResurrectStateManager {
   private _listeners: Array<(info: RestoreStateInfo) => void> = []
 
   /** Typed event emitter used alongside the legacy observer pattern. */
-  readonly emitter = new TypedEventEmitter<WithIndexSignature<SorobanResurrectEvents>>()
+  readonly emitter = new TypedEventEmitter<SorobanResurrectEvents>()
 
   // ---------------------------------------------------------------------------
   // Read-only accessors

@@ -1,6 +1,7 @@
 {
   "name": "@soroban-resurrect/sdk",
   "version": "0.1.0",
+  "description": "Automated Cross-Contract State Restoration SDK & Wallet Middleware for Soroban",
   "keywords": [
     "soroban",
     "stellar",
@@ -52,7 +53,7 @@
     "@vitest/coverage-v8": "5.0.2",
     "fast-check": "4.10.2",
     "tsup": "8.5.1",
-    "typescript": "7.0.2",
+    "typescript": "^5.9.2",
     "vitest": "5.0.1"
   }
 }

@@ -14,6 +14,7 @@ import { executeWithRestore, sendTransaction as _sendTransaction } from './Execu
 import {
   buildRestoreTransaction,
   buildBatchRestoreTransaction,
+  buildRestoreTransactionFromKeys,
   buildOriginalAfterRestore,
   resolveRestoreMemo,
   waitForTransaction,
@@ -28,7 +29,6 @@ import {
 } from './Archiver.js'
 import { TransactionHistory, TransactionHistoryEntry } from './TransactionHistory.js'
 import { attachHistoryPersistence, type HistoryPersistenceHandle } from './HistoryPersistence.js'
-import type { HistoryPersistenceOptions } from './types.js'
 import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
 import { SorobanResurrectSimulator } from './SorobanResurrectSimulation.js'
 import { asTxHash, asHistoryEntryId } from './branded-types.js'
@@ -528,6 +528,7 @@ export class SorobanResurrectExecutor {
       },
 
       onRestoreFailed: (error: string) => {
+        stateMgr.setError(error)
         emitter.emit('error', error)
         onRestoreFailed?.(error)
       },

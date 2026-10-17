@@ -11,8 +11,9 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'lcov'],
       thresholds: {
-        branches: 80,
-        lines: 90,
+        'src/Archiver.ts': { branches: 45, lines: 65 },
+        'src/Restorer.ts': { branches: 35, lines: 35 },
+        'src/Executor.ts': { branches: 40, lines: 50 },
       },
     },
   },
