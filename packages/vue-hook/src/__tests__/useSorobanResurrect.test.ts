@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { defineComponent, ref, nextTick, type Ref } from 'vue'
+import { defineComponent, effectScope, ref, nextTick, type Ref } from 'vue'
 import { mount } from '@vue/test-utils'
 import { useSorobanResurrect, type UseSorobanResurrectReturn } from '../useSorobanResurrect.js'
 import { SorobanResurrect } from '@soroban-resurrect/sdk'
@@ -8,9 +8,13 @@ import { SorobanResurrect } from '@soroban-resurrect/sdk'
 // Self-contained SDK mock (no importOriginal), mirroring the react-hook pattern.
 // ---------------------------------------------------------------------------
 const mockOnStateChange = vi.fn()
+const mockOn = vi.fn()
 const mockReset = vi.fn()
+const mockDispose = vi.fn()
 const mockDetectArchivedKeys = vi.fn()
 const mockSubmitWithRestore = vi.fn()
+const mockDispose = vi.fn()
+const mockOn = vi.fn()
 
 const PROCESSING_STATES = [
   'simulating',
@@ -25,9 +29,13 @@ vi.mock('@soroban-resurrect/sdk', () => ({
   SorobanResurrect: vi.fn().mockImplementation((config: unknown) => ({
     config,
     onStateChange: mockOnStateChange,
+    on: mockOn,
     reset: mockReset,
+    dispose: mockDispose,
     detectArchivedKeys: mockDetectArchivedKeys,
     submitWithRestore: mockSubmitWithRestore,
+    dispose: mockDispose,
+    on: mockOn,
   })),
   isProcessingState: (state: string) => PROCESSING_STATES.includes(state),
 }))
@@ -36,7 +44,7 @@ const testConfig = { rpcUrl: 'https://soroban-testnet.stellar.org' }
 
 /**
  * Mounts the composable inside a throwaway component so that Vue lifecycle
- * hooks (`onUnmounted`) and reactivity work as they would in a real app.
+ * hooks and reactivity work as they would in a real app.
  */
 function mountComposable(configRef: Ref<{ rpcUrl: string }>) {
   let api!: UseSorobanResurrectReturn
@@ -55,6 +63,7 @@ describe('useSorobanResurrect', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockOnStateChange.mockReturnValue(vi.fn())
+    mockOn.mockReturnValue(vi.fn())
   })
 
   it('starts in the idle state with an SDK instance', () => {
@@ -114,18 +123,21 @@ describe('useSorobanResurrect', () => {
 
   it('recreates the SDK and resets state when the config changes', async () => {
     const configRef = ref(testConfig)
-    const { api } = mountComposable(configRef)
+    const { api, wrapper } = mountComposable(configRef)
     const first = api().resurrect.value
 
     configRef.value = { rpcUrl: 'https://other-rpc.example' }
     await nextTick()
 
     expect(vi.mocked(SorobanResurrect)).toHaveBeenCalledTimes(2)
+    expect(mockDispose).toHaveBeenCalledTimes(1)
     expect(vi.mocked(SorobanResurrect)).toHaveBeenLastCalledWith({
       rpcUrl: 'https://other-rpc.example',
     })
     expect(api().resurrect.value).not.toBe(first)
     expect(api().state.value?.state).toBe('idle')
+    wrapper.unmount()
+    expect(mockDispose).toHaveBeenCalledTimes(2)
   })
 
   it('unsubscribes from SDK state changes on unmount', () => {
@@ -134,6 +146,35 @@ describe('useSorobanResurrect', () => {
     const { wrapper } = mountComposable(ref(testConfig))
     wrapper.unmount()
     expect(unsubscribe).toHaveBeenCalledTimes(1)
+    expect(mockDispose).toHaveBeenCalledTimes(1)
+  })
+
+  it('disposes state and event subscriptions when an effect scope ends and remounts', () => {
+    const stateUnsubscribe = vi.fn()
+    const eventUnsubscribe = vi.fn()
+    mockOnStateChange.mockReturnValue(stateUnsubscribe)
+    mockOn.mockReturnValue(eventUnsubscribe)
+
+    const firstScope = effectScope()
+    let firstApi!: UseSorobanResurrectReturn
+    firstScope.run(() => {
+      firstApi = useSorobanResurrect(testConfig)
+    })
+    firstApi.on('stateChange', vi.fn())
+    firstScope.stop()
+
+    expect(stateUnsubscribe).toHaveBeenCalledTimes(1)
+    expect(eventUnsubscribe).toHaveBeenCalledTimes(1)
+    expect(mockDispose).toHaveBeenCalledTimes(1)
+
+    const secondScope = effectScope()
+    secondScope.run(() => {
+      useSorobanResurrect(testConfig)
+    })
+    secondScope.stop()
+
+    expect(vi.mocked(SorobanResurrect)).toHaveBeenCalledTimes(2)
+    expect(mockDispose).toHaveBeenCalledTimes(2)
   })
 
   it('delegates submitWithRestore to the SDK instance', async () => {
@@ -144,7 +185,55 @@ describe('useSorobanResurrect', () => {
     const tx = {} as never
     const wallet = {} as never
     await expect(api().submitWithRestore(tx, wallet)).resolves.toBe(expected)
-    expect(mockSubmitWithRestore).toHaveBeenCalledWith({ transaction: tx, wallet })
+    expect(mockSubmitWithRestore).toHaveBeenCalledWith({
+      transaction: tx,
+      wallet,
+      signal: expect.any(AbortSignal),
+    })
+  })
+
+  it('cancel aborts active submissions', () => {
+    let signal!: AbortSignal
+    mockSubmitWithRestore.mockImplementation(
+      (options: { signal: AbortSignal }) =>
+        new Promise((resolve) => {
+          signal = options.signal
+          signal.addEventListener('abort', () =>
+            resolve({ success: false, archivedKeysDetected: 0, error: 'Operation cancelled' }),
+          )
+        }),
+    )
+    const { api } = mountComposable(ref(testConfig))
+
+    const pending = api().submitWithRestore({} as never, {} as never)
+    api().cancel()
+
+    expect(signal.aborted).toBe(true)
+    return expect(pending).resolves.toMatchObject({ success: false, error: 'Operation cancelled' })
+  })
+
+  it('unsubscribes typed event listeners on unmount', () => {
+    const unsubscribe = vi.fn()
+    mockOn.mockReturnValue(unsubscribe)
+    const { api, wrapper } = mountComposable(ref(testConfig))
+
+    api().on('restoreComplete', vi.fn())
+    wrapper.unmount()
+
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+  })
+
+  it('returns and retains a wallet rejection as a failed result', async () => {
+    const rejected = {
+      success: false,
+      archivedKeysDetected: 0,
+      error: 'User rejected the request',
+    }
+    mockSubmitWithRestore.mockResolvedValue(rejected)
+    const { api } = mountComposable(ref(testConfig))
+
+    await expect(api().submitWithRestore({} as never, {} as never)).resolves.toBe(rejected)
+    expect(api().lastResult.value).toBe(rejected)
   })
 
   it('delegates detectArchivedKeys to the SDK instance', async () => {

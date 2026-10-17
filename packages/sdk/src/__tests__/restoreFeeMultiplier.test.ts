@@ -36,16 +36,16 @@ async function buildFee(minResourceFee: number, config: SorobanResurrectConfig):
 
 describe('buildRestoreTransaction — RESTORE_FEE_MULTIPLIER application', () => {
   describe('base fee multiplication with the default multiplier', () => {
-    it('multiplies minResourceFee by the default RESTORE_FEE_MULTIPLIER (100)', async () => {
-      expect(RESTORE_FEE_MULTIPLIER).toBe(100)
+    it('multiplies minResourceFee by the default RESTORE_FEE_MULTIPLIER (3)', async () => {
+      expect(RESTORE_FEE_MULTIPLIER).toBe(3)
       const fee = await buildFee(100, baseConfig)
-      expect(fee).toBe('10000')
+      expect(fee).toBe('300')
     })
 
     it('scales correctly for an arbitrary base fee', async () => {
       const fee = await buildFee(1234, baseConfig)
       expect(fee).toBe((1234 * RESTORE_FEE_MULTIPLIER).toString())
-      expect(fee).toBe('123400')
+      expect(fee).toBe('3702')
     })
   })
 
@@ -74,14 +74,14 @@ describe('buildRestoreTransaction — RESTORE_FEE_MULTIPLIER application', () =>
 
     it('handles a minResourceFee of 1 with the default multiplier', async () => {
       const fee = await buildFee(1, baseConfig)
-      expect(fee).toBe('100')
+      expect(fee).toBe('3')
     })
 
     it('handles a very large minResourceFee without losing precision', async () => {
       const largeFee = 1_000_000_000
       const fee = await buildFee(largeFee, baseConfig)
       expect(fee).toBe((largeFee * RESTORE_FEE_MULTIPLIER).toString())
-      expect(fee).toBe('100000000000')
+      expect(fee).toBe('3000000000')
       expect(Number(fee)).toBeLessThan(Number.MAX_SAFE_INTEGER)
     })
 

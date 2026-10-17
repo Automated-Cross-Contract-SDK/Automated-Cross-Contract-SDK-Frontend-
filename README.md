@@ -9,7 +9,7 @@
 [![GitHub issues](https://img.shields.io/github/issues/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-)](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/issues)
 [![GitHub Discussions](https://img.shields.io/github/discussions/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-)](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/discussions)
 
-**Automated Cross-Contract State Restoration SDK & Wallet Middleware**
+**Automated Cross-Contract State Restoration SDK & Wallet Middleware for Soroban**
 
 Soroban-Resurrect solves the "archived ledger entry" problem for Soroban dApps. When a user's persistent data (token balance, loan position, etc.) expires due to TTL rent, their transaction fails with a cryptic error. This SDK automatically detects archived entries via CAP-0066 and seamlessly restores them before submitting the user's intended transaction.
 
@@ -464,13 +464,17 @@ Found a bug? Open a [bug report](https://github.com/Automated-Cross-Contract-SDK
 
 ## Roadmap
 
-The epic backlog is mapped to three release phases in [`docs/roadmap.md`](./docs/roadmap.md):
+The epic backlog is mapped to three release phases in [`ROADMAP.md`](./ROADMAP.md):
 
 1. **Phase 1 — v0.2 Hardening:** `main` compiles, documented APIs behave as documented, core test coverage.
 2. **Phase 2 — v1.0 Production Readiness:** complete docs, full wallet coverage, perf budgets, release provenance.
 3. **Phase 3 — Post-1.0 Scale:** examples, developer tooling, and ecosystem growth.
 
-Live progress is tracked on the [GitHub Project board](https://github.com/orgs/Automated-Cross-Contract-SDK/projects).
+Live progress is tracked on the [GitHub Project board](https://github.com/orgs/Automated-Cross-Contract-SDK/projects)
+and [repository milestones](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/milestones?state=all).
+
+Ecosystem directory submissions and their release re-check schedule are tracked in
+[`docs/ecosystem-listings.md`](./docs/ecosystem-listings.md).
 
 ## Showcase
 

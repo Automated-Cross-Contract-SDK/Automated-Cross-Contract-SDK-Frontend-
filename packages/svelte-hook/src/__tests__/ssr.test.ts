@@ -10,6 +10,7 @@ vi.mock('@soroban-resurrect/sdk', () => ({
     reset: vi.fn(),
     detectArchivedKeys: vi.fn(),
     submitWithRestore: vi.fn(),
+    dispose: vi.fn(),
   })),
   isProcessingState: (s: string) =>
     [

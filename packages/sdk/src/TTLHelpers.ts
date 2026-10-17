@@ -21,7 +21,10 @@ export interface QueryLedgerTTLOptions {
   concurrency?: number
 }
 
-const latestLedgerCache = new WeakMap<ISorobanRpcClient, { at: number; sequence: Promise<number> }>()
+const latestLedgerCache = new WeakMap<
+  ISorobanRpcClient,
+  { at: number; sequence: Promise<number> }
+>()
 
 /**
  * Returns the latest ledger sequence, sharing one in-flight/cached request per
@@ -63,8 +66,9 @@ export const DEFAULT_TTL_WARNING_WINDOW_LEDGERS = 100
  */
 export type LedgerKeyEntryType = 'contractData' | 'contractCode' | 'other'
 
-/** Stable lifecycle status for a queried ledger entry. */
-export type LedgerEntryStatus = 'healthy' | 'near-expiry' | 'archived' | 'unknown'
+/** Why a queried key has no usable live TTL value. */
+export type TTLUnavailableReason =
+  'missing' | 'expired' | 'unsupported' | 'rpc_error' | 'ttl_unavailable'
 
 /**
  * Detailed TTL information for a single ledger entry.
@@ -74,20 +78,20 @@ export interface LedgerEntryTTLInfo {
   keyBase64: XdrBase64
   /** The kind of ledger entry this key refers to. */
   entryType: LedgerKeyEntryType
-  /** Lifecycle status, computed using the query's warning window. */
-  status: LedgerEntryStatus
-  /** Ledger sequence number at which this entry expires (0 if archived). */
-  liveUntilLedger: number
+  /** Ledger sequence number at which this entry expires, when returned by RPC. */
+  liveUntilLedger?: number
   /** Current ledger sequence number at the time of the query. */
   currentLedger: number
-  /** Number of ledgers remaining before the entry expires (0 if archived/expired). */
-  ttlLedgers: number
+  /** Number of ledgers remaining before the entry expires, when available. */
+  ttlLedgers?: number
   /** Whether the entry is already archived (expired TTL or not found on-chain). */
   isArchived: boolean
+  /** `live` when a usable TTL was returned; otherwise `unavailable`. */
+  status: 'live' | 'unavailable'
+  /** Reason no current live TTL is available. */
+  unavailableReason?: TTLUnavailableReason
   /** Rough estimate of seconds remaining until expiry, based on ~5 s per ledger. */
-  estimatedSecondsRemaining: number
-  /** Error returned for the chunk containing this key, when its status is unknown. */
-  error?: unknown
+  estimatedSecondsRemaining?: number
 }
 
 /**
@@ -116,9 +120,9 @@ export interface TTLQueryResult {
   currentLedger: number
   /** Unix timestamp (ms) when the query was performed. */
   queriedAt: number
-  /** Ledger-entry requests that failed; affected entries have `status: 'unknown'`. */
-  failedChunks: Array<{ chunkIndex: number; keys: string[]; error: unknown }>
-  /** Whether one or more ledger-entry requests failed. */
+  /** RPC chunks that could not be queried; their entries remain unavailable. */
+  failedChunks: Array<{ chunkIndex: number; message: string; keys: XdrBase64[] }>
+  /** Convenience flag: true when at least one RPC chunk failed. */
   hasErrors: boolean
 }
 
@@ -138,12 +142,26 @@ function makeArchivedInfo(
   return {
     keyBase64,
     entryType,
-    status: 'archived',
-    liveUntilLedger: 0,
     currentLedger,
-    ttlLedgers: 0,
     isArchived: true,
-    estimatedSecondsRemaining: 0,
+    status: 'unavailable',
+    unavailableReason: 'missing',
+  }
+}
+
+function makeUnavailableInfo(
+  keyBase64: XdrBase64,
+  currentLedger: number,
+  entryType: LedgerKeyEntryType,
+  reason: TTLUnavailableReason,
+): LedgerEntryTTLInfo {
+  return {
+    keyBase64,
+    entryType,
+    currentLedger,
+    isArchived: reason === 'expired',
+    status: 'unavailable',
+    unavailableReason: reason,
   }
 }
 
@@ -167,6 +185,8 @@ function makeLiveInfo(
     currentLedger,
     ttlLedgers,
     isArchived,
+    status: isArchived ? 'unavailable' : 'live',
+    unavailableReason: isArchived ? 'expired' : undefined,
     estimatedSecondsRemaining: ttlLedgers * LEDGER_CLOSE_TIME_SECONDS,
   }
 }
@@ -206,43 +226,54 @@ export async function queryLedgerTTL(
   const currentLedger =
     opts.currentLedger ?? (await getCachedLatestLedger(server, opts.latestLedgerCacheMs))
 
-  // Build a map from keyBase64 → LedgerEntryTTLInfo for fast lookup
+  const failedChunks: TTLQueryResult['failedChunks'] = []
   const infoMap = new Map<string, LedgerEntryTTLInfo>()
   const failedChunks: TTLQueryResult['failedChunks'] = []
   const errorsByKey = new Map<string, unknown>()
   const failedKeys = new Set<string>()
 
-  // Pre-populate all keys as archived; overwrite if found on-chain
+  // Establish an explicit unavailable result before the RPC lookup.
   for (const key of keys) {
     const keyBase64 = asXdrBase64(key.toXDR('base64'))
-    infoMap.set(keyBase64, makeArchivedInfo(keyBase64, currentLedger, getLedgerKeyEntryType(key)))
+    const entryType = getLedgerKeyEntryType(key)
+    infoMap.set(
+      keyBase64,
+      entryType === 'other'
+        ? makeUnavailableInfo(keyBase64, currentLedger, entryType, 'unsupported')
+        : makeArchivedInfo(keyBase64, currentLedger, entryType),
+    )
   }
 
-  const found = await fetchLedgerEntriesChunked(server, keys, {
+  const supportedKeys = keys.filter((key) => getLedgerKeyEntryType(key) !== 'other')
+  const found = await fetchLedgerEntriesChunked(server, supportedKeys, {
     chunkSize: opts.chunkSize,
     concurrency: opts.concurrency,
-    onChunkError: (error, chunkIndex, chunkKeys) => {
-      const keyBase64s = chunkKeys.map((key) => asXdrBase64(key.toXDR('base64')))
-      failedChunks.push({ chunkIndex, keys: keyBase64s, error })
-      for (const keyBase64 of keyBase64s) {
-        failedKeys.add(keyBase64)
-        errorsByKey.set(keyBase64, error)
+    onChunkError: (err, chunkIndex, chunkKeys) => {
+      const message = err instanceof Error ? err.message : String(err)
+      const failedKeys = chunkKeys.map((key) => asXdrBase64(key.toXDR('base64')))
+      failedChunks.push({ chunkIndex, message, keys: failedKeys })
+      for (const key of chunkKeys) {
+        const keyBase64 = asXdrBase64(key.toXDR('base64'))
+        infoMap.set(
+          keyBase64,
+          makeUnavailableInfo(keyBase64, currentLedger, getLedgerKeyEntryType(key), 'rpc_error'),
+        )
       }
+      console.warn(`TTLHelpers: getLedgerEntries chunk ${chunkIndex} failed: ${message}`)
     },
   })
   for (const entry of found) {
     const keyBase64 = asXdrBase64(entry.key.toXDR('base64'))
     if (entry.liveUntilLedgerSeq === undefined) {
-      infoMap.set(keyBase64, {
+      infoMap.set(
         keyBase64,
-        entryType: getLedgerKeyEntryType(entry.key),
-        status: 'unknown',
-        liveUntilLedger: 0,
-        currentLedger,
-        ttlLedgers: 0,
-        isArchived: false,
-        estimatedSecondsRemaining: 0,
-      })
+        makeUnavailableInfo(
+          keyBase64,
+          currentLedger,
+          getLedgerKeyEntryType(entry.key),
+          'ttl_unavailable',
+        ),
+      )
       continue
     }
     infoMap.set(
@@ -252,7 +283,6 @@ export async function queryLedgerTTL(
         entry.liveUntilLedgerSeq,
         currentLedger,
         getLedgerKeyEntryType(entry.key),
-        warningWindowLedgers,
       ),
     )
   }
@@ -299,8 +329,13 @@ export async function getExpiringSoonEntries(
   keys: xdr.LedgerKey[],
   ledgersThreshold: number,
 ): Promise<LedgerEntryTTLInfo[]> {
-  const result = await queryLedgerTTL(server, keys, { warningWindowLedgers: ledgersThreshold })
-  return result.entries.filter((entry) => entry.status === 'archived' || entry.status === 'near-expiry')
+  const result = await queryLedgerTTL(server, keys)
+  return result.entries.filter(
+    (entry) =>
+      entry.unavailableReason === 'missing' ||
+      entry.unavailableReason === 'expired' ||
+      (entry.status === 'live' && (entry.ttlLedgers ?? Infinity) <= ledgersThreshold),
+  )
 }
 
 /**
@@ -322,6 +357,13 @@ export async function getArchivedEntries(
     .map((entry) => {
       // Re-derive the original xdr.LedgerKey from the base64 string
       const key = xdr.LedgerKey.fromXDR(entry.keyBase64, 'base64')
-      return { key, keyBase64: entry.keyBase64 }
+      return {
+        key,
+        keyBase64: entry.keyBase64,
+        entryType: entry.entryType,
+        liveUntilLedger: entry.liveUntilLedger,
+        currentLedger: entry.currentLedger,
+        ttlLedgers: entry.ttlLedgers,
+      }
     })
 }

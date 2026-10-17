@@ -10,7 +10,7 @@ All adapters sign transactions; the columns are the `WalletCapabilities` flags.
 
 | Wallet (`KnownWallet`) | Package / export                                                  | `signAuthEntry` | `feeBump` | `hardware` | Guide                              |
 | ---------------------- | ----------------------------------------------------------------- | --------------- | --------- | ---------- | ---------------------------------- |
-| `freighter`            | `@soroban-resurrect/adapter-freighter` · `FreighterAdapter`         | ✅              | ✅        | —          | [Adapters](./adapters-and-wallets.md) |
+| `freighter`            | `@soroban-resurrect/adapter-freighter` · `FreighterAdapter`         | ✅              | ✅        | —          | [Freighter](./freighter.md) |
 | `albedo`               | `@soroban-resurrect/adapter-albedo` · `AlbedoAdapter`               | —               | ✅        | —          | [Adapters](./adapters-and-wallets.md) |
 | `lobstr`               | `@soroban-resurrect/adapter-lobstr` · `LobstrAdapter`               | —               | ✅        | —          | [Adapters](./adapters-and-wallets.md) |
 | `xbull`                | `@soroban-resurrect/adapter-xbull` · `XBullAdapter`                 | —               | ✅        | —          | [Adapters](./adapters-and-wallets.md) |

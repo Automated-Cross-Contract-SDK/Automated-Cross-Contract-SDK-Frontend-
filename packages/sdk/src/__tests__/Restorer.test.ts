@@ -15,8 +15,7 @@ import {
   waitForTransaction,
   buildRestoreTransaction,
   buildOriginalAfterRestore,
-  assertRestoreTransactionFresh,
-  RESTORE_TX_LEDGER_BOUNDS_WINDOW,
+  getExpiredTransactionInfo,
 } from '../Restorer.js'
 
 function makeSampleTx(): Transaction {
@@ -260,6 +259,30 @@ describe('Restorer', () => {
   })
 
   describe('buildOriginalAfterRestore', () => {
+    function makeTimeBoundTx(minTime: number, maxTime: number): Transaction {
+      const kp = Keypair.random()
+      return new TransactionBuilder(new Account(kp.publicKey(), '2'), {
+        fee: '100',
+        networkPassphrase: Networks.TESTNET,
+      })
+        .addOperation(Operation.restoreFootprint({}))
+        .setTimebounds(minTime, maxTime)
+        .build()
+    }
+
+    function mockSuccessfulSimulation(server: rpc.Server): void {
+      vi.mocked(server.simulateTransaction).mockResolvedValue({
+        id: '1',
+        latestLedger: 100,
+        events: [],
+        _parsed: true,
+        transactionData: { build: () => new SorobanDataBuilder().build() },
+        minResourceFee: '100',
+        cost: { cpuInsns: '100', memBytes: '100' },
+        result: { auth: [], retval: { switch: () => 0 } },
+      } as never)
+    }
+
     it('rebuilds and assembles the original transaction after restore', async () => {
       const server = makeMockServer()
       const kp = Keypair.random()
@@ -283,6 +306,87 @@ describe('Restorer', () => {
       const result = await buildOriginalAfterRestore(server, originalTx, Networks.TESTNET, '100')
 
       expect(result).toBeInstanceOf(Transaction)
+    })
+
+    it('preserves the original absolute time bounds when rebuilding', async () => {
+      const server = makeMockServer()
+      const now = Math.floor(Date.now() / 1000)
+      const bounds = { minTime: now - 10, maxTime: now + 120 }
+      const originalTx = makeTimeBoundTx(bounds.minTime, bounds.maxTime)
+      vi.mocked(server.getAccount).mockResolvedValue(new Account(originalTx.source, '3') as never)
+      mockSuccessfulSimulation(server)
+
+      const rebuilt = await buildOriginalAfterRestore(
+        server,
+        originalTx,
+        Networks.TESTNET,
+        '100',
+      )
+
+      expect(rebuilt.timeBounds).toEqual({
+        minTime: String(bounds.minTime),
+        maxTime: String(bounds.maxTime),
+      })
+    })
+
+    it('refuses to silently extend an expired original time bound', async () => {
+      const server = makeMockServer()
+      const now = Math.floor(Date.now() / 1000)
+      const originalTx = makeTimeBoundTx(0, now - 1)
+      vi.mocked(server.getAccount).mockResolvedValue(new Account(originalTx.source, '3') as never)
+
+      await expect(
+        buildOriginalAfterRestore(server, originalTx, Networks.TESTNET, '100'),
+      ).rejects.toMatchObject({
+        code: 'ORIGINAL_TRANSACTION_EXPIRED',
+        expiredTransaction: {
+          originalTimeBounds: {
+            minTime: 0,
+            maxTime: now - 1,
+          },
+        },
+      })
+      expect(server.simulateTransaction).not.toHaveBeenCalled()
+    })
+
+    it('treats maxTime equality as expired and the preceding second as valid', () => {
+      const originalTx = makeTimeBoundTx(10, 100)
+
+      expect(getExpiredTransactionInfo(originalTx, 99)).toBeUndefined()
+      expect(getExpiredTransactionInfo(originalTx, 100)).toEqual({
+        originalTimeBounds: { minTime: 10, maxTime: 100 },
+        detectedAt: 100,
+      })
+    })
+
+    it('accepts valid caller-supplied future bounds and rejects an expired override', async () => {
+      const server = makeMockServer()
+      const now = Math.floor(Date.now() / 1000)
+      const originalTx = makeTimeBoundTx(0, now + 30)
+      vi.mocked(server.getAccount).mockResolvedValue(new Account(originalTx.source, '3') as never)
+      mockSuccessfulSimulation(server)
+
+      const rebuilt = await buildOriginalAfterRestore(
+        server,
+        originalTx,
+        Networks.TESTNET,
+        '100',
+        { minTime: now, maxTime: now + 180 },
+      )
+      expect(rebuilt.timeBounds).toEqual({
+        minTime: String(now),
+        maxTime: String(now + 180),
+      })
+
+      await expect(
+        buildOriginalAfterRestore(
+          server,
+          originalTx,
+          Networks.TESTNET,
+          '100',
+          { minTime: now, maxTime: now },
+        ),
+      ).rejects.toMatchObject({ code: 'INVALID_REBUILD_TIME_BOUNDS' })
     })
   })
 })

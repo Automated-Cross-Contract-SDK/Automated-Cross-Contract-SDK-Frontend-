@@ -70,6 +70,8 @@ export interface SorobanResurrectStore {
   estimate: (transaction: Transaction) => Promise<FeeEstimate>
   /** Reset state back to idle. Optionally, only reset if in a specific state. */
   reset: (fromState?: RestoreState) => void
+  /** Abort active submissions without disposing the store. */
+  cancel: () => void
   /**
    * Subscribes to a typed lifecycle event (`restoreNeeded`, `restoreSubmitted`,
    * `restoreConfirmed`, `originalSubmitted`, `error`, `restoreComplete`, `stateChange`)
@@ -81,7 +83,7 @@ export interface SorobanResurrectStore {
   ) => () => void
   /** The underlying SDK instance. */
   resurrect: SorobanResurrect
-  /** Clean up subscriptions. Call inside Svelte's `onDestroy()`. */
+  /** Fully release owned subscriptions and TTL watches; call inside `onDestroy()`. */
   destroy: () => void
 }
 
@@ -91,7 +93,8 @@ export interface SorobanResurrectStore {
  * Subscribes to SDK state changes and exposes the state as a readable Svelte store.
  * Accepts a reactive config store so the SDK is recreated when config changes.
  *
- * **Important:** Call `store.destroy()` in your component's `onDestroy()` to clean up.
+ * **Important:** Call `store.destroy()` in your component's `onDestroy()` to
+ * abort active work and release subscriptions and TTL watches.
  *
  * @example
  * ```svelte
@@ -101,10 +104,11 @@ export interface SorobanResurrectStore {
  *   import { createSorobanResurrect } from '@soroban-resurrect/svelte-hook'
  *
  *   const config = writable({ rpcUrl: 'https://soroban-testnet.stellar.org' })
- *   const { state, archivedKeys, feeEstimate, lastResult, submitBatch, reset, destroy } =
+ *   const { state, archivedKeys, feeEstimate, lastResult, submitBatch, reset, cancel, destroy } =
  *     createSorobanResurrect(config)
  *
  *   onDestroy(destroy)
+ *   // Call cancel() to abort active local submissions without destroying the store.
  * </script>
  *
  * {$state.message}
@@ -152,12 +156,34 @@ export function createSorobanResurrect(
   let resurrect: SorobanResurrect | null = null
   let currentConfig: SorobanResurrectConfig | null = null
   let unsubscribeState: (() => void) | null = null
+  let unsubscribeConfig: () => void = () => {}
+  let destroyed = false
+  const activeSubmissions = new Set<AbortController>()
+  const eventUnsubscribers = new Set<() => void>()
 
-  const initSdk = (config: SorobanResurrectConfig): SorobanResurrect => {
+  const assertNotDestroyed = (): void => {
+    if (destroyed) throw new Error('SorobanResurrect store has been destroyed.')
+  }
+
+  const cancel = (): void => {
+    for (const controller of activeSubmissions) controller.abort()
+  }
+
+  const disposeCurrentInstance = (): void => {
+    cancel()
+    for (const unsubscribe of eventUnsubscribers) unsubscribe()
+    eventUnsubscribers.clear()
     if (unsubscribeState) {
       unsubscribeState()
       unsubscribeState = null
     }
+    resurrect?.dispose()
+    resurrect = null
+  }
+
+  const initSdk = (config: SorobanResurrectConfig): SorobanResurrect => {
+    assertNotDestroyed()
+    disposeCurrentInstance()
 
     resurrect = new SorobanResurrect(config)
     unsubscribeState = resurrect.onStateChange((info: RestoreStateInfo) => {
@@ -167,6 +193,7 @@ export function createSorobanResurrect(
   }
 
   const getResurrect = (): SorobanResurrect => {
+    assertNotDestroyed()
     if (!resurrect) {
       if (!currentConfig) {
         throw new Error('SorobanResurrectConfig has not been provided.')
@@ -177,14 +204,10 @@ export function createSorobanResurrect(
   }
 
   // React to config store changes — recreate SDK when config updates
-  const unsubscribeConfig = configStore.subscribe((newConfig) => {
+  unsubscribeConfig = configStore.subscribe((newConfig) => {
+    if (destroyed) return
+    disposeCurrentInstance()
     currentConfig = newConfig
-
-    // Clean up previous SDK subscription
-    if (unsubscribeState) {
-      unsubscribeState()
-      unsubscribeState = null
-    }
 
     stateWritable.set({ state: 'idle', message: '' })
     lastResultWritable.set(null)
@@ -206,58 +229,86 @@ export function createSorobanResurrect(
     transaction: Transaction,
     wallet: WalletAdapter,
   ): Promise<ResurrectResult> => {
-    const result = await getResurrect().submitWithRestore({ transaction, wallet })
-    lastResultWritable.set(result)
-    return result
+    const instance = getResurrect()
+    const controller = new AbortController()
+    activeSubmissions.add(controller)
+    try {
+      const result = await instance.submitWithRestore({
+        transaction,
+        wallet,
+        signal: controller.signal,
+      })
+      if (!destroyed && resurrect === instance) lastResultWritable.set(result)
+      return result
+    } finally {
+      activeSubmissions.delete(controller)
+    }
   }
 
   const submitBatch = (items: SubmitWithRestoreOptions[]): BatchSubmission => {
-    const itemStores = items.map(() => writable<BatchItemState>({ status: 'pending', result: null }))
+    const itemStores = items.map(() =>
+      writable<BatchItemState>({ status: 'pending', result: null }),
+    )
 
     const done = (async () => {
+      const instance = getResurrect()
+      const controller = new AbortController()
+      activeSubmissions.add(controller)
       const results: ResurrectResult[] = []
-      for (let i = 0; i < items.length; i++) {
-        const itemStore = itemStores[i]
-        itemStore.set({ status: 'submitting', result: null })
-        try {
-          const result = await getResurrect().submitWithRestore(items[i])
-          itemStore.set({ status: 'success', result })
+      try {
+        for (let i = 0; i < items.length; i++) {
+          const itemStore = itemStores[i]
+          itemStore.set({ status: 'submitting', result: null })
+          let result: ResurrectResult
+          try {
+            result = await instance.submitWithRestore({
+              ...items[i],
+              signal: controller.signal,
+            })
+          } catch (error) {
+            itemStore.set({ status: 'error', result: null })
+            throw error
+          }
+          itemStore.set({ status: result.success ? 'success' : 'error', result })
           results.push(result)
-        } catch (error) {
-          itemStore.set({ status: 'error', result: null })
-          throw error
+          if (!destroyed && resurrect === instance) lastResultWritable.set(result)
+          if (controller.signal.aborted) throw new Error('Operation cancelled')
         }
+        return results
+      } finally {
+        activeSubmissions.delete(controller)
       }
-      return results
     })()
 
     return { items: itemStores, done }
   }
 
   const detectArchivedKeys = async (transaction: Transaction): Promise<ArchivedLedgerEntry[]> => {
-    return getResurrect().detectArchivedKeys(transaction)
+    const instance = getResurrect()
+    return instance.detectArchivedKeys(transaction)
   }
 
   const estimate = async (transaction: Transaction): Promise<FeeEstimate> => {
-    const archivedKeysDetected = await getResurrect().detectArchivedKeys(transaction)
-    const minResourceFee = await getResurrect().estimateRestoreFee(transaction)
-    const estimatedRestoreFee = (
-      BigInt(minResourceFee) * BigInt(RESTORE_FEE_MULTIPLIER)
-    ).toString()
+    const instance = getResurrect()
+    const archivedKeysDetected = await instance.detectArchivedKeys(transaction)
+    const minResourceFee = await instance.estimateRestoreFee(transaction)
+    const estimatedRestoreFee = (BigInt(minResourceFee) * BigInt(RESTORE_FEE_MULTIPLIER)).toString()
     const estimateResult: FeeEstimate = {
       archivedKeysDetected: archivedKeysDetected.length,
       minResourceFee,
       estimatedRestoreFee,
       multiplier: RESTORE_FEE_MULTIPLIER,
     }
-    feeEstimateWritable.set(estimateResult)
+    if (!destroyed && resurrect === instance) feeEstimateWritable.set(estimateResult)
     return estimateResult
   }
 
   const reset = (fromState?: RestoreState): void => {
+    assertNotDestroyed()
     if (fromState && get(stateWritable).state !== fromState) {
       return
     }
+    getResurrect().reset(fromState)
     stateWritable.set({ state: 'idle', message: '' })
     lastResultWritable.set(null)
     feeEstimateWritable.set(null)
@@ -267,16 +318,19 @@ export function createSorobanResurrect(
     event: K,
     listener: (payload: SorobanResurrectEvents[K]) => void,
   ): (() => void) => {
-    return getResurrect().on(event, listener)
+    const unsubscribe = getResurrect().on(event, listener)
+    eventUnsubscribers.add(unsubscribe)
+    return () => {
+      unsubscribe()
+      eventUnsubscribers.delete(unsubscribe)
+    }
   }
 
   const destroy = (): void => {
+    if (destroyed) return
+    destroyed = true
     unsubscribeConfig()
-    if (unsubscribeState) {
-      unsubscribeState()
-      unsubscribeState = null
-    }
-    resurrect = null
+    disposeCurrentInstance()
   }
 
   return {
@@ -291,6 +345,7 @@ export function createSorobanResurrect(
     estimate,
     reset,
     on,
+    cancel,
     get resurrect() {
       return getResurrect()
     },

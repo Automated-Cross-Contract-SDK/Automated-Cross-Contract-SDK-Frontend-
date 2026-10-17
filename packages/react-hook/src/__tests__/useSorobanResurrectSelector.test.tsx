@@ -17,6 +17,22 @@ vi.mock('@soroban-resurrect/sdk', () => ({
     submitWithRestore: vi.fn(),
     config: { rpcUrl: 'https://test' },
   })),
+  createSubscriptionStore: <T,>(initialSnapshot: T) => {
+    let snapshot = initialSnapshot
+    const listeners = new Set<() => void>()
+    return {
+      getSnapshot: () => snapshot,
+      subscribe: (listener: () => void) => {
+        listeners.add(listener)
+        return () => listeners.delete(listener)
+      },
+      setSnapshot: (nextSnapshot: T) => {
+        if (Object.is(snapshot, nextSnapshot)) return
+        snapshot = nextSnapshot
+        listeners.forEach((listener) => listener())
+      },
+    }
+  },
   isProcessingState: (s: string) =>
     [
       'simulating',

@@ -46,9 +46,10 @@ export class LedgerWalletAdapter implements HardwareWalletAdapter {
 
   /**
    * The Ledger Stellar app signs the transaction hash and this adapter attaches
-   * the signature to the parsed envelope, so fee-bump envelopes are supported.
-   * The app does not implement CAP-0046 per-entry signing. `hardware` is `true`:
-   * signing requires physical confirmation and may be subject to blind-signing.
+   * the signature to the parsed envelope, including fee-bump envelopes. The
+   * adapter does not implement CAP-0046 per-entry signing. `hardware` is
+   * `true`: signing requires physical confirmation and may be subject to
+   * blind-signing.
    */
   readonly capabilities = {
     signAuthEntry: false,
@@ -99,7 +100,8 @@ export class LedgerWalletAdapter implements HardwareWalletAdapter {
       )
     }
 
-    this.strApp = new StrModule.default(this.transport)
+    const StrCtor = StrModule.default
+    this.strApp = new StrCtor(this.transport)
     this._connected = true
 
     // Pre-fetch and cache the public key on connect.
@@ -159,10 +161,7 @@ export class LedgerWalletAdapter implements HardwareWalletAdapter {
    * @param opts  - Optional network passphrase (defaults to Testnet).
    * @returns Base64 XDR of the signed transaction envelope.
    */
-  async signTransaction(
-    txXdr: string,
-    opts?: { networkPassphrase?: string; network?: string },
-  ) {
+  async signTransaction(txXdr: string, opts?: { networkPassphrase?: string; network?: string }) {
     this.assertConnected()
 
     const networkPassphrase = opts?.networkPassphrase ?? Networks.TESTNET
@@ -236,10 +235,10 @@ export class TrezorWalletAdapter implements HardwareWalletAdapter {
   readonly type = 'trezor' as const
 
   /**
-   * TrezorConnect signs the transaction and this adapter attaches the signature
-   * to the parsed envelope, so fee-bump envelopes are supported. It does not
-   * implement CAP-0046 per-entry signing. `hardware` is `true`: signing requires
-   * physical confirmation on the device.
+   * TrezorConnect signs the transaction and this adapter attaches the
+   * signature to the parsed envelope, including fee-bump envelopes. It does
+   * not implement CAP-0046 per-entry signing. `hardware` is `true`: signing
+   * requires physical confirmation on the device.
    */
   readonly capabilities = {
     signAuthEntry: false,
@@ -248,7 +247,7 @@ export class TrezorWalletAdapter implements HardwareWalletAdapter {
   } as const
 
   private readonly accountIndex: number
-  private readonly manifest: { email: string; appUrl: string }
+  private readonly manifest?: { email: string; appUrl: string }
   private trezorConnect: TrezorConnectInstance | null
   private _connected: boolean = false
   private _publicKey: string | null = null
@@ -256,7 +255,7 @@ export class TrezorWalletAdapter implements HardwareWalletAdapter {
   constructor(config: TrezorAdapterConfig) {
     this.accountIndex = config.accountIndex ?? 0
     this.manifest = config.manifest
-    this.trezorConnect = (config.trezorConnect as TrezorConnectInstance) ?? null
+    this.trezorConnect = isTrezorConnectInstance(config.trezorConnect) ? config.trezorConnect : null
   }
 
   /** BIP44 derivation path for the configured account index (full path for Trezor). */
@@ -274,7 +273,12 @@ export class TrezorWalletAdapter implements HardwareWalletAdapter {
     if (!this.trezorConnect) {
       throw new Error(
         'TrezorWalletAdapter: no TrezorConnect instance provided. ' +
-          'Install @trezor/connect-web and pass the instance as `config.trezorConnect`.',
+          'Pass `trezorConnect` in the config.',
+      )
+    }
+    if (!this.manifest) {
+      throw new Error(
+        'TrezorWalletAdapter: manifest is required. ' + 'Pass `manifest` in the config.',
       )
     }
 
@@ -340,10 +344,7 @@ export class TrezorWalletAdapter implements HardwareWalletAdapter {
    * @param opts  - Optional network passphrase (defaults to Testnet).
    * @returns Base64 XDR of the signed transaction envelope.
    */
-  async signTransaction(
-    txXdr: string,
-    opts?: { networkPassphrase?: string; network?: string },
-  ) {
+  async signTransaction(txXdr: string, opts?: { networkPassphrase?: string; network?: string }) {
     this.assertConnected()
 
     const networkPassphrase = opts?.networkPassphrase ?? Networks.TESTNET
@@ -467,6 +468,17 @@ interface TrezorConnectInstance {
     networkPassphrase: string
     transaction: TrezorStellarTransaction
   }): Promise<{ success: boolean; payload: TrezorStellarSignResult | { error: string } }>
+}
+
+function isTrezorConnectInstance(value: unknown): value is TrezorConnectInstance {
+  if (typeof value !== 'object' || value === null) return false
+  const candidate = value as Record<string, unknown>
+  return (
+    typeof candidate.init === 'function' &&
+    typeof candidate.getFeatures === 'function' &&
+    typeof candidate.stellarGetAddress === 'function' &&
+    typeof candidate.stellarSignTransaction === 'function'
+  )
 }
 
 interface TrezorFeatures {

@@ -1,6 +1,7 @@
 import type { SorobanResurrectConfig } from './types.js'
 import type { ISorobanRpcClient } from './RpcClient.js'
 import { SorobanRpcClient } from './RpcClient.js'
+import { NOOP_LOGGER, withRpcLogging } from './Logger.js'
 import {
   DEFAULT_NETWORK_PASSPHRASE,
   POLL_INTERVAL_MS,
@@ -14,9 +15,14 @@ import {
   KNOWN_NETWORK_PASSPHRASES,
   resolveNetworkPassphrase,
   TTL_WATCH_INTERVAL_MS,
-  TTL_WATCH_THRESHOLD_LEDGERS,
+  TTL_WATCH_THRESHOLD,
+  ARCHIVE_DETECTION_CHUNK_SIZE,
+  ARCHIVE_DETECTION_CONCURRENCY,
+  MAX_BATCH_SIZE,
 } from './constants.js'
 import { SimulationCache } from './SimulationCache.js'
+import { validateRestoreMemoConfig } from './memoValidation.js'
+import { NOOP_LOGGER } from './Logger.js'
 
 /**
  * Result of initialising the SDK configuration.
@@ -48,11 +54,13 @@ const ARCHIVE_DETECTION_METHODS = ['simulation', 'direct'] as const
  * not a finite number or falls outside the allowed range.
  */
 function validateNumber(field: string, value: unknown, minimum: number, exclusive: boolean): void {
-  const valid = typeof value === 'number' && Number.isFinite(value) && (exclusive ? value > minimum : value >= minimum)
+  const valid =
+    typeof value === 'number' &&
+    Number.isFinite(value) &&
+    (exclusive ? value > minimum : value >= minimum)
   if (!valid) {
-    throw new Error(
-      `Invalid ${field}: ${JSON.stringify(value)}. Must be a finite number ${exclusive ? '>' : '>='} ${minimum}.`,
-    )
+    const comparison = exclusive ? 'greater than 0' : 'greater than or equal to 1'
+    throw new Error(`config.${field} must be a finite number ${comparison}`)
   }
 }
 
@@ -83,12 +91,12 @@ export const SIMULATION_CACHE_MAX_SIZE = 50
  */
 export function validateConfigShape(config: SorobanResurrectConfig): void {
   if (typeof config.rpcUrl !== 'string' || config.rpcUrl.length === 0) {
-    throw new Error(`Invalid rpcUrl: ${JSON.stringify(config.rpcUrl)}. Must be a non-empty string.`)
+    throw new Error('config.rpcUrl must be a non-empty string')
   }
   try {
     new URL(config.rpcUrl)
   } catch {
-    throw new Error(`Invalid rpcUrl: ${JSON.stringify(config.rpcUrl)}. Must be a valid URL.`)
+    throw new Error('config.rpcUrl must be a valid URL')
   }
 
   if (config.pollIntervalMs !== undefined) {
@@ -97,6 +105,17 @@ export function validateConfigShape(config: SorobanResurrectConfig): void {
 
   if (config.pollTimeoutMs !== undefined) {
     validateNumber('pollTimeoutMs', config.pollTimeoutMs, 0, true)
+  }
+
+  for (const field of [
+    'simulationTimeoutMs',
+    'walletSigningTimeoutMs',
+    'restoreConfirmationTimeoutMs',
+    'originalSubmissionTimeoutMs',
+  ] as const) {
+    if (config[field] !== undefined) {
+      validateNumber(field, config[field], 0, true)
+    }
   }
 
   if (config.restoreFeeMultiplier !== undefined) {
@@ -129,6 +148,26 @@ export function validateConfigShape(config: SorobanResurrectConfig): void {
     if (!Number.isInteger(config.simulationCacheMaxSize) || config.simulationCacheMaxSize < 1) {
       throw new Error(
         `Invalid simulationCacheMaxSize: ${JSON.stringify(config.simulationCacheMaxSize)}. Must be a positive integer.`,
+      )
+    }
+  }
+
+  validateRestoreMemoConfig(config)
+
+  if (
+    config.maxBatchSize !== undefined &&
+    (!Number.isInteger(config.maxBatchSize) || config.maxBatchSize < 1)
+  ) {
+    throw new Error(
+      `Invalid maxBatchSize: ${JSON.stringify(config.maxBatchSize)}. Must be a positive integer.`,
+    )
+  }
+
+  for (const field of ['archiveDetectionChunkSize', 'archiveDetectionConcurrency'] as const) {
+    const value = config[field]
+    if (value !== undefined && (!Number.isInteger(value) || value < 1)) {
+      throw new Error(
+        `Invalid ${field}: ${JSON.stringify(value)}. Must be a positive integer.`,
       )
     }
   }
@@ -171,7 +210,8 @@ export function validateConfigShape(config: SorobanResurrectConfig): void {
 export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
   validateConfigShape(config)
 
-  const server = config.rpcClient ?? new SorobanRpcClient(config.rpcUrl)
+  const baseServer = config.rpcClient ?? new SorobanRpcClient(config.rpcUrl)
+  const server = withRpcLogging(baseServer, config.logger)
 
   const networkPassphrase =
     config.networkPassphrase ??
@@ -199,31 +239,40 @@ export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
       })
     : undefined
 
-  const resolved: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & { rpcClient: ISorobanRpcClient } = {
+  const resolved: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & {
+    rpcClient: ISorobanRpcClient
+  } = {
     rpcUrl: config.rpcUrl,
     networkPassphrase,
+    logger: config.logger ?? NOOP_LOGGER,
     pollIntervalMs: config.pollIntervalMs ?? POLL_INTERVAL_MS,
     pollTimeoutMs: config.pollTimeoutMs ?? POLL_TIMEOUT_MS,
+    simulationTimeoutMs: config.simulationTimeoutMs ?? RPC_TIMEOUT_MS,
+    walletSigningTimeoutMs: config.walletSigningTimeoutMs ?? 120_000,
+    restoreConfirmationTimeoutMs: config.restoreConfirmationTimeoutMs ?? POLL_TIMEOUT_MS,
+    originalSubmissionTimeoutMs: config.originalSubmissionTimeoutMs ?? RPC_TIMEOUT_MS,
     restoreFeeMultiplier: config.restoreFeeMultiplier ?? RESTORE_FEE_MULTIPLIER,
     rpcTimeoutMs: config.rpcTimeoutMs ?? RPC_TIMEOUT_MS,
     rpcRetryCount: config.rpcRetryCount ?? RPC_RETRY_COUNT,
     rpcRetryBackoffMs: config.rpcRetryBackoffMs ?? RPC_RETRY_BACKOFF_MS,
     rpcCircuitBreakerThreshold: config.rpcCircuitBreakerThreshold ?? RPC_CIRCUIT_BREAKER_THRESHOLD,
-    rpcCircuitBreakerCooldownMs: config.rpcCircuitBreakerCooldownMs ?? RPC_CIRCUIT_BREAKER_COOLDOWN_MS,
+    rpcCircuitBreakerCooldownMs:
+      config.rpcCircuitBreakerCooldownMs ?? RPC_CIRCUIT_BREAKER_COOLDOWN_MS,
     ttlWatchIntervalMs: config.ttlWatchIntervalMs ?? TTL_WATCH_INTERVAL_MS,
-    ttlWatchThresholdLedgers: config.ttlWatchThresholdLedgers ?? TTL_WATCH_THRESHOLD_LEDGERS,
+    ttlWatchThreshold: config.ttlWatchThreshold ?? TTL_WATCH_THRESHOLD,
+    ttlWatchThresholdLedgers: config.ttlWatchThresholdLedgers ?? TTL_WATCH_THRESHOLD,
     archiveDetectionMethod: config.archiveDetectionMethod ?? 'simulation',
     useSSE: config.useSSE ?? false,
     enableSimulationCache: config.enableSimulationCache ?? false,
     simulationCacheTtlMs: config.simulationCacheTtlMs ?? SIMULATION_CACHE_TTL_MS,
     simulationCacheMaxSize: config.simulationCacheMaxSize ?? SIMULATION_CACHE_MAX_SIZE,
-    rpcTimeoutMs: config.rpcTimeoutMs ?? RPC_TIMEOUT_MS,
-    rpcRetryCount: config.rpcRetryCount ?? RPC_RETRY_COUNT,
-    rpcRetryBackoffMs: config.rpcRetryBackoffMs ?? RPC_RETRY_BACKOFF_MS,
-    rpcCircuitBreakerThreshold: config.rpcCircuitBreakerThreshold ?? RPC_CIRCUIT_BREAKER_THRESHOLD,
-    rpcCircuitBreakerCooldownMs: config.rpcCircuitBreakerCooldownMs ?? RPC_CIRCUIT_BREAKER_COOLDOWN_MS,
-    ttlWatchIntervalMs: config.ttlWatchIntervalMs ?? TTL_WATCH_INTERVAL_MS,
-    ttlWatchThresholdLedgers: config.ttlWatchThresholdLedgers ?? TTL_WATCH_THRESHOLD_LEDGERS,
+    archiveDetectionChunkSize: config.archiveDetectionChunkSize ?? ARCHIVE_DETECTION_CHUNK_SIZE,
+    archiveDetectionConcurrency:
+      config.archiveDetectionConcurrency ?? ARCHIVE_DETECTION_CONCURRENCY,
+    maxBatchSize: config.maxBatchSize ?? MAX_BATCH_SIZE,
+    restoreTxMemo: config.restoreTxMemo,
+    restoreTxMemoText: config.restoreTxMemoText ?? '',
+    logger: config.logger ?? NOOP_LOGGER,
     rpcClient: server,
   }
 
