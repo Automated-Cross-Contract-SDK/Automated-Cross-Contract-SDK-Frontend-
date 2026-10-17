@@ -8,7 +8,12 @@
 
 Resolves #434, #551, and #552; prepares the documentation and submission tracker for #435.
 
-## Validation
+- Publish a compatibility matrix for all supported wallet adapters, including signing behavior, required setup/options, limitations, and the locked provider API versions.
+- Validate SDK URLs, timing values, fee settings, and incompatible archive-detection options at construction time with field-specific errors.
+- Add `getEffectiveConfig()` to return validated settings with defaults applied, without constructing runtime RPC/cache resources.
+- Add validated per-request restore workflow overrides while keeping the instance configuration frozen and unchanged.
+
+## Behavior notes
 
 - `npm run test -w packages/sdk -- --coverage --reporter=dot` — 978 tests passed and module coverage floors met.
 - Prettier checks on changed files and `git diff --check` passed.

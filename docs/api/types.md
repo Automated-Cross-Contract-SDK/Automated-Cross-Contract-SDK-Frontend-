@@ -22,7 +22,7 @@ interface SorobanResurrectConfig {
   restoreConfirmationTimeoutMs?: number // default: pollTimeoutMs
   originalSubmissionTimeoutMs?: number // default: rpcTimeoutMs
   restoreFeeMultiplier?: number // default: 3 — see "Choosing restoreFeeMultiplier" below
-  maxRestoreFeeStroops?: FeeStroops | string // plain stroop strings are branded at the config boundary
+  maxRestoreFeeStroops?: number | string // non-negative safe integer or decimal integer string
   maxSequenceRetries?: number // default: 3 — retries when a restore tx fails on sequence number
   archiveDetectionMethod?: 'simulation' | 'direct' // default: 'simulation'
   archiveDetectionChunkSize?: number // default: 50
@@ -45,7 +45,7 @@ interface SorobanResurrectConfig {
 | `restoreConfirmationTimeoutMs` | Maximum time in ms to wait for restore confirmation; defaults to `pollTimeoutMs`. |
 | `originalSubmissionTimeoutMs` | Maximum time in ms to submit the original transaction; defaults to `rpcTimeoutMs` (30 seconds unless configured). |
 | `restoreFeeMultiplier`     | Multiplier applied to `minResourceFee` when building a restore transaction.    |
-| `maxRestoreFeeStroops`     | Upper bound on the restore fee. Accepts a branded `FeeStroops` or a plain numeric stroop string, which is branded at the config boundary. |
+| `maxRestoreFeeStroops`     | Upper bound on the restore fee; accepts a non-negative safe integer or decimal integer string. |
 | `maxSequenceRetries`       | Number of times a restore transaction is retried after a sequence-number failure. |
 | `archiveDetectionMethod`   | Method for detecting archived keys: `'simulation'` (default) or `'direct'`.    |
 | `archiveDetectionChunkSize` | Ledger keys per `getLedgerEntries` request during `'direct'` detection.       |

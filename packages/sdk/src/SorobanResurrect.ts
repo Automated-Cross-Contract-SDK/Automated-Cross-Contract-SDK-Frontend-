@@ -690,7 +690,7 @@ export class SorobanResurrect {
    * Set `dryRun: true` to simulate only; no wallet methods are called, no
    * transaction is submitted, and no history entry is created.
    *
-   * @param options - See {@link SubmitWithRestoreOptions}.
+   * @param options - See {@link SubmitWithRestoreRequestOptions}.
    * @returns {@link ResurrectResult} describing the outcome.
    *
    * @example
@@ -753,7 +753,7 @@ export class SorobanResurrect {
    * sequence-number races) and every returned result carries the same
    * `restoreTxHash`.
    *
-   * @param items - Array of `SubmitWithRestoreOptions`, one per transaction.
+   * @param items - Array of request options, one per transaction.
    * @returns Array of results in the same order as the input.
    */
   async submitBatchWithRestore(
