@@ -37,6 +37,7 @@ test('SorobanResurrectStore return shape', () => {
     Promise<ResurrectResult>
   >()
   expectTypeOf<SorobanResurrectStore['destroy']>().returns.toEqualTypeOf<void>()
+  expectTypeOf<SorobanResurrectStore['cancel']>().returns.toEqualTypeOf<void>()
 })
 
 test('batch submission types are pinned', () => {

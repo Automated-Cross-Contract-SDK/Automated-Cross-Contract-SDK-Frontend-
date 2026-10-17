@@ -19,6 +19,7 @@ export interface SorobanResurrectPluginOptions {
  * Vue plugin that constructs a single shared {@link SorobanResurrect} instance
  * and provides it to the whole app, so components can consume it with
  * {@link injectSorobanResurrect} without any manual `provide`/`inject` wiring.
+ * The SDK instance is disposed when the Vue app is unmounted.
  *
  * The standalone `useSorobanResurrect` composable is unaffected — use it when a
  * component needs its own instance or a reactive config.
@@ -51,6 +52,7 @@ export const SorobanResurrectPlugin = {
     }
     const instance = new SorobanResurrect(options.config)
     app.provide(SOROBAN_RESURRECT_KEY, instance)
+    app.onUnmount(() => instance.dispose())
   },
 }
 

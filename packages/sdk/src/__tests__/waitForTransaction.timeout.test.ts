@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { rpc } from '@stellar/stellar-sdk'
-import { waitForTransaction } from '../Restorer.js'
+import { waitForTransaction, waitForTransactionSSE } from '../Restorer.js'
 
 function makeMockServer(): rpc.Server {
   return {
@@ -15,7 +15,21 @@ describe('waitForTransaction — timeout and retry behavior', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    vi.unstubAllGlobals()
     vi.restoreAllMocks()
+  })
+
+  it('falls back to RPC polling when TextDecoder is unavailable', async () => {
+    const server = makeMockServer()
+    vi.mocked(server.getTransaction)
+      .mockResolvedValueOnce({ status: rpc.Api.GetTransactionStatus.NOT_FOUND } as never)
+      .mockResolvedValueOnce({ status: rpc.Api.GetTransactionStatus.SUCCESS } as never)
+    vi.stubGlobal('TextDecoder', undefined)
+
+    const result = await waitForTransactionSSE(server, 'hash', 1000, 'https://rpc.example')
+
+    expect(result.status).toBe(rpc.Api.GetTransactionStatus.SUCCESS)
+    expect(server.getTransaction).toHaveBeenCalledTimes(2)
   })
 
   describe('NOT_FOUND for extended period', () => {
@@ -56,13 +70,38 @@ describe('waitForTransaction — timeout and retry behavior', () => {
   })
 
   describe('RPC unavailable during polling', () => {
+    it('cancels an in-flight status request when its signal aborts', async () => {
+      const server = makeMockServer()
+      vi.mocked(server.getTransaction).mockReturnValue(new Promise(() => {}) as never)
+      const controller = new AbortController()
+
+      const promise = waitForTransaction(server, 'hash', 100, 5000, controller.signal)
+      controller.abort()
+
+      await expect(promise).rejects.toThrow('Operation cancelled')
+    })
+
+    it('clears the retry timer when polling is cancelled', async () => {
+      const server = makeMockServer()
+      vi.mocked(server.getTransaction).mockResolvedValue({
+        status: rpc.Api.GetTransactionStatus.NOT_FOUND,
+      } as never)
+      const controller = new AbortController()
+      const promise = waitForTransaction(server, 'hash', 1000, 5000, controller.signal)
+
+      await vi.advanceTimersByTimeAsync(0)
+      expect(vi.getTimerCount()).toBe(1)
+      controller.abort()
+
+      await expect(promise).rejects.toThrow('Operation cancelled')
+      expect(vi.getTimerCount()).toBe(0)
+    })
+
     it('propagates the error immediately when the RPC endpoint fails on the first poll', async () => {
       const server = makeMockServer()
       vi.mocked(server.getTransaction).mockRejectedValue(new Error('RPC unavailable'))
 
-      await expect(waitForTransaction(server, 'hash', 100, 5000)).rejects.toThrow(
-        'RPC unavailable',
-      )
+      await expect(waitForTransaction(server, 'hash', 100, 5000)).rejects.toThrow('RPC unavailable')
       expect(server.getTransaction).toHaveBeenCalledTimes(1)
     })
 
@@ -186,6 +225,42 @@ describe('waitForTransaction — timeout and retry behavior', () => {
       const assertion = expect(promise).rejects.toThrow('did not complete within 60000ms')
       await vi.runAllTimersAsync()
       await assertion
+    })
+  })
+
+  describe('AbortSignal cancellation', () => {
+    it('stops polling during a pending delay and clears its timer', async () => {
+      const server = makeMockServer()
+      vi.mocked(server.getTransaction).mockResolvedValue({
+        status: rpc.Api.GetTransactionStatus.NOT_FOUND,
+      } as never)
+      const controller = new AbortController()
+      const promise = waitForTransaction(server, 'hash', 1000, 60_000, {
+        signal: controller.signal,
+      })
+
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(server.getTransaction).toHaveBeenCalledTimes(1)
+      expect(vi.getTimerCount()).toBe(1)
+
+      controller.abort()
+      await expect(promise).rejects.toMatchObject({ name: 'AbortError' })
+
+      expect(server.getTransaction).toHaveBeenCalledTimes(1)
+      expect(vi.getTimerCount()).toBe(0)
+    })
+
+    it('does not start an RPC request when the signal was already aborted', async () => {
+      const server = makeMockServer()
+      const controller = new AbortController()
+      controller.abort()
+
+      await expect(
+        waitForTransaction(server, 'hash', 1000, 60_000, { signal: controller.signal }),
+      ).rejects.toMatchObject({ name: 'AbortError' })
+      expect(server.getTransaction).not.toHaveBeenCalled()
     })
   })
 })

@@ -14,7 +14,10 @@ import { getExpiringSoonEntries, type LedgerEntryTTLInfo } from './TTLHelpers.js
 import { calculateRestoreFee } from './feeCalculation.js'
 import { isErrorResponse } from './Archiver.js'
 import { DEFAULT_NETWORK_PASSPHRASE } from './constants.js'
-import { asXdrBase64, asTxHash } from './branded-types.js'
+import { asTxHash } from './branded-types.js'
+import { signAndVerifyTransaction } from './signedTransaction.js'
+import { configForWalletRestore } from './memoValidation.js'
+import { resolveRestoreMemo } from './Restorer.js'
 
 /** Options for {@link watchTTL}. */
 export interface TTLWatchOptions {
@@ -34,6 +37,31 @@ export interface TTLWatchOptions {
   onError?: (error: string) => void
 }
 
+/** Fee estimate shown to the application before the user is prompted to sign. */
+export interface TTLExtensionEstimate {
+  minResourceFee: number
+  multiplier: number
+  estimatedFee: string
+  keyCount: number
+  extendTo: number
+}
+
+/** Options for explicitly confirming and submitting a TTL extension. */
+export interface ExtendLedgerTTLOptions {
+  wallet: WalletAdapter
+  /** Minimum TTL in ledgers for every selected persistent entry. */
+  extendTo: number
+  /** Return false to abort before wallet signing or transaction submission. */
+  confirmFee: (estimate: TTLExtensionEstimate) => boolean | Promise<boolean>
+}
+
+/** Result of an explicit TTL-extension request. */
+export interface ExtendLedgerTTLResult {
+  status: 'declined' | 'submitted'
+  estimate: TTLExtensionEstimate
+  transactionHash?: string
+}
+
 /** Handle returned by {@link watchTTL}, used to stop polling. */
 export interface TTLWatchHandle {
   /** Stops the watch. Safe to call more than once. */
@@ -42,6 +70,148 @@ export interface TTLWatchHandle {
   readonly inFlight: boolean
   /** Epoch ms when the last poll cycle started, or `null` if none has run yet. */
   readonly lastTickAt: number | null
+}
+
+function isPersistentKey(key: xdr.LedgerKey): boolean {
+  switch (key.switch().name) {
+    case 'contractCode':
+      return true
+    case 'contractData':
+      return key.contractData().durability().name === 'persistent'
+    default:
+      return false
+  }
+}
+
+function buildTTLExtensionTransaction(
+  account: Account,
+  extendTo: number,
+  sorobanData: xdr.SorobanTransactionData,
+  fee: string,
+  networkPassphrase: string,
+): Transaction {
+  return new TransactionBuilder(account, { fee, networkPassphrase })
+    .addOperation(Operation.extendFootprintTtl({ extendTo }))
+    .setSorobanData(sorobanData)
+    .setTimeout(30)
+    .build()
+}
+
+/**
+ * Estimate, explicitly confirm, then submit a Soroban TTL extension. Only
+ * persistent contract-data and contract-code keys are accepted. The supplied
+ * confirmation callback runs before wallet signing so applications can show
+ * the exact estimated fee and abort without prompting the wallet.
+ */
+export async function extendLedgerTTL(
+  server: ISorobanRpcClient,
+  config: Required<SorobanResurrectConfig>,
+  keys: xdr.LedgerKey[],
+  options: ExtendLedgerTTLOptions,
+): Promise<ExtendLedgerTTLResult> {
+  if (keys.length === 0) throw new Error('extendLedgerTTL: at least one ledger key is required')
+  if (!Number.isInteger(options.extendTo) || options.extendTo <= 0) {
+    throw new Error('extendLedgerTTL: `extendTo` must be a positive integer')
+  }
+  if (keys.some((key) => !isPersistentKey(key))) {
+    throw new Error(
+      'extendLedgerTTL: only persistent contract data and contract code keys are supported',
+    )
+  }
+  if (!(await options.wallet.isConnected())) {
+    throw new Error('extendLedgerTTL: wallet is not connected')
+  }
+
+  const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
+  if (options.wallet.getNetwork) {
+    const walletNetwork = await options.wallet.getNetwork()
+    if (walletNetwork !== networkPassphrase) {
+      throw new Error(
+        `extendLedgerTTL: wallet network mismatch (wallet "${walletNetwork}", SDK "${networkPassphrase}")`,
+      )
+    }
+  }
+
+  const sourcePublicKey = await options.wallet.getPublicKey()
+  const account = await server.getAccount(sourcePublicKey)
+  const draft = buildTTLExtensionTransaction(
+    account,
+    options.extendTo,
+    new SorobanDataBuilder().setReadOnly(keys).build(),
+    '1000000',
+    networkPassphrase,
+  )
+  const simulation = await withPhaseTimeout(
+    server.simulateTransaction(draft),
+    config.simulationTimeoutMs,
+    'TTL extension fee simulation',
+  )
+  if (isErrorResponse(simulation)) {
+    throw new Error(`extendLedgerTTL: fee simulation failed: ${simulation.error}`)
+  }
+  if (!simulation._parsed || !simulation.transactionData || !simulation.minResourceFee) {
+    throw new Error('extendLedgerTTL: fee simulation returned an incomplete response')
+  }
+
+  const minResourceFee = Number.parseInt(simulation.minResourceFee, 10)
+  if (!Number.isSafeInteger(minResourceFee) || minResourceFee < 0) {
+    throw new Error('extendLedgerTTL: fee simulation returned an invalid minimum resource fee')
+  }
+  const estimatedFee = calculateRestoreFee(minResourceFee, config)
+  if (
+    config.maxRestoreFeeStroops !== undefined &&
+    BigInt(estimatedFee) > BigInt(config.maxRestoreFeeStroops)
+  ) {
+    throw new Error(
+      `extendLedgerTTL: estimated fee ${estimatedFee} exceeds configured maximum ${config.maxRestoreFeeStroops}`,
+    )
+  }
+
+  const estimate: TTLExtensionEstimate = {
+    minResourceFee,
+    multiplier: config.restoreFeeMultiplier,
+    estimatedFee,
+    keyCount: keys.length,
+    extendTo: options.extendTo,
+  }
+  if (!(await options.confirmFee(estimate))) {
+    return { status: 'declined', estimate }
+  }
+
+  const currentAccount = await server.getAccount(sourcePublicKey)
+  const transaction = buildTTLExtensionTransaction(
+    currentAccount,
+    options.extendTo,
+    simulation.transactionData.build(),
+    estimatedFee,
+    networkPassphrase,
+  )
+  const signedXdr = await withPhaseTimeout(
+    options.wallet.signTransaction(asXdrBase64(transaction.toXDR()), { networkPassphrase }),
+    config.walletSigningTimeoutMs,
+    'Wallet signing',
+  )
+  const signedTransaction = TransactionBuilder.fromXDR(signedXdr, networkPassphrase)
+  if (!(signedTransaction instanceof Transaction)) {
+    throw new Error('extendLedgerTTL: wallet returned an invalid signed transaction')
+  }
+
+  const sent = await withPhaseTimeout(
+    server.sendTransaction(signedTransaction),
+    config.originalSubmissionTimeoutMs,
+    'TTL extension submission',
+  )
+  const hash = asTxHash(sent.hash)
+  const status = await withPhaseTimeout(
+    waitForTerminalStatus(server, hash, config.pollIntervalMs, config.restoreConfirmationTimeoutMs),
+    config.restoreConfirmationTimeoutMs,
+    'TTL extension confirmation',
+  )
+  if (status.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
+    throw new Error('extendLedgerTTL: extension transaction failed to confirm')
+  }
+
+  return { status: 'submitted', estimate, transactionHash: hash }
 }
 
 /**
@@ -104,6 +274,7 @@ async function buildRestoreTxForKeys(
     .addOperation(Operation.restoreFootprint({}))
     .setSorobanData(draftData)
     .setTimeout(30)
+    .setLedgerbounds(sim.latestLedger, sim.latestLedger + RESTORE_TX_LEDGER_BOUNDS_WINDOW)
     .build()
 
   const sim = await server.simulateTransaction(draftTx)
@@ -113,14 +284,17 @@ async function buildRestoreTxForKeys(
 
   const restoreFee = calculateRestoreFee(parseInt(sim.minResourceFee, 10), config)
 
-  return new TransactionBuilder(new Account(sourcePublicKey, sequence), {
+  const builder = new TransactionBuilder(new Account(sourcePublicKey, sequence), {
     fee: restoreFee,
     networkPassphrase,
   })
     .addOperation(Operation.restoreFootprint({}))
     .setSorobanData(sim.transactionData.build())
     .setTimeout(30)
-    .build()
+
+  const memo = resolveRestoreMemo(undefined, config)
+  if (memo) builder.addMemo(memo)
+  return builder.build()
 }
 
 /**
@@ -155,7 +329,7 @@ export function watchTTL(
   opts: TTLWatchOptions = {},
 ): TTLWatchHandle {
   const intervalMs = opts.intervalMs ?? config.ttlWatchIntervalMs
-  const thresholdLedgers = opts.thresholdLedgers ?? config.ttlWatchThreshold
+  const thresholdLedgers = opts.thresholdLedgers ?? config.ttlWatchThresholdLedgers
   const autoExtend = opts.autoExtend ?? config.ttlWatchAutoExtend
 
   if (autoExtend && !opts.wallet) {
@@ -182,6 +356,7 @@ export function watchTTL(
         keys,
         thresholdLedgers,
       )
+      if (stopped) return
       if (expiring.length === 0) return
 
       emitter.emit('ttlLow', expiring)
@@ -193,16 +368,24 @@ export function watchTTL(
         xdr.LedgerKey.fromXDR(entry.keyBase64, 'base64'),
       )
       const publicKey = await wallet.getPublicKey()
+      if (stopped) return
 
-      const restoreTx = await buildRestoreTxForKeys(server, publicKey, keysToRestore, config)
+      const restoreConfig = configForWalletRestore(config, wallet)
+      const restoreTx = await buildRestoreTxForKeys(
+        server,
+        publicKey,
+        keysToRestore,
+        restoreConfig,
+      )
       const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
-      const signedXdr = await wallet.signTransaction(asXdrBase64(restoreTx.toXDR()), {
+      const signedTx = await signAndVerifyTransaction(
+        restoreTx,
+        wallet,
         networkPassphrase,
-      })
-      const signedTx = TransactionBuilder.fromXDR(signedXdr, networkPassphrase)
-      if (!(signedTx instanceof Transaction)) {
-        throw new Error('Failed to parse signed TTL auto-extend transaction')
-      }
+        config,
+      )
+
+      await assertRestoreTransactionFresh(server, signedTx, restoreTx)
 
       const sent = await server.sendTransaction(signedTx)
       const hash = asTxHash(sent.hash)
@@ -212,6 +395,7 @@ export function watchTTL(
         config.pollIntervalMs,
         config.pollTimeoutMs,
       )
+      if (stopped) return
 
       if (status.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
         throw new Error('TTL auto-extend restore transaction failed to confirm')

@@ -1,6 +1,9 @@
 {
   "name": "@soroban-resurrect/react-hook",
   "version": "0.1.0",
+  "engines": {
+    "node": ">=20"
+  },
   "keywords": [
     "soroban",
     "stellar",
@@ -81,7 +84,7 @@
     "jsdom": "^30.1.1",
     "react": "^18.3.0",
     "tsup": "^8.5.1",
-    "typescript": "^7.0.2",
+    "typescript": "^5.9.2",
     "vitest": "^5.0.1"
   }
 }

@@ -26,6 +26,6 @@
     "@react-native/babel-preset": "0.87.1",
     "@react-native/typescript-config": "0.87.1",
     "@types/react": "^18.3.0",
-    "typescript": "^7.0.2"
+    "typescript": "^5.9.2"
   }
 }

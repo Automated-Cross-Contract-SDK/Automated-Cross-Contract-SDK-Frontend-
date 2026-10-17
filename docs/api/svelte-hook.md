@@ -21,12 +21,20 @@ recreated whenever the config changes.
     submitBatch,
     estimate,
     reset,
+    cancel,
     destroy,
   } = createSorobanResurrect(config)
 
   onDestroy(destroy)
 </script>
 ```
+
+`cancel()` aborts active local submissions while leaving the store usable.
+`destroy()` is idempotent: it aborts active submissions, unsubscribes from the
+config and SDK event/state streams, and calls `resurrect.dispose()` to stop
+SDK-owned TTL watches. After destruction, methods that need the SDK throw
+`SorobanResurrect store has been destroyed.` Svelte's normal component teardown
+continues to release subscribers to the readable stores.
 
 ## Returned stores
 
@@ -77,6 +85,11 @@ so a UI can render per-item progress reactively:
   <li>{$item.status}</li>
 {/each}
 ```
+
+A resolved failed result (including a wallet cancellation) sets that item's
+status to `error`, preserves the result on the item and in `lastResult`, and
+does not reject `done`. `destroy()` removes both the config and SDK-state
+subscriptions; call it from Svelte's `onDestroy()`.
 
 ### `estimate(transaction)`
 

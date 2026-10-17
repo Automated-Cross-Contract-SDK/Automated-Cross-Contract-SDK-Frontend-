@@ -17,30 +17,20 @@ interface SorobanResurrectConfig {
   networkPassphrase?: string // default: resolved from rpcUrl, else Testnet
   pollIntervalMs?: number // default: 1000
   pollTimeoutMs?: number // default: 60000
+  simulationTimeoutMs?: number // default: rpcTimeoutMs
+  walletSigningTimeoutMs?: number // default: 120000
+  restoreConfirmationTimeoutMs?: number // default: pollTimeoutMs
+  originalSubmissionTimeoutMs?: number // default: rpcTimeoutMs
   restoreFeeMultiplier?: number // default: 3 — see "Choosing restoreFeeMultiplier" below
   maxRestoreFeeStroops?: number | string // non-negative safe integer or decimal integer string
   maxSequenceRetries?: number // default: 3 — retries when a restore tx fails on sequence number
   archiveDetectionMethod?: 'simulation' | 'direct' // default: 'simulation'
   archiveDetectionChunkSize?: number // default: 50
   archiveDetectionConcurrency?: number // default: 4
-  archiveDetectionFallback?: boolean
-  rpcTimeoutMs?: number
-  rpcRetryCount?: number
-  rpcRetryBackoffMs?: number
-  rpcCircuitBreakerThreshold?: number
-  rpcCircuitBreakerCooldownMs?: number
-  ttlWatchIntervalMs?: number
-  ttlWatchThreshold?: number
-  ttlWatchAutoExtend?: boolean
-  useSSE?: boolean
-  enableSimulationCache?: boolean
-  simulationCacheTtlMs?: number
-  simulationCacheMaxSize?: number
+  maxBatchSize?: number // default: 100
   restoreTxMemo?: Memo
-  restoreTxMemoText?: string
-  maxRestoreTxSizeBytes?: number
-  restoreSizeWarnRatio?: number
-  throwOnRestoreSizeLimit?: boolean
+  restoreTxMemoText?: string // at most 28 UTF-8 bytes
+  logger?: Logger
 }
 ```
 
@@ -50,88 +40,201 @@ interface SorobanResurrectConfig {
 | `networkPassphrase`        | Network passphrase (defaults to Testnet).                                      |
 | `pollIntervalMs`           | Polling interval in ms when waiting for transaction confirmation.              |
 | `pollTimeoutMs`             | Timeout in ms when waiting for transaction confirmation.                       |
+| `simulationTimeoutMs`      | Maximum time in ms for simulation; defaults to `rpcTimeoutMs` (30 seconds unless configured). |
+| `walletSigningTimeoutMs`   | Maximum time in ms for each wallet signature; defaults to 120 seconds.         |
+| `restoreConfirmationTimeoutMs` | Maximum time in ms to wait for restore confirmation; defaults to `pollTimeoutMs`. |
+| `originalSubmissionTimeoutMs` | Maximum time in ms to submit the original transaction; defaults to `rpcTimeoutMs` (30 seconds unless configured). |
 | `restoreFeeMultiplier`     | Multiplier applied to `minResourceFee` when building a restore transaction.    |
 | `maxRestoreFeeStroops`     | Upper bound on the restore fee; accepts a non-negative safe integer or decimal integer string. |
 | `maxSequenceRetries`       | Number of times a restore transaction is retried after a sequence-number failure. |
 | `archiveDetectionMethod`   | Method for detecting archived keys: `'simulation'` (default) or `'direct'`.    |
 | `archiveDetectionChunkSize` | Ledger keys per `getLedgerEntries` request during `'direct'` detection.       |
 | `archiveDetectionConcurrency` | Chunk requests kept in flight at once during `'direct'` detection.          |
-| `archiveDetectionFallback` | Whether unclassifiable simulation responses may fall back to direct detection. Only applies when `archiveDetectionMethod` is `'simulation'`. |
-| `rpcTimeoutMs`             | Timeout for an individual RPC request; must be finite and greater than zero. |
-| `rpcRetryCount`             | Retry count; must be a non-negative integer. |
-| `rpcRetryBackoffMs`         | Base delay between retries; must be a non-negative integer. |
-| `rpcCircuitBreakerThreshold` | Consecutive failures before opening the circuit; must be a positive integer. |
-| `rpcCircuitBreakerCooldownMs` | Circuit-breaker cooldown; must be a non-negative integer. |
-| `ttlWatchIntervalMs`        | TTL watcher interval; must be finite and greater than zero. |
-| `ttlWatchThreshold`          | TTL warning threshold in ledgers; must be a non-negative integer. |
-| `ttlWatchAutoExtend`         | Enables automatic extension by TTL watchers. |
-| `useSSE`                     | Uses the RPC event stream when waiting for transaction confirmation. |
-| `enableSimulationCache`      | Enables simulation response caching. |
-| `simulationCacheTtlMs`       | Cache lifetime; must be finite and greater than zero. |
-| `simulationCacheMaxSize`     | Cache capacity; must be a positive safe integer. |
-| `restoreTxMemo`              | Explicit memo attached to restore transactions. |
-| `restoreTxMemoText`          | Text memo fallback for restore transactions. |
-| `maxRestoreTxSizeBytes`      | Restore-transaction size limit in bytes; must be a positive safe integer. |
-| `restoreSizeWarnRatio`       | Fraction of the size limit that triggers a warning; must be greater than `0` and at most `1`. |
-| `throwOnRestoreSizeLimit`    | Throws rather than warning when a restore transaction exceeds the size limit. |
+| `maxBatchSize` | Maximum items accepted by `detectArchivedKeysBatch`, `submitBatchWithRestore`, and `restoreKeys`. Oversized batches fail with `BATCH_SIZE_EXCEEDED`. |
+| `restoreTxMemo` | Optional Stellar memo attached to restore transactions. Only text and none memo types are accepted; text is limited to 28 UTF-8 bytes. |
+| `restoreTxMemoText` | Convenience text memo for restore transactions, limited to 28 UTF-8 bytes (not 28 characters). May also be overridden per `submitWithRestore` call. |
+| `logger` | Optional logger. Hardware-signing warnings are sent through its `warn` method. |
 
-The constructor validates URL protocols (`http:` or `https:`), numeric ranges,
-boolean and string fields, and the network passphrase before initializing the
-RPC client. Invalid settings throw an error naming the field, for example
-`Invalid config.rpcTimeoutMs`. Fee multipliers must be finite and at least `1`;
-fee caps must be non-negative safe integers or decimal integer strings. The
-`archiveDetectionFallback: true` is invalid with
-`archiveDetectionMethod: 'direct'` because the fallback only applies to
-simulation-based detection.
+The memo limit is measured after UTF-8 encoding. For example, fourteen `é`
+characters use 28 bytes and fit, while fifteen use 30 bytes and are rejected
+during configuration resolution, before a wallet approval is requested.
+`submitBatchWithRestore` uses one shared restore transaction; when that
+transaction is needed, all per-item memo overrides must resolve to the same
+memo.
 
-### Reading effective settings
+## `SubmitWithRestoreOptions`
 
-Use `getEffectiveConfig()` when an application needs validated settings and
-resolved defaults without constructing an SDK instance or RPC client. It
-returns a frozen, fresh settings snapshot and excludes runtime dependencies
-such as `rpcClient` and the simulation cache.
+`submitWithRestore(options)` accepts per-request recovery controls. Retry is
+**disabled by default**; opt in only for operations where repeating an RPC call
+is acceptable:
 
-```typescript
-import { getEffectiveConfig } from '@soroban-resurrect/sdk'
-
-const settings = getEffectiveConfig({
-  rpcUrl: 'https://soroban-testnet.stellar.org',
-})
-
-console.log(settings.pollIntervalMs) // 1000
-console.log(settings.restoreFeeMultiplier) // 3
-```
-
-The helper applies the same validation as `new SorobanResurrect(config)` and
-throws the same field-specific errors for invalid values.
-
-## Request-specific workflow configuration
-
-`SorobanResurrect.config` is a frozen snapshot. To vary supported restore
-settings for one transaction, pass `configOverrides` in the request; this does
-not mutate the instance configuration.
-
-```typescript
-const result = await sdk.submitWithRestore({
+```ts
+const result = await sr.submitWithRestore({
   transaction,
   wallet,
-  configOverrides: {
-    restoreFeeMultiplier: 5,
-    maxRestoreFeeStroops: '2500000',
-    pollTimeoutMs: 90_000,
-    maxSequenceRetries: 1,
+  retry: {
+    maxRetries: 3, // retries after the first attempt
+    baseDelayMs: 250,
+    maxDelayMs: 5_000,
   },
 })
 ```
 
-The supported fields are `pollIntervalMs`, `pollTimeoutMs`,
-`restoreFeeMultiplier`, `maxRestoreFeeStroops`, `maxSequenceRetries`,
-`restoreTxMemo`, and `restoreTxMemoText`. Overrides are validated before a
-workflow is recorded or executed. Existing top-level `restoreTxMemo` and
-`restoreTxMemoText` request options remain supported and take precedence over
-the same fields in `configOverrides`. For `submitBatchWithRestore`, any
-per-request override switches the batch to sequential per-transaction
-workflows so each request keeps its own fee and timeout settings.
+The SDK retries transient transport errors, HTTP 408/425/429/5xx responses,
+known temporary network failures, and Soroban's explicit `TRY_AGAIN_LATER`
+submission response. Backoff is exponential with jitter and is capped by
+`maxDelayMs`. The retry wrapper applies only to RPC calls: it never repeats
+wallet prompts, wallet rejection, invalid transaction errors, simulation
+failures, on-chain failures, or deterministic contract errors. Because a
+transport failure during submission can occur after the server accepted the
+transaction, retries resend the same signed transaction bytes rather than
+rebuilding or re-signing it.
+
+| Option | Default when `retry` is supplied | Meaning |
+| --- | ---: | --- |
+| `maxRetries` | `3` | Number of additional RPC attempts; `0` disables retries for this request. |
+| `baseDelayMs` | `250` | Initial exponential-backoff delay. |
+| `maxDelayMs` | `5000` | Maximum delay between attempts. |
+
+### Lifecycle events
+
+`SubmitWithRestoreOptions.onLifecycleEvent` receives a discriminated
+`SubmitLifecycleEvent` for each phase. The identical events are available to
+instance subscribers through `sr.on('workflowLifecycle', listener)`:
+
+```ts
+const unsubscribe = sr.on('workflowLifecycle', (event) => {
+  switch (event.phase) {
+    case 'simulation_started':
+    case 'restore_preparation_started':
+    case 'restore_submission_started':
+    case 'restore_submitted':
+    case 'restore_confirmation_started':
+    case 'restore_confirmed':
+    case 'original_submission_started':
+    case 'original_submitted':
+    case 'original_confirmation_started':
+    case 'original_confirmed':
+    case 'completed':
+    case 'failed':
+      updateProgress(event)
+      break
+  }
+})
+```
+
+Every event may include the supplied `requestId`; transaction hashes, detected
+keys, terminal results, and errors are included when applicable. Call
+`unsubscribe()` when the listener is no longer needed. Existing stage-specific
+callbacks and events remain available.
+
+### Logical request deduplication
+
+Pass a stable, non-empty `requestId` to coalesce concurrent calls that represent
+the same logical operation:
+
+```ts
+const options = { transaction, wallet, requestId: `withdrawal:${userActionId}` }
+const [first, duplicate] = await Promise.all([
+  sr.submitWithRestore(options),
+  sr.submitWithRestore(options),
+])
+// Both callers receive the same result; only one restore/submission flow runs.
+```
+
+Deduplication is scoped to one SDK instance and only lasts while the request is
+in flight. A later call using the same id starts a new attempt. Different ids
+remain independent and may run concurrently. A coalesced caller receives the
+first call's result; callbacks are invoked only for the call that started the
+flow. Calls without `requestId` retain the prior, non-deduplicated behavior.
+An empty or whitespace-only id returns a validation error without starting a
+workflow.
+
+### Confirmation policy and timeout
+
+The default, `confirmationPolicy: 'wait-for-finality'`, waits until Soroban RPC
+reports a terminal `SUCCESS` or `FAILED` status for the original transaction.
+Successful results include `confirmationStatus: 'confirmed'`. This waits for
+the ledger outcome rather than merely the RPC submission acknowledgment; it can
+add polling latency and remains subject to the configured timeout.
+
+Set `confirmationPolicy: 'return-on-submission'` to return after the RPC accepts
+the original transaction. This yields `success: true` with
+`confirmationStatus: 'submitted'`; it does **not** establish whether the
+transaction later succeeds or fails. A required restore transaction is always
+confirmed before the original transaction is rebuilt and submitted.
+
+`confirmationTimeoutMs` overrides the configured `pollTimeoutMs` for restore
+and original transaction confirmation. On timeout the default behavior returns
+`success: false`, `errorCode: 'CONFIRMATION_TIMEOUT'`, and the submitted hash
+without claiming an on-chain failure. Set
+`confirmationTimeoutBehavior: 'return-pending'` to additionally report
+`confirmationStatus: 'pending'`:
+
+```ts
+const result = await sr.submitWithRestore({
+  transaction,
+  wallet,
+  confirmationTimeoutMs: 90_000,
+  confirmationTimeoutBehavior: 'return-pending',
+})
+
+if (result.confirmationStatus === 'pending') {
+  // The outcome is unknown; inspect the hash or resume polling.
+  console.log(result.originalTxHash ?? result.restoreTxHash)
+}
+```
+
+When RPC reports a terminal `FAILED` status, the result instead uses
+`ORIGINAL_TX_FAILED` (or `RESTORE_TX_FAILED` for a restore failure) and includes
+decoded `onchainError` information when available.
+
+Restore workflows now wait for the original transaction's terminal status
+before reporting success, correcting the former early-return behavior for that
+path. Applications that relied on the earlier return can opt into
+`return-on-submission`.
+
+These phase timeouts are independent. Existing callers can omit them to use
+their documented defaults; set one or more explicitly when the application
+needs tighter bounds for a particular step. A timeout stops waiting for the
+operation but does not cancel a wallet prompt or RPC request already in flight.
+
+## `ArchivedLedgerEntry`
+
+An archived ledger key returned by detection and restore helpers. The public
+representation contains its XDR ledger key, the ledger-entry classification,
+and TTL metadata when the lookup provided it; it never contains wallet signing
+material or other secrets.
+
+```typescript
+interface ArchivedLedgerEntry {
+  key: xdr.LedgerKey
+  keyBase64: XdrBase64
+  entryType?: 'contractData' | 'contractCode' | 'other'
+  liveUntilLedger?: number
+  currentLedger?: number
+  ttlLedgers?: number
+}
+```
+
+The SDK populates `entryType` for detected keys. TTL metadata is optional
+because simulation-only detection may not perform a separate ledger query.
+
+## `LedgerEntryTTLInfo`
+
+One result from `queryLedgerTTL`, `queryLedgerEntryTTL`, or a contract scan.
+
+| Field | Meaning |
+| --- | --- |
+| `status` | `'live'` when the ledger returned a TTL, otherwise `'unavailable'`. |
+| `unavailableReason` | `'missing'`, `'expired'`, `'unsupported'`, `'rpc_error'`, or `'ttl_unavailable'`. |
+| `isArchived` | `true` only for confirmed missing or expired entries; RPC failures and unsupported keys are never treated as archived. |
+| `liveUntilLedger` / `ttlLedgers` | Expiration sequence and remaining ledgers when available. |
+| `entryType` | `'contractData'`, `'contractCode'`, or `'other'`. |
+
+Chunk failures are also returned in `failedChunks` and summarized by `hasErrors`.
+This lets callers distinguish a confirmed missing key from an RPC failure without
+guessing from a zero TTL.
 
 ## `SorobanResurrectNetwork`
 
@@ -178,28 +281,33 @@ Payload emitted on the `networkChanged` event after a successful
 
 ```typescript
 interface NetworkChangedEvent {
-  previous: SorobanResurrectNetwork
-  current: SorobanResurrectNetwork
+  rpcUrl: string
+  networkPassphrase: string
 }
 ```
 
-| Field      | Description                                              |
-| ---------- | -------------------------------------------------------- |
-| `previous` | The network the instance was on before the switch.       |
-| `current`  | The network the instance is now on.                      |
+| Field               | Description                                      |
+| ------------------- | ------------------------------------------------ |
+| `rpcUrl`             | The RPC endpoint active after the switch.         |
+| `networkPassphrase` | The passphrase active after the switch.           |
 
 ### What survives a switch
 
-`switchNetwork()` swaps the RPC endpoint and passphrase in place. It does **not**
-recreate the instance, so anything bound to the instance keeps working:
+`switchNetwork()` swaps the RPC endpoint and passphrase in place. A changed
+`rpcUrl` creates a fresh RPC client unless a replacement `rpcClient` is passed.
+Calls made while any SDK operation or TTL watch cycle is in progress are
+rejected; finish or cancel the operation before switching. The SDK retains the instance, event
+listeners, and historical transaction records, while resetting network-specific
+state and stopping active TTL watchers:
 
 | Concern            | After `switchNetwork()`                                                                 |
 | ------------------ | --------------------------------------------------------------------------------------- |
-| Event listeners    | **Preserved.** `on('networkChanged', …)` and other subscriptions stay attached.          |
-| Restore history    | **Preserved.** Previously recorded restore results remain readable.                      |
-| TTL watchers       | **Preserved.** Active watchers keep running and now poll the new network.                |
-| Archive cache      | **Reset.** Cached archive-detection results are cleared — ledger keys differ per network.|
-| In-flight workflow | **Not migrated.** A submit/restore already running finishes against the old network.     |
+| Event listeners    | **Preserved.** Subscriptions remain attached to the same SDK instance.                   |
+| Restore history    | **Preserved.** Historical records remain readable; they are not replayed on switch.      |
+| TTL watchers       | **Stopped.** Start a new watch after switching to monitor the new network.               |
+| Archive cache      | **Reset.** Simulation and latest-ledger caches are cleared for the new network.          |
+| Workflow state     | **Reset.** State returns to `idle`, with prior archived keys and errors cleared.          |
+| In-flight operation | **Switch rejected.** The active operation must settle before the network can change.   |
 
 ## `WalletAdapter`
 
@@ -368,11 +476,46 @@ const myWallet: WalletAdapter = {
 }
 ```
 
+## Stable ledger-key serialization
+
+Use `serializeLedgerKey` to obtain a deterministic base64 XDR identity for a
+ledger key. The result can be used as a cache key or included in diagnostics;
+it is XDR, not JSON, and should be decoded with the Stellar SDK when needed.
+
+```typescript
+import { xdr } from '@stellar/stellar-sdk'
+import { serializeLedgerKey } from '@soroban-resurrect/sdk'
+
+const cacheKey = serializeLedgerKey(ledgerKey)
+const restoredKey = xdr.LedgerKey.fromXDR(cacheKey, 'base64')
+```
+
+The serializer accepts any Stellar `LedgerKey` supported by the SDK, including
+`contractData` and `contractCode`. The encoded value is stable for that key
+under the SDK's XDR format; applications persisting it across Stellar SDK or
+protocol upgrades should retain that compatibility consideration.
+
 ## Contract and account scanning
 
 These APIs answer "what in my contract is about to expire?" **without submitting a
 transaction**. They read ledger entries directly, so they are safe to call on page
 load, in a background poll, or before you decide whether a restore is needed.
+
+### Contract code and contract data TTLs
+
+Soroban tracks a contract's Wasm code (`contractCode`) and its instance and
+storage (`contractData`) as separate ledger entries. Their TTLs are independent:
+restoring or extending one entry does not refresh the TTL of another. A contract
+can therefore have live storage while its code is archived, or live code while a
+data entry is archived.
+
+The SDK TTL helpers accept both key types and report each key's own
+`entryType`, `liveUntilLedger`, and `ttlLedgers`. To monitor both sides of a
+contract, include both its code key and the relevant contract-data keys in the
+same query. Contract-code entries are included in a contract scan by default
+when the contract instance can be read; contract storage keys must still be
+provided explicitly because Soroban does not expose a storage-key enumeration
+API.
 
 > **Important limitation — contract storage keys cannot be enumerated.**
 > Soroban does not expose a way to list the storage keys a contract holds. The
@@ -525,3 +668,8 @@ const account = await getExpiringEntriesForAccount(accountId, {
 Use the scan functions to build a dashboard or a pre-flight check. Use
 `detectArchivedKeys` when you have a specific transaction in hand and want to know
 whether its footprint touches archived entries.
+
+Detected archived-key arrays are normalized by ascending serialized ledger-key
+XDR. Their order is therefore stable even when footprint or RPC response ordering
+changes; callers can use `serializeLedgerKey` for the same identity format in
+caches and diagnostics.

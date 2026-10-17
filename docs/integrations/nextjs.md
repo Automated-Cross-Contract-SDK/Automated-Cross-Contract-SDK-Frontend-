@@ -10,7 +10,11 @@ Soroban-Resurrect has two halves with different runtime needs:
   client code) as before.
 
 The React provider and the hooks always belong on the client; only the
-read-only SDK calls can move server-side.
+read-only SDK calls can move server-side. A Client Component can still be
+rendered on the server to produce HTML, so do not read `window`, `localStorage`,
+or an injected wallet while a module is imported or a component is rendered.
+The React provider creates its SDK instance after the client commits. Resolve
+wallet globals from an event handler (as in the example) or a client effect.
 
 ## Setup
 
@@ -94,12 +98,24 @@ export function RestoreButton({ needsRestore }: { needsRestore: boolean }) {
   const { submitWithRestore, state, isProcessing } = useSorobanResurrectContext()
 
   return (
-    <button disabled={isProcessing} onClick={() => submitWithRestore(tx, wallet)}>
+    <button
+      disabled={isProcessing}
+      onClick={async () => {
+        const wallet = getWalletFromBrowser()
+        if (!wallet) return
+        await submitWithRestore(tx, wallet)
+      }}
+    >
       {isProcessing ? state.message : needsRestore ? 'Restore & Withdraw' : 'Withdraw'}
     </button>
   )
 }
 ```
+
+`getWalletFromBrowser()` should only access the injected wallet inside this
+client-side event handler and should return `null` when no wallet is available.
+Keep any wallet-specific imports in the client module; do not pass wallet
+objects or secrets through Server Component props.
 
 ## Notes
 

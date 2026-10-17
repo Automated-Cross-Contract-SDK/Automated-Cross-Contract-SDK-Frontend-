@@ -3,7 +3,7 @@
 Soroban ledger entries have a time-to-live (TTL). When an entry's TTL drops to
 zero the entry is archived and any transaction that touches it must restore it
 first. Instead of reacting to archives after the fact, you can watch an entry's
-TTL and extend it *before* it expires.
+TTL and extend it _before_ it expires.
 
 The SDK exposes this through `watchTTL`, which polls the ledger for a set of
 keys and, optionally, automatically extends them when they fall below a
@@ -27,6 +27,40 @@ const keys = extractFootprintFromSuccess(sim)
 
 If you already know the contract data keys you want to protect, construct them
 directly with `xdr.LedgerKey.contractData(...)` and pass them in.
+
+## Query TTL and lifecycle status
+
+Use `queryLedgerTTL` to get a snapshot with a stable status for each requested
+key. The default `warningWindowLedgers` is 100; keys with a positive TTL at or
+below that window are `near-expiry`. Override the window per query:
+
+```typescript
+const result = await sr.queryLedgerTTL(keys, { warningWindowLedgers: 17_280 })
+
+for (const entry of result.entries) {
+  switch (entry.status) {
+    case 'healthy':
+      break
+    case 'near-expiry':
+      showWarning(`${entry.ttlLedgers} ledgers remain`)
+      break
+    case 'archived':
+      showRestoreAction(entry.keyBase64)
+      break
+    case 'unknown':
+      // The RPC request failed or returned incomplete TTL data; retry rather
+      // than treating the key as archived.
+      break
+  }
+}
+```
+
+`result.hasErrors` and `result.failedChunks` describe failed ledger-entry RPC
+requests. Entries in those chunks have `status: 'unknown'` and are not returned
+by `getExpiringSoonEntries`, so a transient RPC failure cannot trigger an
+unnecessary restore. Missing entries from a successful response are reported
+as `archived`. Existing callers can continue using `isArchived`; it is false
+for both `healthy`, `near-expiry`, and `unknown` entries.
 
 ## Choosing `thresholdLedgers`
 
@@ -91,11 +125,11 @@ const handle = sr.watchTTL({
 
 `onEvent` receives a discriminated union:
 
-| `event.type`   | Fields                                   | Meaning                                              |
-| -------------- | ---------------------------------------- | ---------------------------------------------------- |
-| `ttlLow`       | `key`, `remainingLedgers`                | A watched key dropped below `thresholdLedgers`.      |
-| `ttlExtended`  | `key`, `remainingLedgers`                | A watched key's TTL increased (observed or applied). |
-| `error`        | `key?`, `error`                          | A poll or extend attempt failed.                     |
+| `event.type`  | Fields                    | Meaning                                              |
+| ------------- | ------------------------- | ---------------------------------------------------- |
+| `ttlLow`      | `key`, `remainingLedgers` | A watched key dropped below `thresholdLedgers`.      |
+| `ttlExtended` | `key`, `remainingLedgers` | A watched key's TTL increased (observed or applied). |
+| `error`       | `key?`, `error`           | A poll or extend attempt failed.                     |
 
 ## Interval and threshold defaults
 
@@ -105,8 +139,8 @@ below **1000 ledgers** (`thresholdLedgers`). Override either per call:
 ```typescript
 const handle = sr.watchTTL({
   keys,
-  intervalMs: 10_000,      // poll every 10s
-  thresholdLedgers: 5000,  // extend earlier
+  intervalMs: 10_000, // poll every 10s
+  thresholdLedgers: 5000, // extend earlier
   autoExtend: true,
   sourcePublicKey: keypair.publicKey(),
   signTransaction: async (tx) => {
@@ -115,6 +149,35 @@ const handle = sr.watchTTL({
   },
 })
 ```
+
+## Explicitly extend selected entries
+
+For an on-demand TTL extension, use `extendLedgerTTL`. It accepts only
+persistent contract-data and contract-code keys, simulates an
+`extendFootprintTtl` transaction, and passes the fee estimate to your
+confirmation callback **before** prompting the wallet. Returning `false`
+aborts without signing or submitting.
+
+```typescript
+const result = await sr.extendLedgerTTL(keys, {
+  wallet,
+  extendTo: 200_000, // minimum total TTL in ledgers, not an increment
+  confirmFee: async ({ keyCount, extendTo, estimatedFee }) =>
+    confirm({
+      title: 'Extend contract state',
+      message: `Extend ${keyCount} entries to ${extendTo} ledgers for ${estimatedFee} stroops?`,
+    }),
+})
+
+if (result.status === 'submitted') {
+  console.log('Extension transaction:', result.transactionHash)
+}
+```
+
+After the application confirms the estimate, the wallet is asked to sign the
+transaction. Temporary contract data and non-contract ledger keys are rejected.
+Use `queryLedgerTTL` first when you need to inspect current TTLs or exclude keys
+that are already missing.
 
 ## Stopping the watcher
 

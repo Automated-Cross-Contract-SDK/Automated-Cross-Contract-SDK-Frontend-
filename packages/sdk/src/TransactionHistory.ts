@@ -61,6 +61,16 @@ export interface SerializedHistoryEntry {
   lastAttemptAt: number
 }
 
+/** Redacted history form that omits transaction XDR and result details. */
+export interface MinimalHistoryEntry {
+  id: string
+  timestamp: number
+  status: TransactionAttemptStatus
+  attemptCount: number
+  lastAttemptAt: number
+  transactionHash: string
+}
+
 /** Default cap on retained history entries (see {@link TransactionHistory}). */
 export const DEFAULT_MAX_HISTORY_ENTRIES = 500
 

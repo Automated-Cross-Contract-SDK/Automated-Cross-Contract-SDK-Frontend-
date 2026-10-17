@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { Networks, Keypair, TransactionBuilder, Account, Operation, Transaction } from '@stellar/stellar-sdk'
+import {
+  Networks,
+  Keypair,
+  TransactionBuilder,
+  Account,
+  Operation,
+  Transaction,
+} from '@stellar/stellar-sdk'
 import {
   LedgerWalletAdapter,
   TrezorWalletAdapter,
@@ -18,7 +25,9 @@ import type { LedgerAdapterConfig, TrezorAdapterConfig } from '../types.js'
 let _mockStrAppInstance: ReturnType<typeof buildStrAppMock> | null = null
 
 vi.mock('@ledgerhq/hw-app-str', () => ({
-  default: vi.fn().mockImplementation(() => _mockStrAppInstance),
+  default: vi.fn(function () {
+    return _mockStrAppInstance
+  }),
 }))
 
 // ---------------------------------------------------------------------------
@@ -122,6 +131,15 @@ describe('LedgerWalletAdapter', () => {
       expect(adapter.type).toBe('ledger')
     })
 
+    it('declares the capabilities supported by the Ledger Stellar app', () => {
+      const adapter = new LedgerWalletAdapter(config)
+      expect(adapter.capabilities).toEqual({
+        signAuthEntry: false,
+        feeBump: true,
+        hardware: true,
+      })
+    })
+
     it('defaults accountIndex to 0', () => {
       const adapter = new LedgerWalletAdapter()
       expect(adapter.type).toBe('ledger')
@@ -136,9 +154,7 @@ describe('LedgerWalletAdapter', () => {
   describe('connect()', () => {
     it('throws when no transport is provided', async () => {
       const adapter = new LedgerWalletAdapter({ accountIndex: 0 })
-      await expect(adapter.connect()).rejects.toThrow(
-        'LedgerWalletAdapter: no transport provided',
-      )
+      await expect(adapter.connect()).rejects.toThrow('LedgerWalletAdapter: no transport provided')
     })
 
     it('marks the adapter as connected after successful connect()', async () => {
@@ -186,9 +202,7 @@ describe('LedgerWalletAdapter', () => {
   describe('getPublicKey()', () => {
     it('throws when not connected', async () => {
       const adapter = new LedgerWalletAdapter(config)
-      await expect(adapter.getPublicKey()).rejects.toThrow(
-        'LedgerWalletAdapter: not connected',
-      )
+      await expect(adapter.getPublicKey()).rejects.toThrow('LedgerWalletAdapter: not connected')
     })
 
     it('returns the public key after connect()', async () => {
@@ -211,9 +225,7 @@ describe('LedgerWalletAdapter', () => {
   describe('getAppVersion()', () => {
     it('throws when not connected', async () => {
       const adapter = new LedgerWalletAdapter(config)
-      await expect(adapter.getAppVersion()).rejects.toThrow(
-        'LedgerWalletAdapter: not connected',
-      )
+      await expect(adapter.getAppVersion()).rejects.toThrow('LedgerWalletAdapter: not connected')
     })
 
     it('returns the Stellar app version string', async () => {
@@ -300,6 +312,15 @@ describe('TrezorWalletAdapter', () => {
       expect(adapter.type).toBe('trezor')
     })
 
+    it('declares the capabilities supported by Trezor Connect', () => {
+      const adapter = new TrezorWalletAdapter(config)
+      expect(adapter.capabilities).toEqual({
+        signAuthEntry: false,
+        feeBump: true,
+        hardware: true,
+      })
+    })
+
     it('defaults accountIndex to 0', () => {
       const adapter = new TrezorWalletAdapter({
         trezorConnect,
@@ -378,9 +399,7 @@ describe('TrezorWalletAdapter', () => {
   describe('getPublicKey()', () => {
     it('throws when not connected', async () => {
       const adapter = new TrezorWalletAdapter(config)
-      await expect(adapter.getPublicKey()).rejects.toThrow(
-        'TrezorWalletAdapter: not connected',
-      )
+      await expect(adapter.getPublicKey()).rejects.toThrow('TrezorWalletAdapter: not connected')
     })
 
     it('returns the Stellar address after connect()', async () => {
@@ -403,9 +422,7 @@ describe('TrezorWalletAdapter', () => {
   describe('getAppVersion()', () => {
     it('throws when not connected', async () => {
       const adapter = new TrezorWalletAdapter(config)
-      await expect(adapter.getAppVersion()).rejects.toThrow(
-        'TrezorWalletAdapter: not connected',
-      )
+      await expect(adapter.getAppVersion()).rejects.toThrow('TrezorWalletAdapter: not connected')
     })
 
     it('returns a version string derived from firmware features', async () => {

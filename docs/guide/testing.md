@@ -26,6 +26,12 @@ It covers exactly the six RPC methods the SDK uses. Any object — a `vi.fn()` /
 implements these six methods can be used wherever the SDK expects an RPC
 client, with no casting required.
 
+The SDK property-based suite also generates ContractData and ContractCode
+ledger keys, checks that XDR parsing preserves their type and produces
+idempotent canonical base64, and verifies that invalid ledger-key
+discriminants are rejected. A fixed fast-check seed keeps those cases
+reproducible in CI; set `FC_SEED` locally to explore different generated keys.
+
 ## Injecting a test double (recommended)
 
 Pass your test double as `config.rpcClient` when constructing `SorobanResurrect`.
@@ -112,7 +118,14 @@ clean) plus two `sendTransaction` responses (restore, then original) — is
 enough to drive the entire state machine (`restore_needed` →
 `signing_restore` → `submitting_restore` → `confirming_restore` →
 `signing_original` → `submitting_original` → `success`) deterministically,
-with no network access.
+with no network access. A full workflow test should also verify that rebuilding
+preserves the original operations and that each submitted envelope matches the
+XDR returned by its corresponding wallet-signing call.
+
+Wallet-rejection integration tests should cover both signing prompts
+separately: rejecting the restore signature must send neither transaction,
+while rejecting the rebuilt original signature may send the confirmed restore
+transaction but must never send the unsigned original transaction.
 
 ## Free functions
 
@@ -120,6 +133,17 @@ Lower-level functions such as `executeWithRestore`, `waitForTransaction`, and
 `detectArchivedEntries` accept an `ISorobanRpcClient` directly as their
 `server` parameter, so the same test doubles work at that level too if you're
 testing below the `SorobanResurrect` facade.
+
+The SDK's `src/__tests__/fixtures/soroban-rpc/v1.ts` fixture set covers success,
+restore-required, error, malformed, and extended simulation response shapes.
+Keep representative RPC shape changes in a new fixture version and exercise
+them through the response guards and extraction helpers.
+
+To verify published package files rather than workspace links, first build the
+packages and then run `npm run test:packed-exports`. It packs each package with
+an `exports` map, installs the tarballs in a temporary clean project, smoke
+tests every declared runtime export, checks declaration imports with TypeScript,
+and verifies required peer dependencies resolve.
 
 See also: [API Reference](/api/sdk), [`SorobanResurrectConfig`](/api/types#sorobanresurrectconfig).
 
@@ -138,6 +162,11 @@ It exports:
 - `fixtures` — canned responses: `simulateSuccess`, `simulateRestore`,
   `simulateError`, `sendPending`, `sendError('txBadSeq' | ...)`, `txSuccess`,
   `txFailed`, `txNotFound`, `archivedKey`, `account`.
+- `ledgerEntryFixture(status, seed?, currentLedger?)` — deterministic
+  `getLedgerEntries` responses for `active`, `near-expiry`, `archived`,
+  `missing`, and `unsupported` ledger keys. Each fixture includes its key,
+  current ledger, and typed RPC response; `missing` omits the key, while
+  `archived` returns an entry whose live-until ledger has passed.
 - `scenarios` — ready-made scripts: `noRestore`, `restore`,
   `restoreSimulationError`, `badSequence`, `slowConfirmation`.
 
@@ -146,6 +175,21 @@ Add it as a dev dependency of the workspace you are testing:
 ```json
 { "devDependencies": { "@soroban-resurrect/testing": "0.0.0" } }
 ```
+
+## Coverage gates
+
+The SDK's test command enforces explicit branch and line-coverage floors for three critical restore
+modules. The current floors reflect the measured baseline and prevent regressions while coverage
+grows:
+
+| Behavior                         | Module                                                   |
+| -------------------------------- | -------------------------------------------------------- |
+| Archived-key detection           | `packages/sdk/src/Archiver.ts` — 45% branches, 65% lines |
+| Restore transaction construction | `packages/sdk/src/Restorer.ts` — 35% branches, 35% lines |
+| Execution orchestration          | `packages/sdk/src/Executor.ts` — 40% branches, 50% lines |
+
+Run `npm run test -w packages/sdk -- --coverage` to generate the report and fail the command if a
+module-specific floor is missed. Add tests and raise the floors as the modules' coverage improves.
 
 ### Walkthrough: archive detected → restore → resubmit
 

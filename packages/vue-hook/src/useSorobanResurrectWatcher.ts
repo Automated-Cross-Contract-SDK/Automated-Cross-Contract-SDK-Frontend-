@@ -1,7 +1,8 @@
 import {
   ref,
   onMounted,
-  onUnmounted,
+  onScopeDispose,
+  getCurrentInstance,
   toValue,
   type Ref,
   type MaybeRefOrGetter,
@@ -64,8 +65,9 @@ export interface UseSorobanResurrectWatcherReturn {
  * `SorobanResurrect.getExpiringSoonEntries` on an interval so a component can
  * render an "expiring soon" warning and offer one-click extension.
  *
- * SSR-safe: polling starts in `onMounted` and is always cleared in
- * `onUnmounted`, so an unmounted (or server-rendered) component never polls.
+ * SSR-safe: polling starts in `onMounted` and its timer is cleared when the
+ * active Vue effect scope ends, so a server-rendered or disposed scope never
+ * retains a poller.
  * Mirrors the React `useRestoreWatcher` semantics.
  *
  * @param keys - Ledger keys to monitor (ref/getter or plain array).
@@ -90,8 +92,10 @@ export function useSorobanResurrectWatcher(
 
   let timer: ReturnType<typeof setInterval> | null = null
   let hadExpiring = false
+  let disposed = false
 
   const poll = async (): Promise<void> => {
+    if (disposed) return
     const instance = resurrect.value
     if (!instance) return
     try {
@@ -99,6 +103,7 @@ export function useSorobanResurrectWatcher(
         toValue(keys),
         ledgersThreshold,
       )
+      if (disposed) return
       expiringSoon.value = entries
       lastCheckedAt.value = Date.now()
       error.value = null
@@ -108,6 +113,7 @@ export function useSorobanResurrectWatcher(
       }
       hadExpiring = entries.length > 0
     } catch (err) {
+      if (disposed) return
       error.value = err instanceof Error ? err.message : String(err)
       watchStatus.value = 'error'
     }
@@ -122,7 +128,7 @@ export function useSorobanResurrectWatcher(
   }
 
   const start = (): void => {
-    if (timer !== null) return
+    if (disposed || timer !== null) return
     watchStatus.value = 'watching'
     void poll()
     timer = setInterval(() => {
@@ -157,11 +163,14 @@ export function useSorobanResurrectWatcher(
     }
   }
 
-  onMounted(() => {
-    if (autoStart) start()
-  })
+  if (getCurrentInstance()) {
+    onMounted(() => {
+      if (autoStart) start()
+    })
+  }
 
-  onUnmounted(() => {
+  onScopeDispose(() => {
+    disposed = true
     if (timer !== null) {
       clearInterval(timer)
       timer = null

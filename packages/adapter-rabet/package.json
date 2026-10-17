@@ -1,6 +1,9 @@
 {
   "name": "@soroban-resurrect/adapter-rabet",
   "version": "0.1.0",
+  "engines": {
+    "node": ">=20"
+  },
   "keywords": [
     "soroban",
     "stellar",
@@ -34,6 +37,6 @@
     "@soroban-resurrect/sdk": "^0.1.0"
   },
   "devDependencies": {
-    "typescript": "^7.0.2"
+    "typescript": "^5.9.2"
   }
 }

@@ -1,18 +1,27 @@
 import { rpc, Transaction } from '@stellar/stellar-sdk'
 import { xdr } from '@stellar/stellar-sdk'
 import { ArchivedLedgerEntry, SimulateResponse } from './types.js'
+import { getLedgerKeyEntryType } from './TTLHelpers.js'
 import {
-  asXdrBase64,
   asContractIdHex,
   type ContractIdHex,
   type HexString,
 } from './branded-types.js'
 import { extractArchivedKeysSafe, extractFootprintFromSuccessSafe } from './result.js'
 import type { ISorobanRpcClient } from './RpcClient.js'
+import { serializeLedgerKey } from './LedgerKey.js'
 import { createDebugger } from './Debug.js'
 import { LEDGER_ENTRY_CHUNK_SIZE, LEDGER_ENTRY_CONCURRENCY } from './constants.js'
+import { IncompleteFootprintError, readSimulationFootprint } from './SimulationFootprint.js'
 
 const debug = createDebugger('archiver')
+
+function compareArchivedEntries(
+  a: ArchivedLedgerEntry,
+  b: ArchivedLedgerEntry,
+): number {
+  return a.keyBase64 < b.keyBase64 ? -1 : a.keyBase64 > b.keyBase64 ? 1 : 0
+}
 
 /**
  * Type guard — returns true if the simulation response indicates archived
@@ -77,6 +86,8 @@ export function isErrorResponse(
  * @returns Array of {@link ArchivedLedgerEntry}. Empty if the response has
  *   `_parsed: false` or the footprint could not be read (a warning is
  *   logged via `console.warn` in the former case).
+ *   Results are sorted by serialized ledger-key XDR, independent of
+ *   footprint ordering.
  *
  * @example
  * ```ts
@@ -89,30 +100,25 @@ export function isErrorResponse(
 export function extractArchivedKeys(
   response: rpc.Api.SimulateTransactionRestoreResponse,
 ): ArchivedLedgerEntry[] {
-  const keys: ArchivedLedgerEntry[] = []
-
-  if (!response._parsed) {
-    console.warn(
-      'SorobanResurrect: restore simulation response has _parsed=false, cannot extract archived keys',
-    )
-    return keys
-  }
-
+  const { readWrite } = readSimulationFootprint(response, { requireReadWrite: true })
   try {
     const footprint = response.transactionData.getFootprint()
     const readWrite = footprint.readWrite()
 
     for (const ledgerKey of readWrite) {
-      const keyBase64 = asXdrBase64(ledgerKey.toXDR('base64'))
+      const keyBase64 = serializeLedgerKey(ledgerKey)
       keys.push({
         key: ledgerKey,
         keyBase64,
+        entryType: getLedgerKeyEntryType(ledgerKey),
       })
     }
   } catch (err) {
     debug('extractArchivedKeys: failed to read footprint', err)
     return keys
   }
+
+  keys.sort(compareArchivedEntries)
 
   debug('extractArchivedKeys: %d archived key(s) in restore footprint', keys.length)
   return keys
@@ -133,22 +139,7 @@ export function extractFootprintFromSuccess(response: rpc.Api.SimulateTransactio
   readOnly: xdr.LedgerKey[]
   readWrite: xdr.LedgerKey[]
 } {
-  if (!response._parsed) {
-    console.warn(
-      'SorobanResurrect: success simulation response has _parsed=false, cannot extract footprint',
-    )
-    return { readOnly: [], readWrite: [] }
-  }
-
-  try {
-    const footprint = response.transactionData.getFootprint()
-    return {
-      readOnly: footprint.readOnly() || [],
-      readWrite: footprint.readWrite() || [],
-    }
-  } catch {
-    return { readOnly: [], readWrite: [] }
-  }
+  return readSimulationFootprint(response)
 }
 
 /**
@@ -195,17 +186,19 @@ async function detectArchivedChunk(
     const knownKeys = new Set<string>()
     if (result.entries) {
       for (const entry of result.entries) {
+          key,
         knownKeys.add(entry.key.toXDR('base64'))
       }
     }
     // Check each key in the chunk; if not in returned entries, it's archived
     const archived: ArchivedLedgerEntry[] = []
     for (const key of chunk) {
-      const keyXdr = key.toXDR('base64')
+      const keyXdr = asXdrBase64(key.toXDR('base64'))
       if (!knownKeys.has(keyXdr)) {
         archived.push({
           key,
           keyBase64: keyXdr,
+          entryType: getLedgerKeyEntryType(key),
         })
       }
     }
@@ -215,7 +208,8 @@ async function detectArchivedChunk(
     // On network error, conservatively treat all keys in chunk as archived
     return chunk.map((key) => ({
       key,
-      keyBase64: key.toXDR('base64'),
+      keyBase64: asXdrBase64(key.toXDR('base64')),
+      entryType: getLedgerKeyEntryType(key),
     }))
   }
 }
@@ -237,8 +231,8 @@ async function detectArchivedChunk(
  *   chunk size and request concurrency.
  * @returns Array of {@link ArchivedLedgerEntry} for keys that are missing
  *   from `getLedgerEntries` results (i.e. archived), or that could not be
- *   verified due to a request error. Entries keep the relative order of
- *   `ledgerKeys` regardless of the order responses arrive in.
+ *   verified due to a request error. Entries are sorted by serialized
+ *   ledger-key XDR, independent of input and RPC response ordering.
  * @see {@link detectArchivedKeysViaDirect}, which wraps this with the
  *   simulate → extract-footprint steps.
  */
@@ -281,7 +275,7 @@ export async function detectArchivedEntries(
   const workerCount = Math.min(concurrency, chunks.length)
   await Promise.all(Array.from({ length: workerCount }, () => worker()))
 
-  const archived = results.flat()
+  const archived = results.flat().sort(compareArchivedEntries)
   debug('detectArchivedEntries: %d of %d key(s) archived', archived.length, ledgerKeys.length)
   return archived
 }
@@ -307,7 +301,13 @@ export async function detectArchivedKeysViaSimulation(
     return extractArchivedKeys(response)
   }
 
-  return []
+  if (isSuccessResponse(response) || isErrorResponse(response)) {
+    return []
+  }
+  throw new IncompleteFootprintError(
+    'unrecognized-response',
+    'the RPC response is not a recognized success, error, or restore response.',
+  )
 }
 
 /**
@@ -347,7 +347,10 @@ export async function detectArchivedKeysViaDirect(
   }
 
   if (!isSuccessResponse(response)) {
-    throw new Error('Unexpected simulation response type')
+    throw new IncompleteFootprintError(
+      'unrecognized-response',
+      'the RPC response is not a recognized success, error, or restore response.',
+    )
   }
 
   const { readWrite } = extractFootprintFromSuccess(response)

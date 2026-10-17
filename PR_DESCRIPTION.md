@@ -1,6 +1,12 @@
 ## Summary
 
-This PR addresses four wallet and SDK API issues:
+- Publish a root `ROADMAP.md` with all 11 epics, representative issues, explicit out-of-scope boundaries, and links to GitHub Projects and repository milestones.
+- Add a Stellar ecosystem listing tracker with a consistent project description, documentation/example links, submission status, and a next-major-release re-check reminder.
+- Add deterministic active, near-expiry, archived, missing, and unsupported ledger-entry fixtures and verify their TTL behavior.
+- Enforce explicit coverage thresholds for the SDK's transaction construction, archival detection, and execution orchestration modules.
+- Repair SDK restore/facade regressions in RPC rebinding, fee diagnostics, input validation, and compatibility exports.
+
+Resolves #434, #551, and #552; prepares the documentation and submission tracker for #435.
 
 - Publish a compatibility matrix for all supported wallet adapters, including signing behavior, required setup/options, limitations, and the locked provider API versions.
 - Validate SDK URLs, timing values, fee settings, and incompatible archive-detection options at construction time with field-specific errors.
@@ -9,11 +15,11 @@ This PR addresses four wallet and SDK API issues:
 
 ## Behavior notes
 
-- `submitWithRestore` supports request overrides for polling intervals/timeouts, restore fee multiplier/cap, sequence retries, and restore memos.
-- Overrides are validated before a request is recorded. Batched requests with per-request overrides run sequentially so each transaction uses its own settings.
-- `SorobanResurrect.config` and the settings returned by `getEffectiveConfig()` are frozen snapshots.
+- `npm run test -w packages/sdk -- --coverage --reporter=dot` — 978 tests passed and module coverage floors met.
+- Prettier checks on changed files and `git diff --check` passed.
+- `npm run typecheck -w packages/sdk` remains blocked by unresolved SDK TypeScript errors in archival-entry, executor, restore-machine, restorer, configuration, and result types.
+- Repository-wide `npm run format` remains blocked by unrelated baseline formatting issues and a syntax error in `src/react/index.ts`; changed files are formatted.
 
-## Validation
+## External listing status
 
-- Focused configuration-resolution tests pass.
-- The SDK-wide test and typecheck suites are currently blocked by pre-existing SDK source issues on `main` (including invalid syntax in `Executor.ts` and missing exports from `types.ts`).
+The official Stellar ecosystem directory, `stellar/awesome-stellar`, and the SDF community listing are documented as submission targets. No external listing is claimed as complete until its maintainers accept the entry; the tracker records the follow-up required.

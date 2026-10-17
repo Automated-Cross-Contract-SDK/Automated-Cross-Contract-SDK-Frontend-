@@ -1,4 +1,9 @@
-import { ArchivedLedgerEntry, RestoreState, RestoreStateInfo, SorobanResurrectEvents } from './types.js'
+import {
+  ArchivedLedgerEntry,
+  RestoreState,
+  RestoreStateInfo,
+  SorobanResurrectEvents,
+} from './types.js'
 import { TypedEventEmitter, type WithIndexSignature } from './EventEmitter.js'
 
 /**
@@ -29,7 +34,7 @@ export class SorobanResurrectStateManager {
   private _listeners: Array<(info: RestoreStateInfo) => void> = []
 
   /** Typed event emitter used alongside the legacy observer pattern. */
-  readonly emitter = new TypedEventEmitter<WithIndexSignature<SorobanResurrectEvents>>()
+  readonly emitter = new TypedEventEmitter<SorobanResurrectEvents>()
 
   // ---------------------------------------------------------------------------
   // Read-only accessors
@@ -153,6 +158,12 @@ export class SorobanResurrectStateManager {
     return () => {
       this._listeners = this._listeners.filter((l) => l !== listener)
     }
+  }
+
+  /** Remove every state and typed-event listener owned by this manager. */
+  dispose(): void {
+    this._listeners = []
+    this.emitter.removeAllListeners()
   }
 
   // ---------------------------------------------------------------------------

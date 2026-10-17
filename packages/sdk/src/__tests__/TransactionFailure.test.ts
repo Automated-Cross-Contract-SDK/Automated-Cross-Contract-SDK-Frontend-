@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { rpc } from '@stellar/stellar-sdk'
+import { rpc, xdr } from '@stellar/stellar-sdk'
 import { parseTransactionFailure } from '../TransactionFailure.js'
 import {
   INVOKE_TRAPPED_RESULT_XDR,
@@ -107,5 +107,14 @@ describe('parseTransactionFailure', () => {
     expect(parsed?.txResultCode).toBe('unknown')
     expect(parsed?.contractError).toBe('Error(Contract, #3)')
     expect(parsed?.message).toContain('require_auth')
+  })
+
+  it('accepts decoded diagnostic events from the RPC response shape', () => {
+    const parsed = parseTransactionFailure({
+      status: FAILED,
+      diagnosticEvents: [xdr.DiagnosticEvent.fromXDR(DIAG_ERROR_XDR, 'base64')],
+    })
+
+    expect(parsed?.diagnosticMessages.some((message) => message.includes('require_auth'))).toBe(true)
   })
 })

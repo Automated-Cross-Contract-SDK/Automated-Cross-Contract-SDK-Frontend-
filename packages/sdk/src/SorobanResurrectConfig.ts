@@ -1,6 +1,7 @@
 import type { SorobanResurrectConfig } from './types.js'
 import type { ISorobanRpcClient } from './RpcClient.js'
 import { SorobanRpcClient } from './RpcClient.js'
+import { NOOP_LOGGER, withRpcLogging } from './Logger.js'
 import {
   DEFAULT_NETWORK_PASSPHRASE,
   POLL_INTERVAL_MS,
@@ -20,10 +21,13 @@ import {
   resolveNetworkPassphrase,
   TTL_WATCH_INTERVAL_MS,
   TTL_WATCH_THRESHOLD,
-  SOROBAN_MAX_TX_XDR_BYTES,
-  RESTORE_TX_SIZE_WARN_RATIO,
+  ARCHIVE_DETECTION_CHUNK_SIZE,
+  ARCHIVE_DETECTION_CONCURRENCY,
+  MAX_BATCH_SIZE,
 } from './constants.js'
 import { SimulationCache } from './SimulationCache.js'
+import { validateRestoreMemoConfig } from './memoValidation.js'
+import { NOOP_LOGGER } from './Logger.js'
 
 /**
  * Result of initialising the SDK configuration.
@@ -56,23 +60,14 @@ const ARCHIVE_DETECTION_METHODS = ['simulation', 'direct'] as const
 /**
  * Validates a numeric config field and includes its public field name in errors.
  */
-function validateNumber(
-  field: string,
-  value: unknown,
-  minimum: number,
-  exclusive: boolean,
-  integer = false,
-): void {
+function validateNumber(field: string, value: unknown, minimum: number, exclusive: boolean): void {
   const valid =
     typeof value === 'number' &&
     Number.isFinite(value) &&
-    (exclusive ? value > minimum : value >= minimum) &&
-    (!integer || Number.isSafeInteger(value))
+    (exclusive ? value > minimum : value >= minimum)
   if (!valid) {
-    throw new Error(
-      `Invalid config.${field}: expected a finite number ${exclusive ? 'greater than' : 'at least'} ${minimum}` +
-        `${integer ? ' and a safe integer' : ''}; received ${JSON.stringify(value)}.`,
-    )
+    const comparison = exclusive ? 'greater than 0' : 'greater than or equal to 1'
+    throw new Error(`config.${field} must be a finite number ${comparison}`)
   }
 }
 
@@ -120,31 +115,13 @@ export const SIMULATION_CACHE_MAX_SIZE = 50
  */
 export function validateConfigShape(config: SorobanResurrectConfig): void {
   if (typeof config.rpcUrl !== 'string' || config.rpcUrl.length === 0) {
-    throw new Error(
-      `Invalid config.rpcUrl: expected a non-empty URL string; received ${JSON.stringify(config.rpcUrl)}.`,
-    )
-  }
-  if (
-    config.networkPassphrase !== undefined &&
-    (typeof config.networkPassphrase !== 'string' || config.networkPassphrase.length === 0)
-  ) {
-    throw new Error(
-      `Invalid config.networkPassphrase: expected a non-empty string; ` +
-        `received ${JSON.stringify(config.networkPassphrase)}.`,
-    )
+    throw new Error('config.rpcUrl must be a non-empty string')
   }
   let rpcUrl: URL
   try {
     rpcUrl = new URL(config.rpcUrl)
   } catch {
-    throw new Error(
-      `Invalid config.rpcUrl: expected an absolute HTTP(S) URL; received ${JSON.stringify(config.rpcUrl)}.`,
-    )
-  }
-  if (!['http:', 'https:'].includes(rpcUrl.protocol) || !rpcUrl.hostname) {
-    throw new Error(
-      `Invalid config.rpcUrl: expected an absolute HTTP(S) URL; received ${JSON.stringify(config.rpcUrl)}.`,
-    )
+    throw new Error('config.rpcUrl must be a valid URL')
   }
 
   if (config.pollIntervalMs !== undefined) {
@@ -153,6 +130,17 @@ export function validateConfigShape(config: SorobanResurrectConfig): void {
 
   if (config.pollTimeoutMs !== undefined) {
     validateNumber('pollTimeoutMs', config.pollTimeoutMs, 0, true)
+  }
+
+  for (const field of [
+    'simulationTimeoutMs',
+    'walletSigningTimeoutMs',
+    'restoreConfirmationTimeoutMs',
+    'originalSubmissionTimeoutMs',
+  ] as const) {
+    if (config[field] !== undefined) {
+      validateNumber(field, config[field], 0, true)
+    }
   }
 
   if (config.restoreFeeMultiplier !== undefined) {
@@ -249,28 +237,24 @@ export function validateConfigShape(config: SorobanResurrectConfig): void {
     }
   }
 
-  if (config.maxRestoreTxSizeBytes !== undefined) {
-    validateInteger('maxRestoreTxSizeBytes', config.maxRestoreTxSizeBytes, 1)
+  validateRestoreMemoConfig(config)
+
+  if (
+    config.maxBatchSize !== undefined &&
+    (!Number.isInteger(config.maxBatchSize) || config.maxBatchSize < 1)
+  ) {
+    throw new Error(
+      `Invalid maxBatchSize: ${JSON.stringify(config.maxBatchSize)}. Must be a positive integer.`,
+    )
   }
 
-  if (config.restoreSizeWarnRatio !== undefined) {
-    validateNumber('restoreSizeWarnRatio', config.restoreSizeWarnRatio, 0, true)
-    if (config.restoreSizeWarnRatio > 1) {
+  for (const field of ['archiveDetectionChunkSize', 'archiveDetectionConcurrency'] as const) {
+    const value = config[field]
+    if (value !== undefined && (!Number.isInteger(value) || value < 1)) {
       throw new Error(
-        `Invalid config.restoreSizeWarnRatio: expected a value no greater than 1; ` +
-          `received ${JSON.stringify(config.restoreSizeWarnRatio)}.`,
+        `Invalid ${field}: ${JSON.stringify(value)}. Must be a positive integer.`,
       )
     }
-  }
-
-  if (config.throwOnRestoreSizeLimit !== undefined) {
-    validateBoolean('throwOnRestoreSizeLimit', config.throwOnRestoreSizeLimit)
-  }
-
-  if (config.restoreTxMemoText !== undefined && typeof config.restoreTxMemoText !== 'string') {
-    throw new Error(
-      `Invalid config.restoreTxMemoText: expected a string; received ${JSON.stringify(config.restoreTxMemoText)}.`,
-    )
   }
 }
 
@@ -309,8 +293,10 @@ export function validateConfigShape(config: SorobanResurrectConfig): void {
  * ```
  */
 export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
-  const effectiveConfig = resolveEffectiveSettings(config)
-  const server = config.rpcClient ?? new SorobanRpcClient(config.rpcUrl)
+  validateConfigShape(config)
+
+  const baseServer = config.rpcClient ?? new SorobanRpcClient(config.rpcUrl)
+  const server = withRpcLogging(baseServer, config.logger)
 
   // A fresh cache is built on every resolve, so switchNetwork() never reuses
   // stale entries. Keep the TTL short relative to the ledger close time
@@ -357,13 +343,30 @@ function resolveEffectiveSettings(config: SorobanResurrectConfig): EffectiveSoro
     )
   }
 
-  const { rpcClient: _rpcClient, ...providedSettings } = config
-  return {
-    ...providedSettings,
+  // A fresh cache is built on every resolve, so switchNetwork() never reuses
+  // stale entries. Keep the TTL short relative to the ledger close time
+  // (~5s): a replayed cached restore response can report "restore needed"
+  // after the entry was already restored (or miss a newly archived entry),
+  // which at worst causes a redundant restore or a failed submission.
+  const simulationCache = config.enableSimulationCache
+    ? new SimulationCache({
+        ttlMs: config.simulationCacheTtlMs ?? SIMULATION_CACHE_TTL_MS,
+        maxSize: config.simulationCacheMaxSize ?? SIMULATION_CACHE_MAX_SIZE,
+      })
+    : undefined
+
+  const resolved: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & {
+    rpcClient: ISorobanRpcClient
+  } = {
     rpcUrl: config.rpcUrl,
     networkPassphrase,
+    logger: config.logger ?? NOOP_LOGGER,
     pollIntervalMs: config.pollIntervalMs ?? POLL_INTERVAL_MS,
     pollTimeoutMs: config.pollTimeoutMs ?? POLL_TIMEOUT_MS,
+    simulationTimeoutMs: config.simulationTimeoutMs ?? RPC_TIMEOUT_MS,
+    walletSigningTimeoutMs: config.walletSigningTimeoutMs ?? 120_000,
+    restoreConfirmationTimeoutMs: config.restoreConfirmationTimeoutMs ?? POLL_TIMEOUT_MS,
+    originalSubmissionTimeoutMs: config.originalSubmissionTimeoutMs ?? RPC_TIMEOUT_MS,
     restoreFeeMultiplier: config.restoreFeeMultiplier ?? RESTORE_FEE_MULTIPLIER,
     maxRestoreFeeStroops: config.maxRestoreFeeStroops ?? MAX_RESTORE_FEE_STROOPS,
     maxSequenceRetries: config.maxSequenceRetries ?? MAX_SEQUENCE_RETRIES,
@@ -375,19 +378,23 @@ function resolveEffectiveSettings(config: SorobanResurrectConfig): EffectiveSoro
     rpcRetryCount: config.rpcRetryCount ?? RPC_RETRY_COUNT,
     rpcRetryBackoffMs: config.rpcRetryBackoffMs ?? RPC_RETRY_BACKOFF_MS,
     rpcCircuitBreakerThreshold: config.rpcCircuitBreakerThreshold ?? RPC_CIRCUIT_BREAKER_THRESHOLD,
-    rpcCircuitBreakerCooldownMs: config.rpcCircuitBreakerCooldownMs ?? RPC_CIRCUIT_BREAKER_COOLDOWN_MS,
+    rpcCircuitBreakerCooldownMs:
+      config.rpcCircuitBreakerCooldownMs ?? RPC_CIRCUIT_BREAKER_COOLDOWN_MS,
     ttlWatchIntervalMs: config.ttlWatchIntervalMs ?? TTL_WATCH_INTERVAL_MS,
     ttlWatchThreshold: config.ttlWatchThreshold ?? TTL_WATCH_THRESHOLD,
-    ttlWatchAutoExtend: config.ttlWatchAutoExtend ?? TTL_WATCH_AUTO_EXTEND,
+    ttlWatchThresholdLedgers: config.ttlWatchThresholdLedgers ?? TTL_WATCH_THRESHOLD,
     archiveDetectionMethod: config.archiveDetectionMethod ?? 'simulation',
     useSSE: config.useSSE ?? false,
     enableSimulationCache: config.enableSimulationCache ?? false,
     simulationCacheTtlMs: config.simulationCacheTtlMs ?? SIMULATION_CACHE_TTL_MS,
     simulationCacheMaxSize: config.simulationCacheMaxSize ?? SIMULATION_CACHE_MAX_SIZE,
+    archiveDetectionChunkSize: config.archiveDetectionChunkSize ?? ARCHIVE_DETECTION_CHUNK_SIZE,
+    archiveDetectionConcurrency:
+      config.archiveDetectionConcurrency ?? ARCHIVE_DETECTION_CONCURRENCY,
+    maxBatchSize: config.maxBatchSize ?? MAX_BATCH_SIZE,
     restoreTxMemo: config.restoreTxMemo,
     restoreTxMemoText: config.restoreTxMemoText ?? '',
-    maxRestoreTxSizeBytes: config.maxRestoreTxSizeBytes ?? SOROBAN_MAX_TX_XDR_BYTES,
-    restoreSizeWarnRatio: config.restoreSizeWarnRatio ?? RESTORE_TX_SIZE_WARN_RATIO,
-    throwOnRestoreSizeLimit: config.throwOnRestoreSizeLimit ?? false,
+    logger: config.logger ?? NOOP_LOGGER,
+    rpcClient: server,
   }
 }
