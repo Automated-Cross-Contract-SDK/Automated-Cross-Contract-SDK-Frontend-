@@ -59,9 +59,11 @@ describe('waitForTransaction — timeout and retry behavior', () => {
       } as never)
 
       const promise = waitForTransaction(server, 'hash', 100, 2000)
-      const assertion = expect(promise).rejects.toThrow(
-        'Transaction hash did not complete within 2000ms',
-      )
+      const assertion = expect(promise).rejects.toMatchObject({
+        name: 'ResurrectTimeoutError',
+        code: 'TIMEOUT',
+        message: 'Transaction hash did not complete within 2000ms',
+      })
       await vi.runAllTimersAsync()
       await assertion
 

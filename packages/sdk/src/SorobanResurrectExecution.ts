@@ -4,6 +4,7 @@ import type {
   DryRunResult,
   ExpiredTransactionInfo,
   ResurrectResult,
+  ResolvedSorobanResurrectConfig,
   RestoreKeysOptions,
   SubmitLifecycleEvent,
   SubmitWithRestoreOptions,
@@ -53,7 +54,7 @@ import { runWithSignal } from './AbortUtils.js'
  */
 export class SorobanResurrectExecutor {
   private _server: ISorobanRpcClient
-  private _config: Required<SorobanResurrectConfig>
+  private _config: ResolvedSorobanResurrectConfig
   private readonly _stateMgr: SorobanResurrectStateManager
   private readonly _simulator: SorobanResurrectSimulator
   private readonly _history: TransactionHistory
@@ -68,7 +69,7 @@ export class SorobanResurrectExecutor {
    */
   constructor(
     server: ISorobanRpcClient,
-    config: Required<SorobanResurrectConfig>,
+    config: ResolvedSorobanResurrectConfig,
     stateMgr: SorobanResurrectStateManager,
     simulator: SorobanResurrectSimulator,
     persistHistory?: HistoryPersistenceOptions,
@@ -179,7 +180,7 @@ export class SorobanResurrectExecutor {
    * Re-binds this executor to a new RPC client / config in place, keeping
    * history and the state manager intact. Used by `SorobanResurrect.switchNetwork`.
    */
-  rebind(server: ISorobanRpcClient, config: Required<SorobanResurrectConfig>): void {
+  rebind(server: ISorobanRpcClient, config: ResolvedSorobanResurrectConfig): void {
     this._server = server
     this._config = config
   }
@@ -346,7 +347,7 @@ export class SorobanResurrectExecutor {
           )
 
       if (status.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
-        throw new Error('Restore transaction failed')
+        throw new RestoreError('Restore transaction failed')
       }
 
       emitter.emit('restoreConfirmed', restoreHash)
@@ -839,7 +840,7 @@ export class SorobanResurrectExecutor {
         { signal: sharedSignal },
       )
       if (status.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
-        throw new Error('Batch restore transaction failed')
+        throw new RestoreError('Batch restore transaction failed')
       }
       emitter.emit('restoreConfirmed', restoreHash)
       stateMgr.setState(

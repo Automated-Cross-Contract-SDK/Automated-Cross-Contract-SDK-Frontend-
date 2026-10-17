@@ -162,6 +162,47 @@ export const err = <T, E = Error>(error: E): Result<T, E> => new Err(error)
 export const some = <T>(value: T): Option<T> => new Some(value)
 export const none = <T>(): Option<T> => new None()
 
+/** Narrows a Result to its success branch. */
+export function isOk<T, E>(result: Result<T, E>): result is Ok<T, E> {
+  return result.ok
+}
+
+/** Narrows a Result to its failure branch. */
+export function isErr<T, E>(result: Result<T, E>): result is Err<T, E> {
+  return !result.ok
+}
+
+/** Narrows an Option to its present-value branch. */
+export function isSome<T>(option: Option<T>): option is Some<T> {
+  return option.some
+}
+
+/** Narrows an Option to its empty branch. */
+export function isNone<T>(option: Option<T>): option is None<T> {
+  return !option.some
+}
+
+/** Narrow a restore workflow result to its successful outcome. */
+export function isResurrectSuccess(result: ResurrectResult): result is ResurrectSuccess {
+  return result.success
+}
+
+/** Narrow a restore workflow result to its typed failure outcome. */
+export function isResurrectFailure(result: ResurrectResult): result is ResurrectFailure {
+  return !result.success
+}
+
+/** Handle both workflow result branches without optional-field checks. */
+export function matchResurrectResult<T>(
+  result: ResurrectResult,
+  handlers: {
+    success: (result: ResurrectSuccess) => T
+    failure: (result: ResurrectFailure) => T
+  },
+): T {
+  return result.success ? handlers.success(result) : handlers.failure(result)
+}
+
 export function toError(value: unknown): Error {
   if (value instanceof Error) {
     return value

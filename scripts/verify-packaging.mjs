@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url'
 
 const require = createRequire(import.meta.url)
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const sdkApiFixturePath = path.join(repoRoot, 'packages/sdk/api-compatibility.json')
 
 /** Files npm always includes for every package regardless of the `files` field. */
 const ALWAYS_INCLUDED = [
@@ -184,14 +185,20 @@ function dryRunPack(pkg) {
   return parsePackJson(run('npm', ['pack', '--dry-run', '--json'], path.join(repoRoot, pkg.dir)))
 }
 
-function verifyTarballContents(pkg, entries) {
+function verifyTarballContents(pkg, pack) {
   const errors = []
   const { manifest } = pkg
-  const files = entries.map((file) => file.path)
+  if (manifest.name === '@soroban-resurrect/sdk') {
+    const fixture = JSON.parse(fs.readFileSync(sdkApiFixturePath, 'utf8'))
+    if (JSON.stringify(manifest.exports) !== JSON.stringify(fixture.entryPoints)) {
+      errors.push('package.json exports do not match api-compatibility.json')
+    }
+  }
+  const files = pack.files.map((file) => file.path)
   const fileSet = new Set(files)
 
   const allowedPrefixes = (manifest.files ?? []).map((entry) =>
-    entry.replace(/^\.//, '').replace(/\/$/, ''),
+    entry.replace(/^\.\//, '').replace(/\/$/, ''),
   )
   const isAllowed = (file) =>
     ALWAYS_INCLUDED.some((re) => re.test(file)) ||
@@ -245,7 +252,30 @@ function buildConsumerSource(packages) {
   for (const pkg of packages) {
     lines.push(`export type ${typeName(pkg.manifest.name)} = typeof ${ident(pkg.manifest.name)}`)
   }
+  const sdk = packages.find((pkg) => pkg.manifest.name === '@soroban-resurrect/sdk')
+  if (sdk) {
+    const fixture = JSON.parse(fs.readFileSync(sdkApiFixturePath, 'utf8'))
+    const exportedNames = fixture.runtimeExports.map((name) => JSON.stringify(name)).join(' | ')
+    lines.push('')
+    lines.push(`type SdkMissingRuntimeExport = Exclude<${exportedNames}, keyof typeof ${ident(sdk.manifest.name)}>`)
+    lines.push('type SdkRuntimeExportsStable = SdkMissingRuntimeExport extends never ? true : never')
+    lines.push('const sdkRuntimeExportsStable: SdkRuntimeExportsStable = true')
+    for (const name of fixture.typeExports) {
+      lines.push(`import type { ${name} as __SdkApiType_${ident(name)} } from '@soroban-resurrect/sdk'`)
+    }
+  }
   return `${lines.join('\n')}\n`
+}
+
+function buildRuntimeCompatibilitySource() {
+  const fixture = JSON.parse(fs.readFileSync(sdkApiFixturePath, 'utf8'))
+  return [
+    `import * as sdk from '@soroban-resurrect/sdk'`,
+    `const expected = ${JSON.stringify(fixture.runtimeExports)}`,
+    'const missing = expected.filter((name) => !(name in sdk))',
+    'if (missing.length > 0) throw new Error(`SDK package is missing runtime exports: ${missing.join(", ")}`)',
+    '',
+  ].join('\n')
 }
 
 function ident(name) {
@@ -258,7 +288,7 @@ function typeName(name) {
 
 function installAndTypecheck(packages) {
   const tscBin = require.resolve('typescript/bin/tsc')
-  const tempDir = fs.mktempSync(path.join(os.tmpdir(), 'soroban-pack-verify-'))
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'soroban-pack-verify-'))
   const tarballDir = path.join(tempDir, 'tarballs')
   const projectDir = path.join(tempDir, 'consumer')
   fs.mkdirSync(tarballDir, { recursive: true })
@@ -330,10 +360,15 @@ function installAndTypecheck(packages) {
       )}\n`,
     )
     fs.writeFileSync(path.join(projectDir, 'src', 'index.ts'), buildConsumerSource(packages))
+    fs.writeFileSync(
+      path.join(projectDir, 'src', 'compatibility.mjs'),
+      buildRuntimeCompatibilitySource(),
+    )
 
     // 3. Install the tarballs in isolation and typecheck the published types.
     run('npm', ['install', '--no-audit', '--no-fund', '--ignore-scripts'], projectDir)
     run(process.execPath, [tscBin, '--noEmit', '--project', path.join(projectDir, 'tsconfig.json')], projectDir)
+    run(process.execPath, [path.join(projectDir, 'src', 'compatibility.mjs')], projectDir)
   } catch (error) {
     throw new Error(`Install/typecheck verification failed:\n${captured(error)}`)
   } finally {

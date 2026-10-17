@@ -8,6 +8,7 @@ import {
   DEFAULT_TTL_WARNING_WINDOW_LEDGERS,
 } from '../TTLHelpers.js'
 import type { ISorobanRpcClient } from '../RpcClient.js'
+import { SYSTEM_RUNTIME } from '../runtime.js'
 
 const CURRENT_LEDGER = 1_000
 
@@ -68,6 +69,23 @@ beforeEach(() => {
 afterEach(() => warn.mockRestore())
 
 describe('queryLedgerTTL', () => {
+  it('uses the injected clock for query metadata and latest-ledger cache expiry', async () => {
+    const key = dataKey(41)
+    let now = 10_000
+    const runtime = { ...SYSTEM_RUNTIME, now: () => now }
+    const { server } = mockServer(new Map())
+
+    const first = await queryLedgerTTL(server, [key], { runtime })
+    const cached = await queryLedgerTTL(server, [key], { runtime })
+    now += 1_001
+    const refreshed = await queryLedgerTTL(server, [key], { runtime })
+
+    expect(first.queriedAt).toBe(10_000)
+    expect(cached.queriedAt).toBe(10_000)
+    expect(refreshed.queriedAt).toBe(11_001)
+    expect(server.getLatestLedger).toHaveBeenCalledTimes(2)
+  })
+
   it('returns empty entries for no keys and makes no ledger-entry calls', async () => {
     const { server, getLedgerEntries } = mockServer(new Map())
     const res = await queryLedgerTTL(server, [])

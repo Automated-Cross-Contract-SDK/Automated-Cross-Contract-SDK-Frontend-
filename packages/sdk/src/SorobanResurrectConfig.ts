@@ -1,4 +1,4 @@
-import type { SorobanResurrectConfig } from './types.js'
+import type { ResolvedSorobanResurrectConfig, SorobanResurrectConfig } from './types.js'
 import type { ISorobanRpcClient } from './RpcClient.js'
 import { SorobanRpcClient } from './RpcClient.js'
 import { NOOP_LOGGER, withRpcLogging } from './Logger.js'
@@ -32,7 +32,7 @@ import { NOOP_LOGGER } from './Logger.js'
 /**
  * Result of initialising the SDK configuration.
  *
- * Contains the fully resolved `Required<SorobanResurrectConfig>`, the
+ * Contains the resolved SDK configuration, the
  * constructed RPC client, and an optional `SimulationCache` instance
  * (present only when `enableSimulationCache` is `true`).
  */
@@ -44,7 +44,7 @@ export interface ResolvedConfig {
    */
   server: ISorobanRpcClient
   /** Resolved configuration with all optional fields filled in. */
-  config: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & { rpcClient: ISorobanRpcClient }
+  config: ResolvedSorobanResurrectConfig
   /**
    * Cache for simulation responses. Only present when
    * `config.enableSimulationCache` is `true`; `undefined` otherwise.
@@ -256,6 +256,31 @@ export function validateConfigShape(config: SorobanResurrectConfig): void {
       )
     }
   }
+
+  if (config.ttlWatchIntervalMs !== undefined) {
+    validateNumber('ttlWatchIntervalMs', config.ttlWatchIntervalMs, 0, true)
+  }
+
+  if (config.ttlWatchThreshold !== undefined) {
+    validateNumber('ttlWatchThreshold', config.ttlWatchThreshold, 0, false)
+  }
+
+  if (config.ttlWatchThresholdLedgers !== undefined) {
+    validateNumber('ttlWatchThresholdLedgers', config.ttlWatchThresholdLedgers, 0, false)
+  }
+
+  if (config.ttlWatchAutoExtend !== undefined) {
+    validateBoolean('ttlWatchAutoExtend', config.ttlWatchAutoExtend)
+  }
+
+  if (config.runtime !== undefined) {
+    const methods = ['now', 'random', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] as const
+    for (const method of methods) {
+      if (typeof config.runtime?.[method] !== 'function') {
+        throw new InvalidInputError(`config.runtime.${method} must be a function`)
+      }
+    }
+  }
 }
 
 /**
@@ -352,6 +377,7 @@ function resolveEffectiveSettings(config: SorobanResurrectConfig): EffectiveSoro
     ? new SimulationCache({
         ttlMs: config.simulationCacheTtlMs ?? SIMULATION_CACHE_TTL_MS,
         maxSize: config.simulationCacheMaxSize ?? SIMULATION_CACHE_MAX_SIZE,
+        runtime,
       })
     : undefined
 

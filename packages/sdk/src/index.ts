@@ -25,6 +25,8 @@ export type { SorobanNetworkName, SorobanNetworkPreset } from './SorobanResurrec
 // ---------------------------------------------------------------------------
 export type {
   SorobanResurrectConfig,
+  ResolvedSorobanResurrectConfig,
+  SdkRuntime,
   WalletAdapter,
   WalletCapabilities,
   FeeBumpSponsor,
@@ -60,6 +62,8 @@ export type {
   TrezorAdapterConfig,
   // Error types
   ResurrectErrorCode,
+  ResurrectFailure,
+  ResurrectSuccess,
 } from './types.js'
 export type { RestorePlan, DryRunResult } from './RestorePlan.js'
 export type { WalletErrorCode } from './types.js'
@@ -245,3 +249,31 @@ export type {
   AttachHistoryPersistenceOptions,
 } from './HistoryPersistence.js'
 export type { MinimalHistoryEntry } from './TransactionHistory.js'
+
+// ---------------------------------------------------------------------------
+// Result and Option helpers
+// ---------------------------------------------------------------------------
+export type { Result, Option } from './result.js'
+export {
+  Ok,
+  Err,
+  Some,
+  None,
+  ok,
+  err,
+  some,
+  none,
+  isOk,
+  isErr,
+  isSome,
+  isNone,
+  isResurrectSuccess,
+  isResurrectFailure,
+  matchResurrectResult,
+  toError,
+  toResult,
+  toResultAsync,
+  fromNullable,
+  extractArchivedKeysSafe,
+  extractFootprintFromSuccessSafe,
+} from './result.js'

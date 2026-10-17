@@ -3,6 +3,7 @@ import type { ISorobanRpcClient } from './RpcClient.js'
 import type { StellarPublicKey } from './branded-types.js'
 import type {
   SorobanResurrectConfig,
+  ResolvedSorobanResurrectConfig,
   WalletAdapter,
   RestoreState,
   RestoreStateInfo,
@@ -411,7 +412,7 @@ export class SorobanResurrect {
   watchTTL(keys: xdr.LedgerKey[], opts: TTLWatchOptions = {}): TTLWatchHandle {
     const handle = watchTTL(
       this._server,
-      this._config as unknown as Required<SorobanResurrectConfig>,
+      this._config,
       this._stateMgr.emitter as never,
       keys,
       opts,
@@ -827,9 +828,10 @@ export class SorobanResurrect {
       archiveDetectionConcurrency?: number
     }
     return queryLedgerTTL(this._server, keys, {
-      chunkSize: cfg.archiveDetectionChunkSize,
-      concurrency: cfg.archiveDetectionConcurrency,
       ...opts,
+      chunkSize: opts.chunkSize ?? cfg.archiveDetectionChunkSize,
+      concurrency: opts.concurrency ?? cfg.archiveDetectionConcurrency,
+      runtime: opts.runtime ?? this._config.runtime,
     })
   }
 
@@ -869,6 +871,7 @@ export class SorobanResurrect {
   async getExpiringSoonEntries(
     keys: xdr.LedgerKey[],
     ledgersThreshold = 100_000,
+    opts: QueryLedgerTTLOptions = {},
   ): Promise<LedgerEntryTTLInfo[]> {
     return this._trackOperation(() => getExpiringSoonEntries(this._server, keys, ledgersThreshold))
   }

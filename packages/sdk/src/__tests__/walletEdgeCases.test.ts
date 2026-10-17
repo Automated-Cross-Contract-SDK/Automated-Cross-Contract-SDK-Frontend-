@@ -73,6 +73,9 @@ describe('wallet edge cases', () => {
 
     expect(result.success).toBe(false)
     expect(result.error).toContain('rejected')
+    if (!result.success) {
+      expect(result.errorCode).toBe('SIGNING_FAILED')
+    }
   })
 
   it('handles a malformed/unparseable signature returned by the wallet', async () => {

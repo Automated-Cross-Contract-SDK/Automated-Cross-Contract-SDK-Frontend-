@@ -11,8 +11,15 @@ import { expectTypeOf, test } from 'vitest'
 import { xdr } from '@stellar/stellar-sdk'
 import * as sdk from '../index.js'
 import type {
+  SorobanNetworkName,
+  SorobanNetworkPreset,
   WalletAdapter,
   WalletCapabilities,
+  ResolvedSorobanResurrectConfig,
+  SdkRuntime,
+  FeeBumpConfig,
+  HistoryStorage,
+  HistoryPersistenceOptions,
   ResurrectResult,
   ResurrectFailure,
   SorobanResurrectConfig,
@@ -53,6 +60,9 @@ type PublicExports =
   | 'getEffectiveConfig'
   | 'SorobanResurrectNetwork'
   | 'NETWORK_PRESETS'
+  | 'WalletError'
+  | 'ResurrectErrorCode'
+  | 'getResurrectErrorCode'
   | 'ResurrectError'
   | 'OriginalTransactionExpiredError'
   | 'createAdapter'
@@ -60,9 +70,13 @@ type PublicExports =
   | 'SUPPORTED_WALLETS'
   | 'asStellarPublicKey'
   | 'asXdrBase64'
-  | 'isProcessingState'
-  | 'PROCESSING_STATES'
-  | 'MultiSigWalletAdapter'
+  | 'parseTransactionFailure'
+  | 'getCachedLatestLedger'
+  | 'invalidateLatestLedgerCache'
+  | 'LATEST_LEDGER_CACHE_MS'
+  | 'fetchLedgerEntriesChunked'
+  | 'watchTTL'
+  | 'DEFAULT_MAX_HISTORY_ENTRIES'
   | 'LedgerWalletAdapter'
   | 'TrezorWalletAdapter'
   | 'createLedgerAdapter'

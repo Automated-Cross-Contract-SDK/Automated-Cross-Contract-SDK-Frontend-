@@ -437,7 +437,7 @@ export async function waitForTransaction(
     await delayWithSignal(jitter, signal)
   }
 
-  throw new Error(`Transaction ${hash} did not complete within ${pollTimeoutMs}ms`)
+  throw new ResurrectTimeoutError(`Transaction ${hash} did not complete within ${pollTimeoutMs}ms`)
 }
 
 function createAbortError(): Error {
@@ -686,7 +686,7 @@ async function pollTransactionAdaptive(
   signal?: AbortSignal,
 ): Promise<rpc.Api.GetTransactionResponse> {
   let attempt = 0
-  const startTime = Date.now()
+  const startTime = runtime.now()
 
   while (Date.now() - startTime < timeoutMs) {
     throwIfAborted(signal)
@@ -699,7 +699,7 @@ async function pollTransactionAdaptive(
     await delayWithSignal(delay, signal)
   }
 
-  throw new Error(`Transaction ${hash} did not complete within ${timeoutMs}ms`)
+  throw new ResurrectTimeoutError(`Transaction ${hash} did not complete within ${timeoutMs}ms`)
 }
 
 /**
@@ -1021,9 +1021,9 @@ export async function buildFeeBumpTransaction(
     throw new Error('Failed to build fee-bump transaction')
   }
 
-  const signedFeeBumpXdr = await sponsor.signFeeBump(asXdrBase64(feeBumpTx.toXDR()), {
-    networkPassphrase,
-  })
+  const signedFeeBumpXdr = await wrapSigningError(() =>
+    sponsor.signFeeBump(asXdrBase64(feeBumpTx.toXDR()), { networkPassphrase }),
+  )
 
   return asXdrBase64(signedFeeBumpXdr)
 }

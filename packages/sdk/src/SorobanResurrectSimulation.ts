@@ -1,5 +1,6 @@
 import { Transaction, rpc } from '@stellar/stellar-sdk'
 import { ArchivedLedgerEntry } from './types.js'
+import type { ResolvedSorobanResurrectConfig } from './types.js'
 import { SimulationCache } from './SimulationCache.js'
 import {
   isRestoreResponse,
@@ -30,7 +31,7 @@ import { runWithSignal, throwIfAborted, type AbortSignalOptions } from './AbortU
  */
 export class SorobanResurrectSimulator {
   private _server: ISorobanRpcClient
-  private _config: Required<SorobanResurrectConfig>
+  private _config: ResolvedSorobanResurrectConfig
   private _cache: SimulationCache | undefined
   private readonly _stateMgr: SorobanResurrectStateManager
 
@@ -42,7 +43,7 @@ export class SorobanResurrectSimulator {
    */
   constructor(
     server: ISorobanRpcClient,
-    config: Required<SorobanResurrectConfig>,
+    config: ResolvedSorobanResurrectConfig,
     cache: SimulationCache | undefined,
     stateMgr: SorobanResurrectStateManager,
   ) {

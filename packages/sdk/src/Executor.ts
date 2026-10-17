@@ -270,6 +270,7 @@ async function waitForTx(
 ): Promise<rpc.Api.GetTransactionResponse> {
   throwIfAborted(signal)
   const pollTimeout = config.pollTimeoutMs ?? POLL_TIMEOUT_MS
+  const runtime = config.runtime ?? SYSTEM_RUNTIME
 
   if (config.useSSE) {
     return waitForTransactionSSE(server, hash, pollTimeout, config.rpcUrl, { signal })
@@ -739,11 +740,12 @@ async function waitForTransactionWithCallbacks(
   pollIntervalMs: number,
   pollTimeoutMs: number,
   onConfirming?: (txHash: TxHash | string, attempt: number) => void,
+  runtime: SdkRuntime = SYSTEM_RUNTIME,
 ): Promise<rpc.Api.GetTransactionResponse> {
-  const startTime = Date.now()
+  const startTime = runtime.now()
   let attempt = 0
 
-  while (Date.now() - startTime < pollTimeoutMs) {
+  while (runtime.now() - startTime < pollTimeoutMs) {
     const response = await server.getTransaction(hash)
 
     if (
@@ -759,11 +761,11 @@ async function waitForTransactionWithCallbacks(
     // Exponential backoff with jitter: delay = min(100ms * 2^attempt, pollIntervalMs) * (0.5 + random * 0.5)
     const exponentialDelay = 100 * Math.pow(2, attempt)
     const delay = Math.min(exponentialDelay, pollIntervalMs)
-    const jitter = delay * (0.5 + Math.random() * 0.5)
-    await new Promise((resolve) => setTimeout(resolve, jitter))
+    const jitter = delay * (0.5 + runtime.random() * 0.5)
+    await new Promise<void>((resolve) => runtime.setTimeout(resolve, jitter))
   }
 
-  throw new Error(`Transaction ${hash} did not complete within ${pollTimeoutMs}ms`)
+  throw new ResurrectTimeoutError(`Transaction ${hash} did not complete within ${pollTimeoutMs}ms`)
 }
 
 /** Parameters for {@link restoreKeys}. */

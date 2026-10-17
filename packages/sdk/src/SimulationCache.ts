@@ -1,6 +1,8 @@
 import { Transaction } from '@stellar/stellar-sdk'
 import type { SimulateResponse } from './types.js'
 import { extractXdrOperations } from './Restorer.js'
+import type { SdkRuntime } from './types.js'
+import { SYSTEM_RUNTIME } from './runtime.js'
 
 /** Hit/miss/eviction counters exposed by {@link SimulationCache.stats}. */
 export interface SimulationCacheStats {
@@ -53,11 +55,12 @@ export class SimulationCache {
   private readonly maxSize: number
   private readonly ttlMs: number
   private readonly store: Map<string, { response: SimulateResponse; timestamp: number }>
+  private readonly runtime: SdkRuntime
   private hits = 0
   private misses = 0
   private evictions = 0
 
-  constructor(opts?: { maxSize?: number; ttlMs?: number }) {
+  constructor(opts?: { maxSize?: number; ttlMs?: number; runtime?: SdkRuntime }) {
     const maxSize = opts?.maxSize ?? 50
     const ttlMs = opts?.ttlMs ?? 30_000
     if (!Number.isInteger(maxSize) || maxSize < 1) {
@@ -68,6 +71,7 @@ export class SimulationCache {
     }
     this.maxSize = maxSize
     this.ttlMs = ttlMs
+    this.runtime = opts?.runtime ?? SYSTEM_RUNTIME
     this.store = new Map()
   }
 
@@ -141,7 +145,7 @@ export class SimulationCache {
     const key = fingerprint ?? memoizedFingerprint(this, transaction)
     const entry = this.store.get(key)
 
-    if (!entry || Date.now() - entry.timestamp > this.ttlMs) {
+    if (!entry || this.runtime.now() - entry.timestamp > this.ttlMs) {
       if (entry) this.store.delete(key)
       this.misses++
       return undefined
@@ -172,7 +176,7 @@ export class SimulationCache {
       }
     }
 
-    this.store.set(key, { response, timestamp: Date.now() })
+    this.store.set(key, { response, timestamp: this.runtime.now() })
   }
 
   /** Clears all cached entries. */
