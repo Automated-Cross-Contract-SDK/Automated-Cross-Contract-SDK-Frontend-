@@ -105,9 +105,7 @@ export class SorobanResurrectSimulator {
       signal,
     )
 
-    if (this._cache) {
-      this._cache.set(transaction, response)
-    }
+    cache?.set(transaction, response)
 
     return response
   }
@@ -227,6 +225,7 @@ export class SorobanResurrectSimulator {
    * is not used.
    */
   private async _detectViaDirect(transaction: Transaction): Promise<ArchivedLedgerEntry[]> {
+    const server = this._server
     const { detectArchivedKeysViaDirect } = await import('./Archiver.js')
     return detectArchivedKeysViaDirect(this._server, transaction, {
       chunkSize: this._config.archiveDetectionChunkSize,

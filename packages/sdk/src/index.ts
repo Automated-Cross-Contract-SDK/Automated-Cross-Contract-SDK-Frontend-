@@ -61,6 +61,7 @@ export type {
   // Error types
   ResurrectErrorCode,
 } from './types.js'
+export type { RestorePlan, DryRunResult } from './RestorePlan.js'
 export type { WalletErrorCode } from './types.js'
 export { WalletError } from './types.js'
 export { ResurrectError, RestoreFeeExceededError } from './errors.js'

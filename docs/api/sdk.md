@@ -125,7 +125,12 @@ npm install @trezor/connect-web
 
 Submits a transaction with automatic archive restoration. If the simulation detects archived entries, a restore transaction is built, signed, submitted, and confirmed before the original transaction is rebuilt and submitted. State transitions are published to all registered listeners throughout. See [`SubmitWithRestoreOptions`](/api/types#submitwithrestoreoptions) for the full set of lifecycle callbacks.
 
-##### Dry-run mode
+Call `sr.cancel()` to abort every active `submitWithRestore` workflow, or pass
+an `AbortSignal` as `signal` in `SubmitWithRestoreOptions` to cancel one call.
+Cancellation prevents subsequent workflow steps and stops confirmation polling;
+it cannot dismiss an in-flight wallet prompt or retract a transaction already
+submitted to the network. The method returns `true` only when it newly cancels
+at least one active workflow.
 
 Call `previewRestore` for a walletless preview, or pass `dryRun: true` to
 `submitWithRestore` when using the same options shape as a normal submission:

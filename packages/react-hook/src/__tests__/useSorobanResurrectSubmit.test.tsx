@@ -24,6 +24,7 @@ vi.mock('@soroban-resurrect/sdk', async (importOriginal) => {
         originalTxHash: 'xyz',
       }),
       detectArchivedKeys: vi.fn().mockResolvedValue([]),
+      cancel: vi.fn().mockReturnValue(false),
       reset: vi.fn(),
     })),
   }
@@ -43,6 +44,7 @@ function makeFakeResurrect() {
       listeners.forEach((l) => l(info))
     },
     submitWithRestore: vi.fn(),
+    cancel: vi.fn().mockReturnValue(false),
     reset: vi.fn(),
   }
 }
@@ -96,7 +98,11 @@ describe('useSorobanResurrectSubmit', () => {
       returned = await result.current.submit(tx, wallet)
     })
 
-    expect(fake.submitWithRestore).toHaveBeenCalledWith({ transaction: tx, wallet })
+    expect(fake.submitWithRestore).toHaveBeenCalledWith({
+      transaction: tx,
+      wallet,
+      signal: expect.any(AbortSignal),
+    })
     expect(returned).toEqual(okResult)
     expect(result.current.result).toEqual(okResult)
     expect(result.current.error).toBeNull()
@@ -143,6 +149,34 @@ describe('useSorobanResurrectSubmit', () => {
     expect(returned.success).toBe(false)
     expect(returned.error).toBe('network down')
     expect(result.current.error).toBe('network down')
+  })
+
+  it('cancels its workflow and aborts it when unmounted', async () => {
+    let resolveSubmit!: (value: { success: boolean; archivedKeysDetected: number }) => void
+    fake.submitWithRestore.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveSubmit = resolve
+        }),
+    )
+    const onSettled = vi.fn()
+    const { result, unmount } = renderHook(() =>
+      useSorobanResurrectSubmit({ resurrect: fake as never, onSettled }),
+    )
+
+    let submitPromise!: Promise<unknown>
+    await act(async () => {
+      submitPromise = result.current.submit(tx, wallet)
+      await Promise.resolve()
+    })
+    const signal = fake.submitWithRestore.mock.calls[0][0].signal as AbortSignal
+    expect(result.current.cancel()).toBe(true)
+    expect(signal.aborted).toBe(true)
+    unmount()
+
+    resolveSubmit({ success: true, archivedKeysDetected: 0 })
+    await submitPromise
+    expect(onSettled).not.toHaveBeenCalled()
   })
 
   it('reset() clears result/error and resets the SDK', async () => {

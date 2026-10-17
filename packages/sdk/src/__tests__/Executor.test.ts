@@ -106,6 +106,24 @@ describe('executeWithRestore', () => {
     vi.clearAllMocks()
   })
 
+  it('returns a cancellation result without simulating or signing when already aborted', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const wallet = makeWallet()
+
+    const result = await executeWithRestore({
+      server,
+      transaction: makeSampleTx(),
+      wallet,
+      config: defaultConfig,
+      signal: controller.signal,
+    })
+
+    expect(result).toMatchObject({ success: false, error: 'Operation cancelled' })
+    expect(server.simulateTransaction).not.toHaveBeenCalled()
+    expect(wallet.signTransaction).not.toHaveBeenCalled()
+  })
+
   it('returns error result when simulation fails', async () => {
     vi.mocked(server.simulateTransaction).mockResolvedValue(makeErrorResponse() as never)
 

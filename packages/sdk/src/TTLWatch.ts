@@ -356,6 +356,7 @@ export function watchTTL(
         keys,
         thresholdLedgers,
       )
+      if (stopped) return
       if (expiring.length === 0) return
 
       emitter.emit('ttlLow', expiring)
@@ -367,6 +368,7 @@ export function watchTTL(
         xdr.LedgerKey.fromXDR(entry.keyBase64, 'base64'),
       )
       const publicKey = await wallet.getPublicKey()
+      if (stopped) return
 
       const restoreConfig = configForWalletRestore(config, wallet)
       const restoreTx = await buildRestoreTxForKeys(
@@ -393,6 +395,7 @@ export function watchTTL(
         config.pollIntervalMs,
         config.pollTimeoutMs,
       )
+      if (stopped) return
 
       if (status.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
         throw new Error('TTL auto-extend restore transaction failed to confirm')

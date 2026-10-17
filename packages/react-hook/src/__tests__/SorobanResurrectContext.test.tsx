@@ -9,6 +9,7 @@ const mockReset = vi.fn()
 const mockDispose = vi.fn()
 const mockDetectArchivedKeys = vi.fn()
 const mockSubmitWithRestore = vi.fn()
+const mockCancel = vi.fn()
 
 vi.mock('@soroban-resurrect/sdk', () => ({
   isProcessingState: (state: string) =>
@@ -19,6 +20,7 @@ vi.mock('@soroban-resurrect/sdk', () => ({
     dispose: mockDispose,
     detectArchivedKeys: mockDetectArchivedKeys,
     submitWithRestore: mockSubmitWithRestore,
+    cancel: mockCancel,
     config: { rpcUrl: 'https://test' },
     state: 'idle',
   })),
@@ -29,6 +31,7 @@ const testConfig = { rpcUrl: 'https://soroban-testnet.stellar.org' }
 describe('SorobanResurrectProvider', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockCancel.mockReturnValue(false)
     mockOnStateChange.mockReturnValue(vi.fn())
   })
 
@@ -91,6 +94,7 @@ describe('SorobanResurrectProvider', () => {
 
     unmount()
     expect(unsubscribe).toHaveBeenCalledTimes(1)
+    expect(mockCancel).toHaveBeenCalledTimes(1)
   })
 
   it('disposes Strict Mode clients and subscriptions across cleanup and remount', () => {
@@ -221,6 +225,18 @@ describe('SorobanResurrectProvider', () => {
       success: true,
       originalTxHash: 'test-hash',
       archivedKeysDetected: 0,
+    })
+
+    it('exposes cancellation through the context', () => {
+      mockCancel.mockReturnValue(true)
+      const { result } = renderHook(() => useSorobanResurrectContext(), {
+        wrapper: ({ children }) => (
+          <SorobanResurrectProvider config={testConfig}>{children}</SorobanResurrectProvider>
+        ),
+      })
+
+      expect(result.current.cancel()).toBe(true)
+      expect(mockCancel).toHaveBeenCalledTimes(1)
     })
 
     const { result } = renderHook(() => useSorobanResurrectContext(), {

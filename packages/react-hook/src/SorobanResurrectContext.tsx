@@ -37,6 +37,8 @@ export interface SorobanResurrectContextValue {
   isProcessing: boolean
   /** Submit a transaction with automatic archive restoration. */
   submitWithRestore: (transaction: Transaction, wallet: WalletAdapter) => Promise<ResurrectResult>
+  /** Cancel active submit/restore workflows. Already-submitted transactions cannot be recalled. */
+  cancel: () => boolean
   /** Check if a transaction requires archive restoration. */
   detectArchivedKeys: (transaction: Transaction) => Promise<ArchivedLedgerEntry[]>
   /** Reset state back to idle. */
@@ -137,8 +139,9 @@ export function SorobanResurrectProvider({ config, children }: SorobanResurrectP
     const r = new SorobanResurrect(config)
     resurrectRef.current = r
     setState({ state: 'idle', message: '' })
+    let mounted = true
     const unsubscribe = r.onStateChange((info: RestoreStateInfo) => {
-      setState(info)
+      if (mounted) setState(info)
     })
     for (const subscription of eventSubscriptionsRef.current) subscription.attach(r)
 
@@ -169,6 +172,8 @@ export function SorobanResurrectProvider({ config, children }: SorobanResurrectP
     },
     [],
   )
+
+  const cancel = useCallback(() => resurrectRef.current?.cancel() ?? false, [])
 
   const reset = useCallback((fromState?: RestoreState) => {
     resurrectRef.current?.reset(fromState)
@@ -204,6 +209,7 @@ export function SorobanResurrectProvider({ config, children }: SorobanResurrectP
     state,
     isProcessing,
     submitWithRestore,
+    cancel,
     detectArchivedKeys,
     reset,
     on,

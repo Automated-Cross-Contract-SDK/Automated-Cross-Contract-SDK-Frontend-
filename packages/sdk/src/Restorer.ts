@@ -546,9 +546,10 @@ async function streamTransactionViaEvents(
   // SSE relies on browser-standard fetch/AbortController with a readable
   // stream body. Older Node runtimes (< 18) may lack these — degrade
   // gracefully to the polling fallback instead of throwing.
-  if (typeof fetch === 'undefined' || typeof AbortController === 'undefined') {
+  if (!isSSEEnvironmentSupported()) {
     return null
   }
+  throwIfCancelled(signal)
 
   // Determine the latest ledger as a starting point for SSE streaming.
   // We try getLatestLedger first, then fall back to the transaction's latestLedger.
@@ -612,6 +613,7 @@ async function streamTransactionViaEvents(
       }),
       signal: controller.signal,
     })
+    throwIfCancelled(signal)
 
     if (!response.ok || !response.body || typeof response.body.getReader !== 'function') {
       // A `fetch` implementation that resolves but returns a body without a
@@ -628,6 +630,7 @@ async function streamTransactionViaEvents(
 
     while (true) {
       const { done, value } = await reader.read()
+      throwIfCancelled(signal)
       if (done) break
 
       buffer += decoder.decode(value, { stream: true })

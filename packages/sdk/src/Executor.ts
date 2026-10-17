@@ -183,6 +183,8 @@ async function signAndMaybeFeeBump(params: {
     signal,
   } = params
 
+  throwIfCancelled(signal)
+
   // Fail fast when a fee-bump is requested but the wallet has opted out of it,
   // rather than prompting the user only to reject the envelope later.
   if (feeBumpConfig) {
@@ -494,6 +496,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
             ),
           signal,
         )
+        throwIfCancelled(signal)
 
         throwIfAborted(signal)
         onSigningOriginal?.()

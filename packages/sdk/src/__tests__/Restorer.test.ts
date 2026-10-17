@@ -191,6 +191,21 @@ describe('Restorer', () => {
         'did not complete within',
       )
     })
+
+    it('stops polling promptly when its abort signal is triggered', async () => {
+      const server = makeMockServer()
+      vi.mocked(server.getTransaction).mockResolvedValue({
+        status: rpc.Api.GetTransactionStatus.NOT_FOUND,
+      } as never)
+      const controller = new AbortController()
+      const waiting = waitForTransaction(server, 'hash', 60_000, 60_000, controller.signal)
+
+      await Promise.resolve()
+      controller.abort()
+
+      await expect(waiting).rejects.toThrow('Operation cancelled')
+      expect(server.getTransaction).toHaveBeenCalledTimes(1)
+    })
   })
 
   describe('buildRestoreTransaction', () => {

@@ -1,4 +1,4 @@
-import { rpc, Transaction, xdr } from '@stellar/stellar-sdk'
+import { rpc, Transaction, TransactionBuilder, xdr } from '@stellar/stellar-sdk'
 import type { ISorobanRpcClient } from './RpcClient.js'
 import type { StellarPublicKey } from './branded-types.js'
 import type {
@@ -17,8 +17,9 @@ import { resolveConfig } from './SorobanResurrectConfig.js'
 import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
 import { SorobanResurrectSimulator } from './SorobanResurrectSimulation.js'
 import { SorobanResurrectExecutor } from './SorobanResurrectExecution.js'
-import { isRestoreResponse, extractArchivedKeys } from './Archiver.js'
+import { isErrorResponse, isRestoreResponse, isSuccessResponse, extractArchivedKeys } from './Archiver.js'
 import { buildRestoreCostEstimate, type RestoreCostEstimate } from './feeCalculation.js'
+import type { RestorePlan } from './RestorePlan.js'
 import type { TransactionHistoryEntry } from './TransactionHistory.js'
 import {
   queryLedgerTTL,
@@ -261,9 +262,11 @@ export class SorobanResurrect {
    * Re-binds the RPC client and network passphrase in place — no need to
    * construct a new `SorobanResurrect` instance to switch networks.
    *
-   * History, registered listeners, and the internal state machine instance
-   * are all kept intact; only the underlying RPC client and resolved config
-   * are swapped. Emits a `networkChanged` event once the switch completes.
+   * Registered listeners and transaction history are kept intact. Network-
+   * scoped state, simulation/ledger caches, and TTL watches are cleared. An
+   * in-flight workflow must finish before switching. Changing `rpcUrl`
+   * constructs a fresh RPC client unless a replacement `rpcClient` is
+   * explicitly supplied.
    *
    * @param presetOrConfig - Either a well-known network name (`'testnet'`,
    *   `'mainnet'`, `'futurenet'`) or a partial config overriding the current
@@ -281,6 +284,13 @@ export class SorobanResurrect {
   switchNetwork(
     presetOrConfig: SorobanNetworkName | (Partial<SorobanResurrectConfig> & { rpcUrl: string }),
   ): void {
+    if (
+      this._activeOperations > 0 ||
+      [...this._ttlWatches].some((handle) => handle.inFlight)
+    ) {
+      throw new Error('Cannot switch networks while an SDK operation or TTL watch cycle is in progress')
+    }
+
     const overrideConfig: SorobanResurrectConfig =
       typeof presetOrConfig === 'string'
         ? {
@@ -289,16 +299,24 @@ export class SorobanResurrect {
             networkPassphrase: NETWORK_PRESETS[presetOrConfig].networkPassphrase,
             rpcClient: undefined,
           }
-        : { ...this._config, ...presetOrConfig }
+        : {
+            ...this._config,
+            ...presetOrConfig,
+            rpcClient:
+              presetOrConfig.rpcClient ??
+              (presetOrConfig.rpcUrl !== this._config.rpcUrl ? undefined : this._server),
+          }
 
     const resolved = resolveConfig(overrideConfig)
 
     invalidateLatestLedgerCache(this._server)
+    for (const handle of [...this._ttlWatches]) handle.stop()
     this._server = resolved.server
     this._config = resolved.config
     this._configView = this.buildConfigView(overrideConfig)
     this._simulator.rebind(resolved.server, resolved.config, resolved.simulationCache)
     this._executor.rebind(resolved.server, resolved.config)
+    this._stateMgr.reset()
 
     this._stateMgr.emitter.emit('networkChanged', {
       rpcUrl: resolved.config.rpcUrl,
@@ -526,13 +544,54 @@ export class SorobanResurrect {
   ): Promise<RestoreCostEstimate> {
     const response = await this._simulator.simulate(transaction, options)
 
-    if (isRestoreResponse(response)) {
-      const archivedKeys = extractArchivedKeys(response)
-      const minResourceFee = parseInt(response.minResourceFee, 10)
-      return buildRestoreCostEstimate(minResourceFee, archivedKeys.length, this._config)
-    }
+          const response = await this._server.simulateTransaction(simulationTx)
+          if (isErrorResponse(response)) {
+            throw new Error(`Transaction simulation failed: ${response.error}`)
+          }
+          if (!isRestoreResponse(response) && !isSuccessResponse(response)) {
+            throw new Error('Transaction simulation returned an unrecognized response')
+          }
 
-    return buildRestoreCostEstimate(0, 0, this._config)
+          let archivedKeys: string[] = []
+          let minResourceFee = 0
+          if (isRestoreResponse(response)) {
+            if (!response._parsed) {
+              throw new Error('Transaction simulation returned an unparsed restore plan')
+            }
+            archivedKeys = response.transactionData
+              .getFootprint()
+              .readWrite()
+              .map((key) => key.toXDR('base64'))
+            minResourceFee = Number.parseInt(response.minResourceFee, 10)
+            if (!Number.isSafeInteger(minResourceFee) || minResourceFee < 0) {
+              throw new Error(`Invalid minimum restore resource fee: ${response.minResourceFee}`)
+            }
+          }
+
+          const estimate = buildRestoreCostEstimate(minResourceFee, archivedKeys.length, this._config)
+          return {
+            transaction: {
+              xdr: transactionXdr,
+              sourceAccount: transaction.source,
+              sequence: transaction.sequence,
+              fee: transaction.fee,
+              operationCount: transaction.operations.length,
+            },
+            network: {
+              rpcUrl: this._config.rpcUrl,
+              networkPassphrase: this._config.networkPassphrase,
+            },
+            wouldNeedRestore: estimate.wouldNeedRestore,
+            archivedKeys,
+            minResourceFee: estimate.minResourceFee,
+            feeMultiplier: estimate.multiplier,
+            estimatedRestoreFee: estimate.estimatedFee,
+          }
+        })
+      }
+
+      return buildRestoreCostEstimate(0, 0, this._config)
+    })
   }
 
   /**
@@ -730,7 +789,16 @@ export class SorobanResurrect {
     wallet: WalletAdapter,
     opts: RestoreKeysOptions & AbortSignalOptions = {},
   ): Promise<ResurrectResult> {
-    return this._executor.restoreKeys(keys, wallet, opts)
+    return this._trackOperation(() => this._executor.restoreKeys(keys, wallet, opts))
+  }
+
+  private async _trackOperation<T>(run: () => Promise<T>): Promise<T> {
+    this._activeOperations++
+    try {
+      return await run()
+    } finally {
+      this._activeOperations--
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -802,7 +870,7 @@ export class SorobanResurrect {
     keys: xdr.LedgerKey[],
     ledgersThreshold = 100_000,
   ): Promise<LedgerEntryTTLInfo[]> {
-    return getExpiringSoonEntries(this._server, keys, ledgersThreshold)
+    return this._trackOperation(() => getExpiringSoonEntries(this._server, keys, ledgersThreshold))
   }
 
   /**
