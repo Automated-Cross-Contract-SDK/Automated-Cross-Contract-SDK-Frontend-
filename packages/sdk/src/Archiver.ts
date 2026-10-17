@@ -1,6 +1,7 @@
 import { rpc, Transaction } from '@stellar/stellar-sdk'
 import { xdr } from '@stellar/stellar-sdk'
 import { ArchivedLedgerEntry, SimulateResponse } from './types.js'
+import { getLedgerKeyEntryType } from './TTLHelpers.js'
 import {
   asContractIdHex,
   type ContractIdHex,
@@ -116,6 +117,7 @@ export function extractArchivedKeys(
       keys.push({
         key: ledgerKey,
         keyBase64,
+        entryType: getLedgerKeyEntryType(ledgerKey),
       })
     }
   } catch (err) {
@@ -206,17 +208,19 @@ async function detectArchivedChunk(
     const knownKeys = new Set<string>()
     if (result.entries) {
       for (const entry of result.entries) {
+          key,
         knownKeys.add(entry.key.toXDR('base64'))
       }
     }
     // Check each key in the chunk; if not in returned entries, it's archived
     const archived: ArchivedLedgerEntry[] = []
     for (const key of chunk) {
-      const keyXdr = key.toXDR('base64')
+      const keyXdr = asXdrBase64(key.toXDR('base64'))
       if (!knownKeys.has(keyXdr)) {
         archived.push({
           key,
-          keyBase64: serializeLedgerKey(key),
+          keyBase64: keyXdr,
+          entryType: getLedgerKeyEntryType(key),
         })
       }
     }
@@ -226,7 +230,8 @@ async function detectArchivedChunk(
     // On network error, conservatively treat all keys in chunk as archived
     return chunk.map((key) => ({
       key,
-      keyBase64: serializeLedgerKey(key),
+      keyBase64: asXdrBase64(key.toXDR('base64')),
+      entryType: getLedgerKeyEntryType(key),
     }))
   }
 }

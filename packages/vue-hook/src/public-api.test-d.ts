@@ -42,6 +42,7 @@ test('useSorobanResurrect return shape', () => {
     UseSorobanResurrectReturn['resurrect']['value']
   >().toEqualTypeOf<SorobanResurrect | null>()
   expectTypeOf<UseSorobanResurrectReturn['reset']>().returns.toEqualTypeOf<void>()
+  expectTypeOf<UseSorobanResurrectReturn['cancel']>().returns.toEqualTypeOf<void>()
 })
 
 test('plugin options are pinned', () => {

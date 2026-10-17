@@ -1,7 +1,15 @@
 {
   "name": "soroban-resurrect",
   "version": "0.1.0",
-  "keywords": ["soroban", "stellar", "cap-0066", "ttl", "restore", "smart-contracts", "wallet"],
+  "keywords": [
+    "soroban",
+    "stellar",
+    "cap-0066",
+    "ttl",
+    "restore",
+    "smart-contracts",
+    "wallet"
+  ],
   "private": true,
   "description": "Automated Cross-Contract State Restoration SDK & Wallet Middleware for Soroban",
   "license": "MIT",
@@ -48,13 +56,14 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@vitest/coverage-v8": "^5.0.2",
+    "esbuild": "^0.28.2",
     "eslint": "^10.11.0",
     "eslint-config-prettier": "^10.1.8",
     "husky": "^9.1.7",
     "lint-staged": "^17.5.1",
     "prettier": "^3.9.9",
     "turbo": "^2.11.4",
-    "typescript": "^7.0.2",
+    "typescript": "^5.9.2",
     "typescript-eslint": "^8.70.1"
   },
   "overrides": {

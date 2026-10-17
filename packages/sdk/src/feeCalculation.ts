@@ -21,18 +21,18 @@ export function resolveRestoreFeeMultiplier(config: SorobanResurrectConfig): num
  * {@link RESTORE_FEE_MULTIPLIER} (3x) but can be overridden via
  * config.restoreFeeMultiplier.
  *
- * A 3x multiplier is a reasonable balance: high enough to ensure inclusion
- * during network congestion, but not so excessive that users overpay.
+ * A 3x multiplier keeps restore transactions competitive under congestion
+ * without requiring users to hand-tune the fee cap in the common case.
  *
  * @param minResourceFee - Minimum resource fee from simulation (integer stroops).
  * @param config - SDK configuration (used to resolve the multiplier).
  * @returns The calculated restore fee as a string (required by TransactionBuilder).
  *
  * @example
- * `	s
+ * ```ts
  * const fee = calculateRestoreFee(parseInt(simResponse.minResourceFee, 10), config)
  * // fee === '300' when minResourceFee === 100 and multiplier === 3
- * `
+ * ```
  */
 export function calculateRestoreFee(
   minResourceFee: number,

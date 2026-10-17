@@ -21,7 +21,12 @@ import {
   rpc,
   xdr,
 } from '@stellar/stellar-sdk'
-import { SorobanRpcClient, createRpcClient, type ISorobanRpcClient } from '../RpcClient.js'
+import {
+  SorobanRpcClient,
+  RetryingRpcClient,
+  createRpcClient,
+  type ISorobanRpcClient,
+} from '../RpcClient.js'
 import { SorobanResurrect } from '../SorobanResurrect.js'
 import { executeWithRestore } from '../Executor.js'
 import { detectArchivedEntries } from '../Archiver.js'
@@ -79,6 +84,59 @@ describe('ISorobanRpcClient interface', () => {
     expect(typeof client.getAccount).toBe('function')
     expect(typeof client.getLedgerEntries).toBe('function')
     expect(typeof client.getLatestLedger).toBe('function')
+  })
+
+  describe('RetryingRpcClient', () => {
+    it('retries transient transport errors with the configured attempt limit', async () => {
+      const client = makeMockRpcClient()
+      vi.mocked(client.getAccount)
+        .mockRejectedValueOnce(new TypeError('fetch failed'))
+        .mockRejectedValueOnce(Object.assign(new Error('gateway unavailable'), { status: 503 }))
+        .mockResolvedValue(new Account(Keypair.random().publicKey(), '1'))
+
+      const retrying = new RetryingRpcClient(client, {
+        maxRetries: 2,
+        baseDelayMs: 0,
+        maxDelayMs: 0,
+      })
+
+      await expect(retrying.getAccount('GTEST')).resolves.toBeInstanceOf(Account)
+      expect(client.getAccount).toHaveBeenCalledTimes(3)
+    })
+
+    it('does not retry deterministic transaction errors or generic client errors', async () => {
+      const client = makeMockRpcClient()
+      vi.mocked(client.getAccount).mockRejectedValue(
+        new Error('tx_bad_seq: invalid transaction sequence'),
+      )
+      const retrying = new RetryingRpcClient(client, { maxRetries: 3, baseDelayMs: 0 })
+
+      await expect(retrying.getAccount('GTEST')).rejects.toThrow('tx_bad_seq')
+      expect(client.getAccount).toHaveBeenCalledTimes(1)
+
+      vi.mocked(client.getAccount).mockRejectedValue(new Error('invalid transaction XDR'))
+      await expect(retrying.getAccount('GTEST')).rejects.toThrow('invalid transaction')
+      expect(client.getAccount).toHaveBeenCalledTimes(2)
+    })
+
+    it('retries explicit TRY_AGAIN_LATER submissions but leaves other server responses alone', async () => {
+      const client = makeMockRpcClient()
+      vi.mocked(client.sendTransaction)
+        .mockResolvedValueOnce({ status: 'TRY_AGAIN_LATER' } as never)
+        .mockResolvedValueOnce({ status: 'TRY_AGAIN_LATER' } as never)
+        .mockResolvedValueOnce({ status: 'PENDING', hash: 'tx-hash' } as never)
+      const retrying = new RetryingRpcClient(client, {
+        maxRetries: 2,
+        baseDelayMs: 0,
+        maxDelayMs: 0,
+      })
+
+      await expect(retrying.sendTransaction(makeSampleTx())).resolves.toMatchObject({
+        status: 'PENDING',
+        hash: 'tx-hash',
+      })
+      expect(client.sendTransaction).toHaveBeenCalledTimes(3)
+    })
   })
 
   it('exposes exactly the six RPC methods used by the SDK', () => {

@@ -14,15 +14,19 @@ import type {
   WalletAdapter,
   WalletCapabilities,
   ResurrectResult,
+  ResurrectFailure,
   SorobanResurrectConfig,
   RestoreState,
   RestoreStateInfo,
   SorobanResurrectEvents,
   SubmitWithRestoreOptions,
+  AbortSignalOptions,
   ArchivedLedgerEntry,
   HardwareWalletAdapter,
   FeeBumpSponsor,
   DryRunResult,
+  RebuildTimeBounds,
+  ExpiredTransactionInfo,
   TxDiagnostics,
   ISorobanRpcClient,
   KnownWallet,
@@ -33,7 +37,10 @@ import type {
   TransactionHistoryEntry,
   LedgerEntryTTLInfo,
   RestoreCostEstimate,
-  XdrBase64,
+  ConfirmationPolicy,
+  ConfirmationTimeoutBehavior,
+  SubmitRetryOptions,
+  SubmitLifecycleEvent,
 } from '../index.js'
 
 /**
@@ -45,6 +52,7 @@ type PublicExports =
   | 'SorobanResurrectNetwork'
   | 'NETWORK_PRESETS'
   | 'ResurrectError'
+  | 'OriginalTransactionExpiredError'
   | 'createAdapter'
   | 'isKnownWallet'
   | 'SUPPORTED_WALLETS'
@@ -151,13 +159,39 @@ test('SorobanResurrectConfig and result types keep their shape', () => {
   expectTypeOf<ResurrectResult['success']>().toEqualTypeOf<boolean>()
   expectTypeOf<ResurrectResult['archivedKeysDetected']>().toEqualTypeOf<number>()
   expectTypeOf<ResurrectResult['error']>().toEqualTypeOf<string | undefined>()
+  expectTypeOf<ResurrectResult['failure']>().toEqualTypeOf<ResurrectFailure | undefined>()
+  expectTypeOf<ResurrectResult['expiredTransaction']>().toEqualTypeOf<
+    ExpiredTransactionInfo | undefined
+  >()
+  expectTypeOf<ResurrectFailure['retryable']>().toEqualTypeOf<boolean>()
+  expectTypeOf<ResurrectFailure['nextStep']>().toEqualTypeOf<string>()
 
   expectTypeOf<SubmitWithRestoreOptions>().toHaveProperty('transaction')
   expectTypeOf<SubmitWithRestoreOptions>().toHaveProperty('wallet')
+  expectTypeOf<AbortSignalOptions['signal']>().toEqualTypeOf<AbortSignal | undefined>()
+  expectTypeOf<Parameters<SorobanResurrect['submitWithRestore']>[0]>().toHaveProperty('signal')
+  expectTypeOf<Parameters<SorobanResurrect['retry']>[2]>().toMatchTypeOf<AbortSignalOptions>()
+  expectTypeOf<Parameters<SorobanResurrect['sendTransaction']>[2]>().toMatchTypeOf<AbortSignalOptions>()
+  expectTypeOf<
+    Parameters<SorobanResurrect['submitBatchWithRestore']>[1]
+  >().toMatchTypeOf<AbortSignalOptions>()
+  expectTypeOf<Parameters<SorobanResurrect['restoreKeys']>[2]>().toHaveProperty('signal')
+  expectTypeOf<
+    Parameters<SorobanResurrect['buildRestoreTx']>[3]
+  >().toMatchTypeOf<AbortSignalOptions>()
+  expectTypeOf<
+    Parameters<SorobanResurrect['buildBatchRestoreTx']>[2]
+  >().toMatchTypeOf<AbortSignalOptions>()
   expectTypeOf<ArchivedLedgerEntry>().toHaveProperty('keyBase64')
 
   expectTypeOf<FeeBumpSponsor>().toHaveProperty('signFeeBump')
   expectTypeOf<DryRunResult>().toHaveProperty('wouldNeedRestore')
+  expectTypeOf<DryRunResult>().toHaveProperty('intendedOperations')
+  expectTypeOf<SubmitWithRestoreOptions>().toHaveProperty('dryRun')
+  expectTypeOf<InstanceType<typeof sdk.SorobanResurrect>>().toHaveProperty('previewRestore')
+  expectTypeOf<RebuildTimeBounds>().toHaveProperty('maxTime')
+  expectTypeOf<SubmitWithRestoreOptions>().toHaveProperty('rebuildTimeBounds')
+  expectTypeOf<SubmitWithRestoreOptions>().toHaveProperty('approveExpiredRebuild')
   expectTypeOf<TxDiagnostics>().toHaveProperty('events')
 })
 
@@ -196,8 +230,15 @@ test('scan / multisig / history / TTL public types exist', () => {
   expectTypeOf<RestoreCostEstimate>().not.toBeAny()
 })
 
-test('ledger-key serializer is a typed public API', () => {
-  expectTypeOf(sdk.serializeLedgerKey).toBeFunction()
-  expectTypeOf(sdk.serializeLedgerKey).parameter(0).toEqualTypeOf<xdr.LedgerKey>()
-  expectTypeOf(sdk.serializeLedgerKey).returns.toEqualTypeOf<XdrBase64>()
+test('recovery policies and lifecycle types are stable public types', () => {
+  expectTypeOf<ConfirmationPolicy>().toEqualTypeOf<
+    'wait-for-finality' | 'return-on-submission'
+  >()
+  expectTypeOf<ConfirmationTimeoutBehavior>().toEqualTypeOf<'error' | 'return-pending'>()
+  expectTypeOf<SubmitRetryOptions>().toHaveProperty('maxRetries')
+  expectTypeOf<SubmitLifecycleEvent['phase']>().toMatchTypeOf<string>()
+  expectTypeOf<SubmitWithRestoreOptions>().toHaveProperty('requestId')
+  expectTypeOf<SubmitWithRestoreOptions>().toHaveProperty('confirmationPolicy')
+  expectTypeOf<SubmitWithRestoreOptions>().toHaveProperty('confirmationTimeoutMs')
+  expectTypeOf<SubmitWithRestoreOptions>().toHaveProperty('confirmationTimeoutBehavior')
 })

@@ -118,16 +118,21 @@ describe('ensureAddressAuthorization (#244)', () => {
     // Wallet "signs" by echoing the entry back (a valid SorobanAuthorizationEntry XDR).
     const signAuthEntry = vi.fn(async (entryXdr: string) => entryXdr)
     const wallet = { signAuthEntry } as unknown as AuthorizationWalletAdapter
+    const controller = new AbortController()
 
     const res = await ensureAddressAuthorization({
       transaction: tx,
       simulation: { result: { auth: [entry] } },
       wallet,
       networkPassphrase: NP,
+      signal: controller.signal,
     })
 
     expect(signAuthEntry).toHaveBeenCalledTimes(1)
-    expect((signAuthEntry.mock.calls[0] as unknown[])[1]).toMatchObject({ networkPassphrase: NP })
+    expect((signAuthEntry.mock.calls[0] as unknown[])[1]).toMatchObject({
+      networkPassphrase: NP,
+      signal: controller.signal,
+    })
     expect(res.signed).toBe(true)
     expect(res.signedEntryCount).toBe(1)
 

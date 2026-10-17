@@ -2,6 +2,7 @@ import { rpc, xdr } from '@stellar/stellar-sdk'
 
 import { asXdrBase64 } from './branded-types.js'
 import type { ArchivedLedgerEntry } from './types.js'
+import { getLedgerKeyEntryType } from './TTLHelpers.js'
 
 export type Result<T, E = Error> = Ok<T, E> | Err<T, E>
 export type Option<T> = Some<T> | None<T>
@@ -212,7 +213,11 @@ export function extractArchivedKeysSafe(
 
       for (const ledgerKey of readWrite) {
         const keyBase64 = asXdrBase64(ledgerKey.toXDR('base64'))
-        keys.push({ key: ledgerKey, keyBase64 })
+        keys.push({
+          key: ledgerKey,
+          keyBase64,
+          entryType: getLedgerKeyEntryType(ledgerKey),
+        })
       }
     } catch {
       return keys
