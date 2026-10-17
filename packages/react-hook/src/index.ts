@@ -3,6 +3,7 @@ export {
   useSorobanResurrectContext,
   useOptionalSorobanResurrectContext,
   SorobanResurrectContext,
+  useSorobanResurrectSelector,
 } from './SorobanResurrectContext.js'
 
 export { useSorobanResurrect } from './useSorobanResurrect.js'
@@ -15,7 +16,10 @@ export { useRestoreEstimate } from './useRestoreEstimate.js'
 
 export { useSorobanResurrectNetwork } from './useSorobanResurrectNetwork.js'
 
-export type { SorobanResurrectProviderProps } from './SorobanResurrectContext.js'
+export type {
+  SorobanResurrectProviderProps,
+  SorobanResurrectContextValue,
+} from './SorobanResurrectContext.js'
 
 export type {
   UseSorobanResurrectOptions,

@@ -41,6 +41,19 @@ function makeSampleTx(): Transaction {
     .build()
 }
 
+function makeExpiredSampleTx(): Transaction {
+  const kp = Keypair.random()
+  const account = new Account(kp.publicKey(), '41')
+  const now = Math.floor(Date.now() / 1000)
+  return new TransactionBuilder(account, {
+    fee: '100',
+    networkPassphrase: Networks.TESTNET,
+  })
+    .addOperation(Operation.restoreFootprint({}))
+    .setTimebounds(0, now - 1)
+    .build()
+}
+
 function makeWallet(): WalletAdapter {
   return {
     isConnected: vi.fn().mockResolvedValue(true),
@@ -120,6 +133,10 @@ function makeIntegrationServer(callLog: string[]) {
         callLog.push('sendTransaction:original')
         return { hash: 'original-tx-hash' }
       }),
+    getLatestLedger: vi.fn().mockImplementation(async () => {
+      callLog.push('getLatestLedger')
+      return { sequence: 100 }
+    }),
     getTransaction: vi.fn().mockImplementation(async () => {
       callLog.push('getTransaction')
       return { status: rpc.Api.GetTransactionStatus.SUCCESS }
@@ -140,6 +157,7 @@ describe('full restore workflow integration', () => {
   it('drives the full restore-and-resubmit workflow through executeWithRestore in the correct order', async () => {
     const server = makeIntegrationServer(callLog)
     const wallet = makeWallet()
+    const originalTx = makeSampleTx()
 
     const onRestoreNeeded = vi.fn()
     const onSigningRestore = vi.fn()
@@ -152,7 +170,7 @@ describe('full restore workflow integration', () => {
 
     const result = await executeWithRestore({
       server,
-      transaction: makeSampleTx(),
+      transaction: originalTx,
       wallet,
       config: defaultConfig,
       onRestoreNeeded,
@@ -171,6 +189,7 @@ describe('full restore workflow integration', () => {
       originalTxHash: 'original-tx-hash',
       restoreTxHash: 'restore-tx-hash',
       archivedKeysDetected: 1,
+      sequenceRetries: 0,
     })
 
     // RPC calls happen in the expected end-to-end order: simulate -> account
@@ -179,15 +198,32 @@ describe('full restore workflow integration', () => {
     expect(callLog).toEqual([
       'simulateTransaction',
       'getAccount',
+      'getLatestLedger',
       'sendTransaction:restore',
       'getTransaction',
       'getAccount',
       'simulateTransaction',
       'sendTransaction:original',
+      'getTransaction',
     ])
 
     // Wallet signs both the restore and the rebuilt original transaction.
     expect(wallet.signTransaction).toHaveBeenCalledTimes(2)
+    expect(server.simulateTransaction).toHaveBeenCalledTimes(2)
+
+    const rebuiltOriginal = vi.mocked(server.simulateTransaction).mock.calls[1][0]
+    expect(rebuiltOriginal).toBeInstanceOf(Transaction)
+    if (rebuiltOriginal instanceof Transaction) {
+      expect(rebuiltOriginal.operations.map((operation) => operation.type)).toEqual(
+        originalTx.operations.map((operation) => operation.type),
+      )
+    }
+
+    // Each submitted envelope must be the exact envelope returned by the
+    // corresponding wallet-signing call, in restore-then-original order.
+    expect(vi.mocked(server.sendTransaction).mock.calls.map(([tx]) => tx.toXDR())).toEqual(
+      vi.mocked(wallet.signTransaction).mock.calls.map(([signedXdr]) => signedXdr),
+    )
 
     // Callbacks fire in the expected order with the right payloads.
     expect(onRestoreNeeded).toHaveBeenCalledWith([
@@ -217,13 +253,29 @@ describe('full restore workflow integration', () => {
     expect(signingOriginalCallOrder).toBeLessThan(originalSubmittedCallOrder)
   })
 
+  it('does not submit a restore after wallet approval if its ledger bounds are stale', async () => {
+    const server = makeIntegrationServer(callLog)
+    vi.mocked(server.getLatestLedger).mockResolvedValue({ sequence: 130 } as never)
+
+    const result = await executeWithRestore({
+      server,
+      transaction: makeSampleTx(),
+      wallet: makeWallet(),
+      config: defaultConfig,
+    })
+
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('Restore preamble is stale')
+    expect(server.sendTransaction).not.toHaveBeenCalled()
+  })
+
   it('propagates every workflow state transition through the SorobanResurrect facade', async () => {
     const server = makeIntegrationServer(callLog)
     const wallet = makeWallet()
-    const resurrect = new SorobanResurrect(defaultConfig)
-    // Swap in the mocked RPC server so the full real workflow runs against
-    // a realistic, controlled sequence of responses instead of the network.
-    ;(resurrect as unknown as { server: rpc.Server }).server = server
+    const resurrect = new SorobanResurrect({
+      ...defaultConfig,
+      rpcClient: server,
+    })
 
     const states: RestoreStateInfo[] = []
     resurrect.onStateChange((info) => states.push({ ...info }))
@@ -249,6 +301,177 @@ describe('full restore workflow integration', () => {
 
     expect(resurrect.state).toBe('success')
     expect(resurrect.stateInfo.error).toBeUndefined()
+  })
+
+  it('previews archived entries, fee, and operation types without a wallet or submission', async () => {
+    const server = makeIntegrationServer(callLog)
+    const resurrect = new SorobanResurrect({
+      ...defaultConfig,
+      rpcClient: server,
+    })
+
+    const preview = await resurrect.previewRestore(makeSampleTx())
+
+    expect(preview).toMatchObject({
+      wouldNeedRestore: true,
+      archivedKeysDetected: 1,
+      estimatedRestoreFee: '300',
+      intendedOperations: ['restoreFootprint'],
+    })
+    expect(preview.archivedKeys[0]).toMatchObject({
+      keyBase64: 'archived-key-base64',
+    })
+    expect(server.simulateTransaction).toHaveBeenCalledTimes(1)
+    expect(server.sendTransaction).not.toHaveBeenCalled()
+    expect(server.getAccount).not.toHaveBeenCalled()
+    expect(callLog).toEqual(['simulateTransaction'])
+    expect(resurrect.state).toBe('idle')
+  })
+
+  it('returns simulation errors from a preview without submitting', async () => {
+    const server = {
+      simulateTransaction: vi.fn().mockResolvedValue({
+        error: 'simulation rejected',
+      } as never),
+      getAccount: vi.fn(),
+      sendTransaction: vi.fn(),
+      getTransaction: vi.fn(),
+      getLedgerEntries: vi.fn(),
+    } as unknown as rpc.Server
+    const resurrect = new SorobanResurrect({
+      ...defaultConfig,
+      rpcClient: server,
+    })
+
+    const preview = await resurrect.previewRestore(makeSampleTx())
+
+    expect(preview.simulationError).toBe('simulation rejected')
+    expect(preview.failure).toMatchObject({
+      stage: 'simulation',
+      code: 'SIMULATION_FAILED',
+    })
+    expect(server.sendTransaction).not.toHaveBeenCalled()
+  })
+
+  it('supports dry-run submit options without signing, submitting, or recording history', async () => {
+    const server = makeIntegrationServer(callLog)
+    const wallet = makeWallet()
+    const resurrect = new SorobanResurrect({
+      ...defaultConfig,
+      rpcClient: server,
+    })
+
+    const result = await resurrect.submitWithRestore({
+      transaction: makeSampleTx(),
+      wallet,
+      dryRun: true,
+    })
+
+    expect(result).toMatchObject({
+      success: true,
+      dryRun: true,
+      dryRunResult: {
+        wouldNeedRestore: true,
+        archivedKeysDetected: 1,
+        estimatedRestoreFee: '300',
+        intendedOperations: ['restoreFootprint'],
+      },
+    })
+    expect(result.historyId).toBeUndefined()
+    expect(wallet.signTransaction).not.toHaveBeenCalled()
+    expect(server.sendTransaction).not.toHaveBeenCalled()
+    expect(server.getAccount).not.toHaveBeenCalled()
+    expect(callLog).toEqual(['simulateTransaction'])
+  })
+
+  it('returns a typed expired outcome and does not sign or submit the original transaction', async () => {
+    const server = makeIntegrationServer(callLog)
+    const wallet = makeWallet()
+    const onRestoreFailed = vi.fn()
+
+    const result = await executeWithRestore({
+      server,
+      transaction: makeExpiredSampleTx(),
+      wallet,
+      config: defaultConfig,
+      onRestoreFailed,
+    })
+
+    expect(result).toMatchObject({
+      success: false,
+      restoreTxHash: 'restore-tx-hash',
+      archivedKeysDetected: 1,
+      errorCode: 'ORIGINAL_TRANSACTION_EXPIRED',
+      failure: {
+        stage: 'rebuild',
+        code: 'ORIGINAL_TRANSACTION_EXPIRED',
+        retryable: false,
+      },
+      expiredTransaction: {
+        originalTimeBounds: {
+          minTime: 0,
+        },
+      },
+    })
+    expect(wallet.signTransaction).toHaveBeenCalledTimes(1)
+    expect(server.sendTransaction).toHaveBeenCalledTimes(1)
+    expect(server.getAccount).toHaveBeenCalledTimes(1)
+    expect(server.simulateTransaction).toHaveBeenCalledTimes(1)
+    expect(onRestoreFailed).toHaveBeenCalledWith(result.error)
+  })
+
+  it('rebuilds an expired original only when the caller approves replacement bounds', async () => {
+    const server = makeIntegrationServer(callLog)
+    const wallet = makeWallet()
+    const now = Math.floor(Date.now() / 1000)
+    const approveExpiredRebuild = vi.fn().mockResolvedValue({
+      minTime: now,
+      maxTime: now + 120,
+    })
+
+    const result = await executeWithRestore({
+      server,
+      transaction: makeExpiredSampleTx(),
+      wallet,
+      config: defaultConfig,
+      approveExpiredRebuild,
+    })
+
+    expect(result.success).toBe(true)
+    expect(result.originalTxHash).toBe('original-tx-hash')
+    expect(approveExpiredRebuild).toHaveBeenCalledWith(
+      expect.objectContaining({
+        originalTimeBounds: expect.objectContaining({ minTime: 0 }),
+      }),
+    )
+    expect(wallet.signTransaction).toHaveBeenCalledTimes(2)
+    expect(server.sendTransaction).toHaveBeenCalledTimes(2)
+  })
+
+  it('rejects invalid replacement bounds returned by the approval callback', async () => {
+    const server = makeIntegrationServer(callLog)
+    const wallet = makeWallet()
+    const now = Math.floor(Date.now() / 1000)
+
+    const result = await executeWithRestore({
+      server,
+      transaction: makeExpiredSampleTx(),
+      wallet,
+      config: defaultConfig,
+      approveExpiredRebuild: () => ({ minTime: now, maxTime: now }),
+    })
+
+    expect(result).toMatchObject({
+      success: false,
+      restoreTxHash: 'restore-tx-hash',
+      errorCode: 'INVALID_REBUILD_TIME_BOUNDS',
+      failure: {
+        stage: 'rebuild',
+        code: 'INVALID_REBUILD_TIME_BOUNDS',
+      },
+    })
+    expect(wallet.signTransaction).toHaveBeenCalledTimes(1)
+    expect(server.sendTransaction).toHaveBeenCalledTimes(1)
   })
 
   it('stops the workflow and never submits the original tx if the restore transaction fails to confirm', async () => {
@@ -278,6 +501,50 @@ describe('full restore workflow integration', () => {
 
     // Only the restore transaction was sent — the original was never rebuilt or submitted.
     expect(server.sendTransaction).toHaveBeenCalledTimes(1)
+    expect(callLog).not.toContain('sendTransaction:original')
+  })
+
+  it('distinguishes rejection at restore signing and never submits the unsigned restore tx', async () => {
+    const server = makeIntegrationServer(callLog)
+    const wallet = makeWallet()
+    vi.mocked(wallet.signTransaction).mockRejectedValueOnce(
+      new Error('User rejected restore signing'),
+    )
+
+    const result = await executeWithRestore({
+      server,
+      transaction: makeSampleTx(),
+      wallet,
+      config: defaultConfig,
+    })
+
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('User rejected restore signing')
+    expect(wallet.signTransaction).toHaveBeenCalledTimes(1)
+    expect(server.sendTransaction).not.toHaveBeenCalled()
+    expect(callLog).not.toContain('sendTransaction:restore')
+    expect(callLog).not.toContain('sendTransaction:original')
+  })
+
+  it('distinguishes rejection at original signing and never submits the unsigned original tx', async () => {
+    const server = makeIntegrationServer(callLog)
+    const wallet = makeWallet()
+    vi.mocked(wallet.signTransaction)
+      .mockImplementationOnce(async (tx: string) => tx)
+      .mockRejectedValueOnce(new Error('User rejected original signing'))
+
+    const result = await executeWithRestore({
+      server,
+      transaction: makeSampleTx(),
+      wallet,
+      config: defaultConfig,
+    })
+
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('User rejected original signing')
+    expect(wallet.signTransaction).toHaveBeenCalledTimes(2)
+    expect(server.sendTransaction).toHaveBeenCalledTimes(1)
+    expect(callLog).toContain('sendTransaction:restore')
     expect(callLog).not.toContain('sendTransaction:original')
   })
 

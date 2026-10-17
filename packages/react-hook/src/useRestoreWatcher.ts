@@ -54,6 +54,8 @@ export interface UseRestoreWatcherReturn {
   start: () => void
   /** Stop polling. Also runs automatically on unmount. */
   stop: () => void
+  /** Cancel active fallback extension workflows started by this hook. */
+  cancel: () => boolean
   /** Force an immediate poll, independent of the interval. */
   refresh: () => Promise<void>
   /**
@@ -109,13 +111,17 @@ export function useRestoreWatcher(
   const optsRef = useRef(options)
   optsRef.current = options
   const hadExpiringRef = useRef(false)
+  const mountedRef = useRef(false)
+  const extensionControllersRef = useRef(new Set<AbortController>())
 
   const poll = useCallback(async () => {
+    if (!mountedRef.current) return
     try {
       const entries = await resurrect.getExpiringSoonEntries(
         keysRef.current,
         ledgersThreshold,
       )
+      if (!mountedRef.current) return
       setExpiringSoon(entries)
       setLastCheckedAt(Date.now())
       setError(null)
@@ -125,6 +131,7 @@ export function useRestoreWatcher(
       }
       hadExpiringRef.current = entries.length > 0
     } catch (err) {
+      if (!mountedRef.current) return
       setError(err instanceof Error ? err.message : String(err))
       setWatchStatus('error')
     }
@@ -135,10 +142,11 @@ export function useRestoreWatcher(
       clearInterval(timerRef.current)
       timerRef.current = null
     }
-    setWatchStatus((s) => (s === 'error' ? s : 'stopped'))
+    if (mountedRef.current) setWatchStatus((s) => (s === 'error' ? s : 'stopped'))
   }, [])
 
   const start = useCallback(() => {
+    if (!mountedRef.current) return
     if (timerRef.current !== null) return
     setWatchStatus('watching')
     void poll()
@@ -147,16 +155,29 @@ export function useRestoreWatcher(
     }, intervalMs)
   }, [poll, intervalMs])
 
+  const cancel = useCallback(() => {
+    let cancelled = false
+    for (const controller of extensionControllersRef.current) {
+      if (!controller.signal.aborted) {
+        controller.abort()
+        cancelled = true
+      }
+    }
+    return cancelled
+  }, [])
+
   const extend = useCallback(
     async (
       transaction?: Transaction,
       wallet?: WalletAdapter,
     ): Promise<ResurrectResult | null> => {
+      if (!mountedRef.current) return null
       setError(null)
+      const controller = new AbortController()
       try {
         if (optsRef.current.onExtend) {
           await optsRef.current.onExtend(expiringSoon)
-          await poll()
+          if (mountedRef.current) await poll()
           return null
         }
         if (!transaction || !wallet) {
@@ -164,13 +185,20 @@ export function useRestoreWatcher(
             'useRestoreWatcher.extend: provide `onExtend`, or pass a transaction and wallet.',
           )
         }
-        const result = await resurrect.submitWithRestore({ transaction, wallet })
-        if (!result.success) setError(result.error ?? 'Extension failed')
-        await poll()
+        extensionControllersRef.current.add(controller)
+        const result = await resurrect.submitWithRestore({
+          transaction,
+          wallet,
+          signal: controller.signal,
+        })
+        if (mountedRef.current && !result.success) setError(result.error ?? 'Extension failed')
+        if (mountedRef.current) await poll()
         return result
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
+        if (mountedRef.current) setError(err instanceof Error ? err.message : String(err))
         throw err
+      } finally {
+        extensionControllersRef.current.delete(controller)
       }
     },
     [resurrect, poll, expiringSoon],
@@ -178,15 +206,18 @@ export function useRestoreWatcher(
 
   // Bind polling to the component lifecycle; always clean up on unmount.
   useEffect(() => {
+    mountedRef.current = true
     if (autoStart) start()
     return () => {
+      mountedRef.current = false
       if (timerRef.current !== null) {
         clearInterval(timerRef.current)
         timerRef.current = null
       }
+      cancel()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [start, autoStart])
+  }, [start, autoStart, cancel])
 
   return {
     expiringSoon,
@@ -195,6 +226,7 @@ export function useRestoreWatcher(
     error,
     start,
     stop,
+    cancel,
     refresh: poll,
     extend,
   }

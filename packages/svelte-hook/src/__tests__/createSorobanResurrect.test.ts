@@ -10,6 +10,9 @@ const mockOnStateChange = vi.fn()
 const mockReset = vi.fn()
 const mockDetectArchivedKeys = vi.fn()
 const mockSubmitWithRestore = vi.fn()
+const mockDispose = vi.fn()
+const mockOn = vi.fn()
+let stateListener: (info: { state: string; message: string }) => void = () => {}
 
 const PROCESSING_STATES = [
   'simulating',
@@ -26,7 +29,10 @@ vi.mock('@soroban-resurrect/sdk', () => ({
     onStateChange: mockOnStateChange,
     reset: mockReset,
     detectArchivedKeys: mockDetectArchivedKeys,
+    estimateRestoreFee: vi.fn().mockResolvedValue('100'),
     submitWithRestore: mockSubmitWithRestore,
+    dispose: mockDispose,
+    on: mockOn,
   })),
   isProcessingState: (state: string) => PROCESSING_STATES.includes(state),
 }))
@@ -36,7 +42,11 @@ const testConfig = { rpcUrl: 'https://soroban-testnet.stellar.org' }
 describe('createSorobanResurrect', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockOnStateChange.mockReturnValue(vi.fn())
+    mockOnStateChange.mockImplementation((listener: typeof stateListener) => {
+      stateListener = listener
+      return vi.fn()
+    })
+    mockOn.mockReturnValue(vi.fn())
   })
 
   it('initializes with an idle state store and a live SDK instance', () => {
@@ -113,10 +123,53 @@ describe('createSorobanResurrect', () => {
 
     store.destroy()
     expect(stateUnsub).toHaveBeenCalledTimes(1)
+    expect(mockDispose).toHaveBeenCalledTimes(1)
 
     // Config subscription is gone — further emissions must not recreate the SDK.
     config.set({ rpcUrl: 'https://ignored.example' })
     expect(vi.mocked(SorobanResurrect)).toHaveBeenCalledTimes(1)
+  })
+
+  it('cancels active submissions and forwards their signal to the SDK', async () => {
+    let signal!: AbortSignal
+    mockSubmitWithRestore.mockImplementation(
+      (options: { signal: AbortSignal }) =>
+        new Promise((resolve) => {
+          signal = options.signal
+          signal.addEventListener('abort', () =>
+            resolve({ success: false, archivedKeysDetected: 0, error: 'Operation cancelled' }),
+          )
+        }),
+    )
+    const store = createSorobanResurrect(writable(testConfig))
+
+    const pending = store.submitWithRestore({} as never, {} as never)
+    store.cancel()
+
+    expect(signal.aborted).toBe(true)
+    await expect(pending).resolves.toMatchObject({ success: false, error: 'Operation cancelled' })
+    store.destroy()
+  })
+
+  it('tracks typed event subscriptions and disposes SDK resources on destroy', () => {
+    const unsubscribe = vi.fn()
+    mockOn.mockReturnValue(unsubscribe)
+    const store = createSorobanResurrect(writable(testConfig))
+
+    store.on('restoreComplete', vi.fn())
+    store.destroy()
+    store.destroy()
+
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+    expect(mockDispose).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects SDK operations after destroy', () => {
+    const store = createSorobanResurrect(writable(testConfig))
+    store.destroy()
+
+    expect(() => store.resurrect).toThrow('SorobanResurrect store has been destroyed.')
+    expect(() => store.reset()).toThrow('SorobanResurrect store has been destroyed.')
   })
 
   it('delegates submitWithRestore / detectArchivedKeys / reset to the SDK instance', async () => {
@@ -130,14 +183,34 @@ describe('createSorobanResurrect', () => {
     const wallet = {} as never
 
     await expect(store.submitWithRestore(tx, wallet)).resolves.toBe(result)
-    expect(mockSubmitWithRestore).toHaveBeenCalledWith({ transaction: tx, wallet })
+    expect(mockSubmitWithRestore).toHaveBeenCalledWith({
+      transaction: tx,
+      wallet,
+      signal: expect.any(AbortSignal),
+    })
 
     await expect(store.detectArchivedKeys(tx)).resolves.toBe(keys)
     expect(mockDetectArchivedKeys).toHaveBeenCalledWith(tx)
 
     store.reset()
+    stateListener({ state: 'error', message: 'boom' })
     store.reset('error')
     expect(mockReset).toHaveBeenNthCalledWith(1, undefined)
     expect(mockReset).toHaveBeenNthCalledWith(2, 'error')
+  })
+
+  it('keeps a rejected wallet result as an error result instead of marking it successful', async () => {
+    const rejected = {
+      success: false,
+      archivedKeysDetected: 1,
+      error: 'User rejected the request',
+    }
+    mockSubmitWithRestore.mockResolvedValue(rejected)
+    const store = createSorobanResurrect(writable(testConfig))
+    const batch = store.submitBatch([{ transaction: {} as never, wallet: {} as never }])
+
+    await expect(batch.done).resolves.toEqual([rejected])
+    expect(get(batch.items[0])).toEqual({ status: 'error', result: rejected })
+    expect(get(store.lastResult)).toEqual(rejected)
   })
 })

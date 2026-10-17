@@ -2,8 +2,8 @@ import { createApp, type App } from 'vue'
 
 /**
  * Runs a composable inside a real (headless) Vue app instance so that
- * lifecycle hooks (`onMounted` / `onUnmounted`) fire. Call `app.unmount()`
- * to exercise cleanup.
+ * component lifecycle hooks and scope cleanup fire. Call `app.unmount()` to
+ * exercise cleanup.
  */
 export function withSetup<T>(composable: () => T): [T, App] {
   let result!: T

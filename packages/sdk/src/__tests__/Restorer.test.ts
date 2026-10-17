@@ -15,6 +15,7 @@ import {
   waitForTransaction,
   buildRestoreTransaction,
   buildOriginalAfterRestore,
+  getExpiredTransactionInfo,
 } from '../Restorer.js'
 
 function makeSampleTx(): Transaction {
@@ -34,6 +35,7 @@ function makeMockServer(): rpc.Server {
     getAccount: vi.fn(),
     getTransaction: vi.fn(),
     simulateTransaction: vi.fn(),
+    getLatestLedger: vi.fn(),
   } as unknown as rpc.Server
 }
 
@@ -189,6 +191,21 @@ describe('Restorer', () => {
         'did not complete within',
       )
     })
+
+    it('stops polling promptly when its abort signal is triggered', async () => {
+      const server = makeMockServer()
+      vi.mocked(server.getTransaction).mockResolvedValue({
+        status: rpc.Api.GetTransactionStatus.NOT_FOUND,
+      } as never)
+      const controller = new AbortController()
+      const waiting = waitForTransaction(server, 'hash', 60_000, 60_000, controller.signal)
+
+      await Promise.resolve()
+      controller.abort()
+
+      await expect(waiting).rejects.toThrow('Operation cancelled')
+      expect(server.getTransaction).toHaveBeenCalledTimes(1)
+    })
   })
 
   describe('buildRestoreTransaction', () => {
@@ -205,15 +222,82 @@ describe('Restorer', () => {
         sourcePublicKey: kp.publicKey(),
         transactionData: txData,
         minResourceFee: 100,
+        latestLedger: 100,
         config: { rpcUrl: 'https://test', networkPassphrase: Networks.TESTNET },
       })
 
       expect(tx).toBeInstanceOf(Transaction)
       expect(tx.operations.length).toBeGreaterThanOrEqual(1)
+      expect(tx.ledgerBounds).toEqual({
+        minLedger: 100,
+        maxLedger: 100 + RESTORE_TX_LEDGER_BOUNDS_WINDOW,
+      })
+    })
+  })
+
+  describe('assertRestoreTransactionFresh', () => {
+    it('allows a signed restore while the latest ledger is inside the bounds', async () => {
+      const server = makeMockServer()
+      const kp = Keypair.random()
+      const tx = await buildRestoreTransaction({
+        server,
+        sourcePublicKey: kp.publicKey(),
+        transactionData: new SorobanDataBuilder().build(),
+        minResourceFee: 100,
+        latestLedger: 100,
+        config: { rpcUrl: 'https://test', networkPassphrase: Networks.TESTNET },
+        account: new Account(kp.publicKey(), '1'),
+      })
+      vi.mocked(server.getLatestLedger).mockResolvedValue({ sequence: 129 } as never)
+
+      await expect(assertRestoreTransactionFresh(server, tx, tx)).resolves.toBeUndefined()
+    })
+
+    it('rejects a preamble once the current ledger reaches its exclusive max bound', async () => {
+      const server = makeMockServer()
+      const kp = Keypair.random()
+      const tx = await buildRestoreTransaction({
+        server,
+        sourcePublicKey: kp.publicKey(),
+        transactionData: new SorobanDataBuilder().build(),
+        minResourceFee: 100,
+        latestLedger: 100,
+        config: { rpcUrl: 'https://test', networkPassphrase: Networks.TESTNET },
+        account: new Account(kp.publicKey(), '1'),
+      })
+      vi.mocked(server.getLatestLedger).mockResolvedValue({ sequence: 130 } as never)
+
+      await expect(assertRestoreTransactionFresh(server, tx, tx)).rejects.toThrow(
+        'Restore preamble is stale',
+      )
     })
   })
 
   describe('buildOriginalAfterRestore', () => {
+    function makeTimeBoundTx(minTime: number, maxTime: number): Transaction {
+      const kp = Keypair.random()
+      return new TransactionBuilder(new Account(kp.publicKey(), '2'), {
+        fee: '100',
+        networkPassphrase: Networks.TESTNET,
+      })
+        .addOperation(Operation.restoreFootprint({}))
+        .setTimebounds(minTime, maxTime)
+        .build()
+    }
+
+    function mockSuccessfulSimulation(server: rpc.Server): void {
+      vi.mocked(server.simulateTransaction).mockResolvedValue({
+        id: '1',
+        latestLedger: 100,
+        events: [],
+        _parsed: true,
+        transactionData: { build: () => new SorobanDataBuilder().build() },
+        minResourceFee: '100',
+        cost: { cpuInsns: '100', memBytes: '100' },
+        result: { auth: [], retval: { switch: () => 0 } },
+      } as never)
+    }
+
     it('rebuilds and assembles the original transaction after restore', async () => {
       const server = makeMockServer()
       const kp = Keypair.random()
@@ -237,6 +321,87 @@ describe('Restorer', () => {
       const result = await buildOriginalAfterRestore(server, originalTx, Networks.TESTNET, '100')
 
       expect(result).toBeInstanceOf(Transaction)
+    })
+
+    it('preserves the original absolute time bounds when rebuilding', async () => {
+      const server = makeMockServer()
+      const now = Math.floor(Date.now() / 1000)
+      const bounds = { minTime: now - 10, maxTime: now + 120 }
+      const originalTx = makeTimeBoundTx(bounds.minTime, bounds.maxTime)
+      vi.mocked(server.getAccount).mockResolvedValue(new Account(originalTx.source, '3') as never)
+      mockSuccessfulSimulation(server)
+
+      const rebuilt = await buildOriginalAfterRestore(
+        server,
+        originalTx,
+        Networks.TESTNET,
+        '100',
+      )
+
+      expect(rebuilt.timeBounds).toEqual({
+        minTime: String(bounds.minTime),
+        maxTime: String(bounds.maxTime),
+      })
+    })
+
+    it('refuses to silently extend an expired original time bound', async () => {
+      const server = makeMockServer()
+      const now = Math.floor(Date.now() / 1000)
+      const originalTx = makeTimeBoundTx(0, now - 1)
+      vi.mocked(server.getAccount).mockResolvedValue(new Account(originalTx.source, '3') as never)
+
+      await expect(
+        buildOriginalAfterRestore(server, originalTx, Networks.TESTNET, '100'),
+      ).rejects.toMatchObject({
+        code: 'ORIGINAL_TRANSACTION_EXPIRED',
+        expiredTransaction: {
+          originalTimeBounds: {
+            minTime: 0,
+            maxTime: now - 1,
+          },
+        },
+      })
+      expect(server.simulateTransaction).not.toHaveBeenCalled()
+    })
+
+    it('treats maxTime equality as expired and the preceding second as valid', () => {
+      const originalTx = makeTimeBoundTx(10, 100)
+
+      expect(getExpiredTransactionInfo(originalTx, 99)).toBeUndefined()
+      expect(getExpiredTransactionInfo(originalTx, 100)).toEqual({
+        originalTimeBounds: { minTime: 10, maxTime: 100 },
+        detectedAt: 100,
+      })
+    })
+
+    it('accepts valid caller-supplied future bounds and rejects an expired override', async () => {
+      const server = makeMockServer()
+      const now = Math.floor(Date.now() / 1000)
+      const originalTx = makeTimeBoundTx(0, now + 30)
+      vi.mocked(server.getAccount).mockResolvedValue(new Account(originalTx.source, '3') as never)
+      mockSuccessfulSimulation(server)
+
+      const rebuilt = await buildOriginalAfterRestore(
+        server,
+        originalTx,
+        Networks.TESTNET,
+        '100',
+        { minTime: now, maxTime: now + 180 },
+      )
+      expect(rebuilt.timeBounds).toEqual({
+        minTime: String(now),
+        maxTime: String(now + 180),
+      })
+
+      await expect(
+        buildOriginalAfterRestore(
+          server,
+          originalTx,
+          Networks.TESTNET,
+          '100',
+          { minTime: now, maxTime: now },
+        ),
+      ).rejects.toMatchObject({ code: 'INVALID_REBUILD_TIME_BOUNDS' })
     })
   })
 })

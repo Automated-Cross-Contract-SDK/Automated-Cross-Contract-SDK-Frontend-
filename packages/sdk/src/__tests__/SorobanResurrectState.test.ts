@@ -368,6 +368,20 @@ describe('SorobanResurrectStateManager — listeners', () => {
     expect(other).toHaveBeenCalledTimes(1)
   })
 
+  it('dispose removes all state and typed-event listeners', () => {
+    const sm = new SorobanResurrectStateManager()
+    const stateListener = vi.fn()
+    const eventListener = vi.fn()
+    sm.onStateChange(stateListener)
+    sm.emitter.on('stateChange', eventListener)
+
+    sm.dispose()
+    sm.setState('success', 'done')
+
+    expect(stateListener).not.toHaveBeenCalled()
+    expect(eventListener).not.toHaveBeenCalled()
+  })
+
   it('isolates a throwing listener: others still run and the error is logged', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const sm = new SorobanResurrectStateManager()

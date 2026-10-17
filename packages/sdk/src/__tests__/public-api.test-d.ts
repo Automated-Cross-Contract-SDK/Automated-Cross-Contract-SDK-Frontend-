@@ -8,6 +8,7 @@
  * Run with: `npm run test:types -w packages/sdk`
  */
 import { expectTypeOf, test } from 'vitest'
+import { xdr } from '@stellar/stellar-sdk'
 import * as sdk from '../index.js'
 import type {
   SorobanNetworkName,
@@ -20,15 +21,19 @@ import type {
   HistoryStorage,
   HistoryPersistenceOptions,
   ResurrectResult,
+  ResurrectFailure,
   SorobanResurrectConfig,
   RestoreState,
   RestoreStateInfo,
   SorobanResurrectEvents,
   SubmitWithRestoreOptions,
+  AbortSignalOptions,
   ArchivedLedgerEntry,
   HardwareWalletAdapter,
   FeeBumpSponsor,
   DryRunResult,
+  RebuildTimeBounds,
+  ExpiredTransactionInfo,
   TxDiagnostics,
   ISorobanRpcClient,
   KnownWallet,
@@ -38,38 +43,12 @@ import type {
   MultiSigConfig,
   TransactionHistoryEntry,
   LedgerEntryTTLInfo,
+  LedgerEntryStatus,
   RestoreCostEstimate,
-  ResurrectFailure,
-  ResurrectSuccess,
-  ResurrectErrorCode,
-  LogLevel,
-  LogContext,
-  RpcTimingEvent,
-  ArchiveDetectionOptions,
-  RestoreKeysOptions,
-  RpcResilienceOptions,
-  ContractScanOptions,
-  ClassicEntryStatus,
-  SignatureCollectionResult,
-  AdapterImporter,
-  CreateAdapterOptions,
-  ParsableTransactionResponse,
-  TTLQueryResult,
-  LedgerKeyEntryType,
-  QueryLedgerTTLOptions,
-  ChunkedFetchOptions,
-  TTLWatchOptions,
-  TTLWatchHandle,
-  TransactionAttemptStatus,
-  SdkDefaults,
-  RestoreTxDiagnostics,
-  EvaluateRestoreFootprintOptions,
-  HistoryPersistenceMode,
-  HistorySerializer,
-  AttachHistoryPersistenceOptions,
-  MinimalHistoryEntry,
-  Result,
-  Option,
+  ConfirmationPolicy,
+  ConfirmationTimeoutBehavior,
+  SubmitRetryOptions,
+  SubmitLifecycleEvent,
 } from '../index.js'
 
 /**
@@ -78,36 +57,14 @@ import type {
  */
 type PublicExports =
   | 'SorobanResurrect'
-  | 'SYSTEM_RUNTIME'
+  | 'getEffectiveConfig'
   | 'SorobanResurrectNetwork'
   | 'NETWORK_PRESETS'
   | 'WalletError'
   | 'ResurrectErrorCode'
   | 'getResurrectErrorCode'
   | 'ResurrectError'
-  | 'RestoreFeeExceededError'
-  | 'NetworkError'
-  | 'SimulationError'
-  | 'SigningError'
-  | 'RestoreError'
-  | 'ResurrectTimeoutError'
-  | 'InvalidInputError'
-  | 'SorobanRpcClient'
-  | 'createRpcClient'
-  | 'RpcTimeoutError'
-  | 'RpcCircuitOpenError'
-  | 'NOOP_LOGGER'
-  | 'resolveLogger'
-  | 'isLoggingEnabled'
-  | 'createRequestId'
-  | 'LoggingRpcClient'
-  | 'withRpcLogging'
-  | 'getExpiringEntriesForContract'
-  | 'getExpiringEntriesForAccount'
-  | 'DEFAULT_EXPIRING_SOON_LEDGERS'
-  | 'MultiSigWalletAdapter'
-  | 'isProcessingState'
-  | 'PROCESSING_STATES'
+  | 'OriginalTransactionExpiredError'
   | 'createAdapter'
   | 'isKnownWallet'
   | 'SUPPORTED_WALLETS'
@@ -124,6 +81,40 @@ type PublicExports =
   | 'TrezorWalletAdapter'
   | 'createLedgerAdapter'
   | 'createTrezorAdapter'
+  | 'parseTransactionFailure'
+  | 'getExpiringEntriesForContract'
+  | 'getExpiringEntriesForAccount'
+  | 'DEFAULT_EXPIRING_SOON_LEDGERS'
+  | 'walletMaySupport'
+  | 'walletDeclares'
+  | 'assertWalletCapability'
+  | 'walletMaxOperations'
+  | 'TypedEventEmitter'
+  | 'ok'
+  | 'err'
+  | 'some'
+  | 'none'
+  | 'toResult'
+  | 'toResultAsync'
+  | 'fromNullable'
+  | 'extractArchivedKeysSafe'
+  | 'extractFootprintFromSuccessSafe'
+  | 'resolveConfig'
+  | 'SorobanResurrectStateManager'
+  | 'SorobanResurrectSimulator'
+  | 'SorobanResurrectExecutor'
+  | 'queryLedgerTTL'
+  | 'RESTORE_TX_LEDGER_BOUNDS_WINDOW'
+  | 'checkNetworkCapabilities'
+  | 'MIN_RESTORE_PROTOCOL_VERSION'
+  | 'IncompleteFootprintError'
+  | 'queryLedgerEntryTTL'
+  | 'getExpiringSoonEntries'
+  | 'getArchivedEntries'
+  | 'getLedgerKeyEntryType'
+  | 'TransactionHistory'
+  | 'SorobanRpcClient'
+  | 'createRpcClient'
   | 'SDK_DEFAULTS'
   | 'DEFAULT_NETWORK_PASSPHRASE'
   | 'DEFAULT_RPC_URL'
@@ -137,28 +128,13 @@ type PublicExports =
   | 'estimateRestoreTxSizeBytes'
   | 'evaluateRestoreFootprint'
   | 'restoreSizeGuidance'
-  | 'parseMinimalHistory'
-  | 'Ok'
-  | 'Err'
-  | 'Some'
-  | 'None'
-  | 'ok'
-  | 'err'
-  | 'some'
-  | 'none'
-  | 'isOk'
-  | 'isErr'
-  | 'isSome'
-  | 'isNone'
-  | 'isResurrectSuccess'
-  | 'isResurrectFailure'
-  | 'matchResurrectResult'
-  | 'toError'
-  | 'toResult'
-  | 'toResultAsync'
-  | 'fromNullable'
-  | 'extractArchivedKeysSafe'
-  | 'extractFootprintFromSuccessSafe'
+  | 'NOOP_LOGGER'
+  | 'resolveLogger'
+  | 'isLoggingEnabled'
+  | 'createRequestId'
+  | 'LoggingRpcClient'
+  | 'withRpcLogging'
+  | 'serializeLedgerKey'
 
 test('all documented public exports are present on the barrel', () => {
   expectTypeOf<PublicExports>().toMatchTypeOf<keyof typeof sdk>()
@@ -203,39 +179,53 @@ test('SorobanResurrectConfig and result types keep their shape', () => {
   expectTypeOf<ResurrectResult['success']>().toEqualTypeOf<boolean>()
   expectTypeOf<ResurrectResult['archivedKeysDetected']>().toEqualTypeOf<number>()
   expectTypeOf<ResurrectResult['error']>().toEqualTypeOf<string | undefined>()
+  expectTypeOf<ResurrectResult['failure']>().toEqualTypeOf<ResurrectFailure | undefined>()
+  expectTypeOf<ResurrectResult['expiredTransaction']>().toEqualTypeOf<
+    ExpiredTransactionInfo | undefined
+  >()
+  expectTypeOf<ResurrectFailure['retryable']>().toEqualTypeOf<boolean>()
+  expectTypeOf<ResurrectFailure['nextStep']>().toEqualTypeOf<string>()
 
   expectTypeOf<SubmitWithRestoreOptions>().toHaveProperty('transaction')
   expectTypeOf<SubmitWithRestoreOptions>().toHaveProperty('wallet')
+  expectTypeOf<AbortSignalOptions['signal']>().toEqualTypeOf<AbortSignal | undefined>()
+  expectTypeOf<Parameters<SorobanResurrect['submitWithRestore']>[0]>().toHaveProperty('signal')
+  expectTypeOf<Parameters<SorobanResurrect['retry']>[2]>().toMatchTypeOf<AbortSignalOptions>()
+  expectTypeOf<Parameters<SorobanResurrect['sendTransaction']>[2]>().toMatchTypeOf<AbortSignalOptions>()
+  expectTypeOf<
+    Parameters<SorobanResurrect['submitBatchWithRestore']>[1]
+  >().toMatchTypeOf<AbortSignalOptions>()
+  expectTypeOf<Parameters<SorobanResurrect['restoreKeys']>[2]>().toHaveProperty('signal')
+  expectTypeOf<
+    Parameters<SorobanResurrect['buildRestoreTx']>[3]
+  >().toMatchTypeOf<AbortSignalOptions>()
+  expectTypeOf<
+    Parameters<SorobanResurrect['buildBatchRestoreTx']>[2]
+  >().toMatchTypeOf<AbortSignalOptions>()
   expectTypeOf<ArchivedLedgerEntry>().toHaveProperty('keyBase64')
 
   expectTypeOf<FeeBumpSponsor>().toHaveProperty('signFeeBump')
   expectTypeOf<DryRunResult>().toHaveProperty('wouldNeedRestore')
+  expectTypeOf<DryRunResult>().toHaveProperty('intendedOperations')
+  expectTypeOf<SubmitWithRestoreOptions>().toHaveProperty('dryRun')
+  expectTypeOf<InstanceType<typeof sdk.SorobanResurrect>>().toHaveProperty('previewRestore')
+  expectTypeOf<RebuildTimeBounds>().toHaveProperty('maxTime')
+  expectTypeOf<SubmitWithRestoreOptions>().toHaveProperty('rebuildTimeBounds')
+  expectTypeOf<SubmitWithRestoreOptions>().toHaveProperty('approveExpiredRebuild')
   expectTypeOf<TxDiagnostics>().toHaveProperty('events')
 })
 
-test('workflow results expose typed success and failure branches', () => {
-  expectTypeOf<ResurrectSuccess['success']>().toEqualTypeOf<true>()
-  expectTypeOf<ResurrectFailure['success']>().toEqualTypeOf<false>()
-  expectTypeOf<ResurrectFailure['errorCode']>().toEqualTypeOf<ResurrectErrorCode>()
-  expectTypeOf<ResurrectFailure['error']>().toEqualTypeOf<string>()
+test('getEffectiveConfig is a public settings-only helper', () => {
+  expectTypeOf(sdk.getEffectiveConfig).toBeFunction()
+  expectTypeOf<EffectiveSorobanResurrectConfig>().toHaveProperty('rpcUrl')
+  expectTypeOf<ReturnType<typeof sdk.getEffectiveConfig>>().not.toHaveProperty('rpcClient')
 })
 
-test('runtime injection and compatibility types remain concrete', () => {
-  expectTypeOf<SdkRuntime['now']>().returns.toEqualTypeOf<number>()
-  expectTypeOf<SdkRuntime['random']>().returns.toEqualTypeOf<number>()
-  expectTypeOf<ResolvedSorobanResurrectConfig['runtime']>().toEqualTypeOf<SdkRuntime>()
-  expectTypeOf<HistorySerializer['serialize']>().returns.toEqualTypeOf<string | Promise<string>>()
+test('request-specific config overrides are part of the stable public type surface', () => {
+  expectTypeOf<SubmitWithRestoreConfigOverrides>().toHaveProperty('restoreFeeMultiplier')
+  expectTypeOf<SubmitWithRestoreConfigOverrides>().toHaveProperty('pollTimeoutMs')
+  expectTypeOf<SubmitWithRestoreRequestOptions>().toHaveProperty('configOverrides')
 })
-
-function verifyResultNarrowing(result: ResurrectResult): void {
-  if (sdk.isResurrectFailure(result)) {
-    expectTypeOf(result.errorCode).toEqualTypeOf<ResurrectErrorCode>()
-    expectTypeOf(result.error).toEqualTypeOf<string>()
-  } else {
-    expectTypeOf(result.success).toEqualTypeOf<true>()
-    expectTypeOf(result.originalTxHash).toEqualTypeOf<ResurrectSuccess['originalTxHash']>()
-  }
-}
 
 test('RestoreState union and typed events are pinned', () => {
   expectTypeOf<RestoreState>().toMatchTypeOf<
@@ -269,5 +259,22 @@ test('scan / multisig / history / TTL public types exist', () => {
   expectTypeOf<KnownWallet>().not.toBeAny()
   expectTypeOf<TransactionHistoryEntry>().not.toBeAny()
   expectTypeOf<LedgerEntryTTLInfo>().not.toBeAny()
+  expectTypeOf<LedgerEntryTTLInfo['status']>().toEqualTypeOf<LedgerEntryStatus>()
+  expectTypeOf<LedgerEntryStatus>().toEqualTypeOf<
+    'healthy' | 'near-expiry' | 'archived' | 'unknown'
+  >()
   expectTypeOf<RestoreCostEstimate>().not.toBeAny()
+})
+
+test('recovery policies and lifecycle types are stable public types', () => {
+  expectTypeOf<ConfirmationPolicy>().toEqualTypeOf<
+    'wait-for-finality' | 'return-on-submission'
+  >()
+  expectTypeOf<ConfirmationTimeoutBehavior>().toEqualTypeOf<'error' | 'return-pending'>()
+  expectTypeOf<SubmitRetryOptions>().toHaveProperty('maxRetries')
+  expectTypeOf<SubmitLifecycleEvent['phase']>().toMatchTypeOf<string>()
+  expectTypeOf<SubmitWithRestoreOptions>().toHaveProperty('requestId')
+  expectTypeOf<SubmitWithRestoreOptions>().toHaveProperty('confirmationPolicy')
+  expectTypeOf<SubmitWithRestoreOptions>().toHaveProperty('confirmationTimeoutMs')
+  expectTypeOf<SubmitWithRestoreOptions>().toHaveProperty('confirmationTimeoutBehavior')
 })

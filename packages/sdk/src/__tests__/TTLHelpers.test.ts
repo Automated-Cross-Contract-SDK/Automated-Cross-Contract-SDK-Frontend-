@@ -5,6 +5,7 @@ import {
   getExpiringSoonEntries,
   getArchivedEntries,
   LEDGER_CLOSE_TIME_SECONDS,
+  DEFAULT_TTL_WARNING_WINDOW_LEDGERS,
 } from '../TTLHelpers.js'
 import type { ISorobanRpcClient } from '../RpcClient.js'
 import { SYSTEM_RUNTIME } from '../runtime.js'
@@ -109,13 +110,13 @@ describe('queryLedgerTTL', () => {
     expect(entries.map((e) => e.keyBase64)).toEqual([b64(missing), b64(live), b64(code)])
     expect(entries[0]).toMatchObject({
       isArchived: true,
-      liveUntilLedger: 0,
-      ttlLedgers: 0,
-      estimatedSecondsRemaining: 0,
+      status: 'unavailable',
+      unavailableReason: 'missing',
       entryType: 'contractData',
     })
     expect(entries[1]).toMatchObject({
       isArchived: false,
+      status: 'live',
       liveUntilLedger: CURRENT_LEDGER + 20,
       ttlLedgers: 20,
       estimatedSecondsRemaining: 20 * LEDGER_CLOSE_TIME_SECONDS,
@@ -123,52 +124,84 @@ describe('queryLedgerTTL', () => {
     })
     expect(entries[2]).toMatchObject({
       isArchived: false,
+      status: 'near-expiry',
       ttlLedgers: 5,
       entryType: 'contractCode',
     })
   })
 
-  it('tags non-contract keys as "other"', async () => {
+  it('reports non-contract keys as unsupported without querying them', async () => {
     const acct = accountKey()
-    const { server } = mockServer(new Map([[b64(acct), CURRENT_LEDGER + 1]]))
+    const { server, getLedgerEntries } = mockServer(new Map([[b64(acct), CURRENT_LEDGER + 1]]))
     const { entries } = await queryLedgerTTL(server, [acct])
-    expect(entries[0].entryType).toBe('other')
+    expect(entries[0]).toMatchObject({
+      entryType: 'other',
+      status: 'unavailable',
+      unavailableReason: 'unsupported',
+      isArchived: false,
+    })
+    expect(getLedgerEntries).not.toHaveBeenCalled()
   })
 
-  it('treats liveUntilLedger == currentLedger as archived (ttl 0)', async () => {
+  it('reports an entry at its expiry ledger as unavailable and archived', async () => {
     const k = dataKey(1)
     const { server } = mockServer(new Map([[b64(k), CURRENT_LEDGER]]))
     const { entries } = await queryLedgerTTL(server, [k])
     expect(entries[0]).toMatchObject({
       isArchived: true,
+      status: 'unavailable',
+      unavailableReason: 'expired',
       ttlLedgers: 0,
       liveUntilLedger: CURRENT_LEDGER,
     })
   })
 
-  it('treats liveUntilLedger in the past as archived and clamps ttl to 0', async () => {
+  it('reports an expired entry as unavailable and clamps ttl to 0', async () => {
     const k = dataKey(1)
     const { server } = mockServer(new Map([[b64(k), CURRENT_LEDGER - 50]]))
     const { entries } = await queryLedgerTTL(server, [k])
     expect(entries[0]).toMatchObject({
       isArchived: true,
+      unavailableReason: 'expired',
       ttlLedgers: 0,
       estimatedSecondsRemaining: 0,
     })
   })
 
-  it('treats a missing liveUntilLedgerSeq as archived', async () => {
+  it('reports missing liveUntilLedgerSeq as unavailable without calling it archived', async () => {
     const k = dataKey(1)
     const { server } = mockServer(new Map([[b64(k), undefined]]))
     const { entries } = await queryLedgerTTL(server, [k])
-    expect(entries[0]).toMatchObject({ isArchived: true, liveUntilLedger: 0 })
+    expect(entries[0]).toMatchObject({
+      status: 'unavailable',
+      unavailableReason: 'ttl_unavailable',
+      isArchived: false,
+    })
   })
 
-  it('treats liveUntilLedger == currentLedger + 1 as live with 1 ledger left', async () => {
+  it('marks entries within the warning window as near-expiry', async () => {
     const k = dataKey(1)
     const { server } = mockServer(new Map([[b64(k), CURRENT_LEDGER + 1]]))
-    const { entries } = await queryLedgerTTL(server, [k])
-    expect(entries[0]).toMatchObject({ isArchived: false, ttlLedgers: 1 })
+    const { entries } = await queryLedgerTTL(server, [k], { warningWindowLedgers: 1 })
+    expect(entries[0]).toMatchObject({ status: 'near-expiry', isArchived: false, ttlLedgers: 1 })
+  })
+
+  it('marks entries beyond the warning window as healthy', async () => {
+    const k = dataKey(1)
+    const { server } = mockServer(new Map([[b64(k), CURRENT_LEDGER + 2]]))
+    const { entries } = await queryLedgerTTL(server, [k], { warningWindowLedgers: 1 })
+    expect(entries[0].status).toBe('healthy')
+  })
+
+  it('uses the default warning window and rejects invalid values', async () => {
+    const k = dataKey(1)
+    const { server } = mockServer(
+      new Map([[b64(k), CURRENT_LEDGER + DEFAULT_TTL_WARNING_WINDOW_LEDGERS]]),
+    )
+    expect((await queryLedgerTTL(server, [k])).entries[0].status).toBe('near-expiry')
+    await expect(queryLedgerTTL(server, [k], { warningWindowLedgers: -1 })).rejects.toThrow(
+      'warningWindowLedgers must be a non-negative integer',
+    )
   })
 
   it('splits requests into chunks of 50', async () => {
@@ -182,27 +215,37 @@ describe('queryLedgerTTL', () => {
     expect(entries.every((e) => !e.isArchived)).toBe(true)
   })
 
-  it('conservatively treats every key in a failed chunk as archived, keeping other chunks', async () => {
+  it('reports every key in a failed chunk as unavailable, keeping other chunks', async () => {
     const keys = Array.from({ length: 120 }, (_, i) => dataKey(i))
     const { server } = mockServer(new Map(keys.map((k) => [b64(k), CURRENT_LEDGER + 10])), {
       failOnCall: new Set([1]),
     })
 
-    const { entries } = await queryLedgerTTL(server, keys)
+    const { entries, failedChunks, hasErrors } = await queryLedgerTTL(server, keys)
 
     expect(entries.slice(0, 50).every((e) => !e.isArchived)).toBe(true)
-    expect(entries.slice(50, 100).every((e) => e.isArchived && e.ttlLedgers === 0)).toBe(true)
+    expect(
+      entries
+        .slice(50, 100)
+        .every(
+          (e) => !e.isArchived && e.unavailableReason === 'rpc_error' && e.ttlLedgers === undefined,
+        ),
+    ).toBe(true)
     expect(entries.slice(100).every((e) => !e.isArchived)).toBe(true)
+    expect(failedChunks).toHaveLength(1)
+    expect(hasErrors).toBe(true)
+    expect(failedChunks[0].keys).toHaveLength(50)
     expect(warn).toHaveBeenCalledTimes(1)
   })
 
-  it('treats all keys as archived when every chunk fails', async () => {
+  it('reports every key as unavailable when every chunk fails', async () => {
     const keys = [dataKey(1), codeKey(2)]
     const { server } = mockServer(new Map(keys.map((k) => [b64(k), CURRENT_LEDGER + 10])), {
       failOnCall: new Set([0]),
     })
     const { entries } = await queryLedgerTTL(server, keys)
-    expect(entries.every((e) => e.isArchived)).toBe(true)
+    expect(entries.every((e) => !e.isArchived && e.status === 'unavailable')).toBe(true)
+    expect(entries.map((e) => e.unavailableReason)).toEqual(['rpc_error', 'rpc_error'])
     expect(entries.map((e) => e.entryType)).toEqual(['contractData', 'contractCode'])
   })
 
@@ -261,11 +304,10 @@ describe('getExpiringSoonEntries', () => {
     expect(res).toHaveLength(2)
   })
 
-  it('includes keys from a failed chunk (treated as archived)', async () => {
+  it('excludes keys from a failed chunk instead of treating them as archived', async () => {
     const { server } = mockServer(liveUntil, { failOnCall: new Set([0]) })
     const res = await getExpiringSoonEntries(server, [above], THRESHOLD)
-    expect(res).toHaveLength(1)
-    expect(res[0].isArchived).toBe(true)
+    expect(res).toHaveLength(0)
   })
 })
 
@@ -286,6 +328,10 @@ describe('getArchivedEntries', () => {
     expect(res.map((e) => e.keyBase64)).toEqual([b64(expired), b64(missing)])
     for (const e of res) expect(e.key.toXDR('base64')).toBe(e.keyBase64)
     expect(res[1].key.switch().name).toBe('contractCode')
+    expect(res.map((entry) => entry.entryType)).toEqual(['contractData', 'contractCode'])
+    expect(res[1]).toMatchObject({ currentLedger: CURRENT_LEDGER })
+    expect(res[1].liveUntilLedger).toBeUndefined()
+    expect(res[1].ttlLedgers).toBeUndefined()
   })
 
   it('returns an empty array when every key is live', async () => {
@@ -294,12 +340,12 @@ describe('getArchivedEntries', () => {
     expect(await getArchivedEntries(server, keys)).toEqual([])
   })
 
-  it('returns every key of a failed chunk as archived', async () => {
+  it('does not return keys of a failed chunk as confirmed archived', async () => {
     const keys = Array.from({ length: 60 }, (_, i) => dataKey(i))
     const { server } = mockServer(new Map(keys.map((k) => [b64(k), CURRENT_LEDGER + 10])), {
       failOnCall: new Set([0]),
     })
     const res = await getArchivedEntries(server, keys)
-    expect(res.map((e) => e.keyBase64)).toEqual(keys.slice(0, 50).map(b64))
+    expect(res).toEqual([])
   })
 })

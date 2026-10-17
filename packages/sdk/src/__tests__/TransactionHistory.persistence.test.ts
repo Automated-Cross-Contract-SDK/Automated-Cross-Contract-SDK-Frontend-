@@ -9,6 +9,7 @@ import {
 } from '@stellar/stellar-sdk'
 import { TransactionHistory } from '../TransactionHistory.js'
 import { attachHistoryPersistence } from '../HistoryPersistence.js'
+import { SorobanResurrect } from '../SorobanResurrect.js'
 import type { HistoryStorage } from '../types.js'
 import type { ResurrectResult } from '../types.js'
 
@@ -121,5 +122,56 @@ describe('attachHistoryPersistence', () => {
     history.add(makeTx())
     await flush()
     expect(storage.setItem).not.toHaveBeenCalled()
+  })
+
+  it('dispose detaches SDK history persistence', async () => {
+    const storage = makeStorage()
+    const sdk = new SorobanResurrect({
+      rpcUrl: 'https://soroban-testnet.stellar.org',
+      networkPassphrase: Networks.TESTNET,
+      persistHistory: { storage },
+    })
+    await sdk.ready
+
+    sdk.dispose()
+    sdk.clearHistory()
+    await flush()
+
+    expect(storage.setItem).not.toHaveBeenCalled()
+  })
+
+  it('accepts synchronous Web Storage-style adapters', async () => {
+    const values = new Map<string, string>()
+    const storage: HistoryStorage = {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => {
+        values.set(key, value)
+      },
+    }
+    const history = new TransactionHistory(Networks.TESTNET)
+    const handle = attachHistoryPersistence(history, storage)
+    await handle.hydrated
+
+    history.add(makeTx())
+    await flush()
+
+    expect(JSON.parse(values.get('soroban-resurrect:history')!)).toHaveLength(1)
+    handle.detach()
+  })
+
+  it('keeps storage write failures best-effort', async () => {
+    const storage: HistoryStorage = {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error('storage unavailable')
+      },
+    }
+    const history = new TransactionHistory(Networks.TESTNET)
+    const handle = attachHistoryPersistence(history, storage)
+    await handle.hydrated
+
+    expect(() => history.add(makeTx())).not.toThrow()
+    await flush()
+    handle.detach()
   })
 })

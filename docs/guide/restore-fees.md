@@ -66,6 +66,30 @@ the number it returns is the number you will pay:
 Always call `estimateRestoreCost` before signing a restore so you can reason
 about what you will pay and surface the cap to your users.
 
+## Restore preamble freshness
+
+Restore transactions use ledger bounds derived from the simulation's
+`latestLedger`. The default validity window is exposed as
+`RESTORE_TX_LEDGER_BOUNDS_WINDOW` (30 ledgers). After wallet approval, the SDK
+checks the signed transaction's bounds and current ledger before submitting.
+If the window has elapsed, or the transaction's 30-second time bound expired
+while the wallet prompt was open, the SDK fails without sending it and returns
+an error asking the caller to rebuild and request a new signature. Wallets that
+display transaction preconditions should show the ledger range as part of the
+restore transaction details.
+
+## Incomplete simulation footprints
+
+The SDK does not build or submit a restore when a restore simulation cannot
+provide a complete, non-empty read-write footprint. `extractArchivedKeys`
+throws `IncompleteFootprintError`; `submitWithRestore` returns
+`errorCode: 'INCOMPLETE_FOOTPRINT'`. The error includes a `condition` such as
+`unparsed-response`, `missing-transaction-data`,
+`missing-read-write-entries`, or `empty-read-write-footprint`, so callers can
+report the specific RPC response problem. Retry only after the endpoint
+returns a complete simulation response; do not construct a restore from an
+empty fallback footprint.
+
 ## The footprint-size guard
 
 The size guard runs before the fee is computed. It counts the ledger entries in

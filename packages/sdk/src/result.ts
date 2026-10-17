@@ -2,7 +2,7 @@ import { rpc, xdr } from '@stellar/stellar-sdk'
 
 import { asXdrBase64 } from './branded-types.js'
 import type { ArchivedLedgerEntry } from './types.js'
-import type { ResurrectFailure, ResurrectResult, ResurrectSuccess } from './types.js'
+import { getLedgerKeyEntryType } from './TTLHelpers.js'
 
 export type Result<T, E = Error> = Ok<T, E> | Err<T, E>
 export type Option<T> = Some<T> | None<T>
@@ -254,7 +254,11 @@ export function extractArchivedKeysSafe(
 
       for (const ledgerKey of readWrite) {
         const keyBase64 = asXdrBase64(ledgerKey.toXDR('base64'))
-        keys.push({ key: ledgerKey, keyBase64 })
+        keys.push({
+          key: ledgerKey,
+          keyBase64,
+          entryType: getLedgerKeyEntryType(ledgerKey),
+        })
       }
     } catch {
       return keys
@@ -268,21 +272,6 @@ export function extractFootprintFromSuccessSafe(
   response: rpc.Api.SimulateTransactionSuccessResponse,
 ): Result<{ readOnly: xdr.LedgerKey[]; readWrite: xdr.LedgerKey[] }, Error> {
   return toResult(() => {
-    if (!response._parsed) {
-      console.warn(
-        'SorobanResurrect: success simulation response has _parsed=false, cannot extract footprint',
-      )
-      return { readOnly: [], readWrite: [] }
-    }
-
-    try {
-      const footprint = response.transactionData.getFootprint()
-      return {
-        readOnly: footprint.readOnly() || [],
-        readWrite: footprint.readWrite() || [],
-      }
-    } catch {
-      return { readOnly: [], readWrite: [] }
-    }
+    return readSimulationFootprint(response)
   })
 }

@@ -19,7 +19,7 @@ import { xdr, Transaction, TransactionBuilder, hash } from '@stellar/stellar-sdk
 import { asXdrBase64, type XdrBase64 } from './branded-types.js'
 import type { WalletCapabilities } from './types.js'
 import { assertWalletCapability } from './walletCapabilities.js'
-import { wrapSigningError } from './errors.js'
+import { runWithSignal } from './AbortUtils.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -80,6 +80,8 @@ export interface AuthorizationWalletAdapter {
       networkPassphrase?: string
       /** The address that should sign the entry. */
       address?: string
+      /** Cancels the wallet prompt when the adapter supports cancellation. */
+      signal?: AbortSignal
     },
   ): Promise<XdrBase64>
   /**
@@ -126,6 +128,8 @@ export interface SignAuthorizationEntriesOptions {
    * Network passphrase for computing authorization entry hashes.
    */
   networkPassphrase: string
+  /** Cancels subsequent wallet prompts and stops waiting for the current one. */
+  signal?: AbortSignal
 }
 
 // ---------------------------------------------------------------------------
@@ -190,7 +194,7 @@ export function categorizeAuthEntries(
 export async function signAuthorizationEntries(
   options: SignAuthorizationEntriesOptions,
 ): Promise<xdr.SorobanAuthorizationEntry[]> {
-  const { entries, wallet, networkPassphrase } = options
+  const { entries, wallet, networkPassphrase, signal } = options
 
   // If any entry actually needs the wallet's signature, make sure the wallet
   // hasn't opted out of CAP-0046 auth-entry signing before we start prompting.
@@ -211,11 +215,14 @@ export async function signAuthorizationEntries(
     }
 
     // Address entries must be signed by the specified address
-    const signedXdr = await wrapSigningError(() =>
-      wallet.signAuthEntry!(categorized.entryBase64, {
-        networkPassphrase,
-        address: categorized.signerAddress,
-      }),
+    const walletOptions = {
+      networkPassphrase,
+      address: categorized.signerAddress,
+      ...(signal ? { signal } : {}),
+    }
+    const signedXdr = await runWithSignal(
+      () => wallet.signAuthEntry(categorized.entryBase64, walletOptions),
+      signal,
     )
 
     signed.push(xdr.SorobanAuthorizationEntry.fromXDR(signedXdr, 'base64'))
@@ -400,6 +407,8 @@ export interface EnsureAddressAuthorizationOptions {
   wallet: unknown
   /** Network passphrase, required for computing auth-entry hashes. */
   networkPassphrase: string
+  /** Cancels subsequent wallet prompts and stops waiting for the current one. */
+  signal?: AbortSignal
 }
 
 /**
@@ -422,7 +431,7 @@ export interface EnsureAddressAuthorizationOptions {
 export async function ensureAddressAuthorization(
   options: EnsureAddressAuthorizationOptions,
 ): Promise<EnsureAddressAuthResult> {
-  const { transaction, simulation, wallet, networkPassphrase } = options
+  const { transaction, simulation, wallet, networkPassphrase, signal } = options
 
   const authEntries = extractSimulationAuthEntries(simulation)
   if (authEntries.length === 0 || !requiresAddressAuthorization(authEntries)) {
@@ -445,6 +454,7 @@ export async function ensureAddressAuthorization(
     entries: categorized,
     wallet,
     networkPassphrase,
+    signal,
   })
 
   const rebuilt = attachSignedAuthEntries(transaction, signedEntries, networkPassphrase)

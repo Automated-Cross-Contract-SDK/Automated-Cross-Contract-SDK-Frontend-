@@ -67,6 +67,29 @@ describe('SorobanResurrect', () => {
     })
   })
 
+  describe('dispose', () => {
+    it('stops TTL watches started by the instance', () => {
+      const rpcClient = {
+        getLatestLedger: vi.fn().mockResolvedValue({ sequence: 1 }),
+      }
+      const instance = new SorobanResurrect({ ...testConfig, rpcClient: rpcClient as never })
+      const timer = 123 as never
+      const setIntervalSpy = vi.spyOn(globalThis, 'setInterval').mockReturnValue(timer)
+      const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval').mockImplementation(() => {})
+
+      try {
+        instance.watchTTL([])
+        instance.dispose()
+
+        expect(setIntervalSpy).toHaveBeenCalledTimes(1)
+        expect(clearIntervalSpy).toHaveBeenCalledWith(timer)
+      } finally {
+        setIntervalSpy.mockRestore()
+        clearIntervalSpy.mockRestore()
+      }
+    })
+  })
+
   describe('state management', () => {
     it('starts in idle state', () => {
       expect(resurrect.state).toBe('idle')
@@ -95,6 +118,23 @@ describe('SorobanResurrect', () => {
   })
 
   describe('submitWithRestore', () => {
+    it('forwards an AbortSignal to the execution workflow', async () => {
+      vi.mocked(executeWithRestore).mockResolvedValue({
+        success: false,
+        archivedKeysDetected: 0,
+        error: 'Operation cancelled',
+      })
+      const controller = new AbortController()
+
+      await resurrect.submitWithRestore({
+        transaction: makeSampleTx(),
+        wallet: makeWallet(),
+        signal: controller.signal,
+      })
+
+      expect(vi.mocked(executeWithRestore).mock.calls[0][0].signal).toBe(controller.signal)
+    })
+
     it('returns result from executeWithRestore on success', async () => {
       const mockResult = {
         success: true,
@@ -112,7 +152,8 @@ describe('SorobanResurrect', () => {
         wallet: makeWallet(),
       })
 
-      expect(result).toEqual(mockResult)
+      expect(result).toEqual(expect.objectContaining(mockResult))
+      expect(result.historyId).toEqual(expect.any(String))
       expect(resurrect.state).toBe('success')
     })
 
@@ -201,6 +242,93 @@ describe('SorobanResurrect', () => {
     })
   })
 
+  describe('previewRestore', () => {
+    it('returns a typed restore plan without mutating or submitting the original transaction', async () => {
+      const transaction = makeSampleTx()
+      const originalXdr = transaction.toXDR()
+      const archivedKey = { toXDR: () => 'archived-key-xdr' }
+      const sendSpy = vi.spyOn(resurrect.server, 'sendTransaction')
+      vi.spyOn(resurrect.server, 'simulateTransaction').mockResolvedValue({
+        id: '1',
+        latestLedger: 100,
+        events: [],
+        _parsed: true,
+        transactionData: {
+          getFootprint: () => ({ readOnly: () => [], readWrite: () => [archivedKey] }),
+        },
+        minResourceFee: '100',
+        cost: { cpuInsns: '100', memBytes: '100' },
+        result: { auth: [], retval: { switch: () => 0 } },
+        restorePreamble: {
+          minResourceFee: '100',
+          transactionData: new SorobanDataBuilder(),
+        },
+      } as never)
+
+      const plan = await resurrect.previewRestore(transaction)
+      const simulatedTransaction = vi.mocked(resurrect.server.simulateTransaction).mock.calls[0][0]
+
+      expect(plan).toMatchObject({
+        transaction: {
+          xdr: originalXdr,
+          operationCount: 1,
+        },
+        network: {
+          rpcUrl: testConfig.rpcUrl,
+          networkPassphrase: Networks.TESTNET,
+        },
+        wouldNeedRestore: true,
+        archivedKeys: ['archived-key-xdr'],
+        minResourceFee: 100,
+        feeMultiplier: 3,
+        estimatedRestoreFee: '300',
+      })
+      expect(simulatedTransaction).not.toBe(transaction)
+      expect(simulatedTransaction.toXDR()).toBe(originalXdr)
+      expect(transaction.toXDR()).toBe(originalXdr)
+      expect(resurrect.state).toBe('idle')
+      expect(resurrect.history).toHaveLength(0)
+      expect(sendSpy).not.toHaveBeenCalled()
+    })
+
+    it('reports no restore when simulation succeeds without archived entries', async () => {
+      const sendSpy = vi.spyOn(resurrect.server, 'sendTransaction')
+      vi.spyOn(resurrect.server, 'simulateTransaction').mockResolvedValue({
+        id: '1',
+        latestLedger: 100,
+        events: [],
+        _parsed: true,
+        transactionData: new SorobanDataBuilder(),
+        minResourceFee: '0',
+        cost: { cpuInsns: '100', memBytes: '100' },
+        result: { auth: [], retval: { switch: () => 0 } },
+      } as never)
+
+      const plan = await resurrect.previewRestore(makeSampleTx())
+
+      expect(plan.wouldNeedRestore).toBe(false)
+      expect(plan.archivedKeys).toEqual([])
+      expect(plan.estimatedRestoreFee).toBe('0')
+      expect(sendSpy).not.toHaveBeenCalled()
+    })
+
+    it('surfaces simulation errors rather than returning a success-shaped plan', async () => {
+      const sendSpy = vi.spyOn(resurrect.server, 'sendTransaction')
+      vi.spyOn(resurrect.server, 'simulateTransaction').mockResolvedValue({
+        id: '1',
+        latestLedger: 100,
+        events: [],
+        _parsed: true,
+        error: 'simulation rejected',
+      } as never)
+
+      await expect(resurrect.previewRestore(makeSampleTx())).rejects.toThrow(
+        'Transaction simulation failed: simulation rejected',
+      )
+      expect(sendSpy).not.toHaveBeenCalled()
+    })
+  })
+
   describe('buildRestoreTx', () => {
     it('throws when no restore is needed', async () => {
       vi.spyOn(resurrect.server, 'simulateTransaction').mockResolvedValue({
@@ -242,8 +370,12 @@ describe('SorobanResurrect', () => {
       )
 
       const initialState = resurrect.state
-      await resurrect.buildRestoreTx(Keypair.random().publicKey(), makeSampleTx(), mockRestoreResponse as never)
-      
+      await resurrect.buildRestoreTx(
+        Keypair.random().publicKey(),
+        makeSampleTx(),
+        mockRestoreResponse as never,
+      )
+
       // When providing simulationResponse, state should not change to 'simulating'
       expect(resurrect.state).toBe(initialState)
     })
@@ -257,7 +389,10 @@ describe('SorobanResurrect', () => {
       const mainnet = new SorobanResurrect({ ...testConfig, networkPassphrase: Networks.PUBLIC })
       expect(mainnet.config.networkPassphrase).toBe(Networks.PUBLIC)
 
-      const futurenet = new SorobanResurrect({ ...testConfig, networkPassphrase: Networks.FUTURENET })
+      const futurenet = new SorobanResurrect({
+        ...testConfig,
+        networkPassphrase: Networks.FUTURENET,
+      })
       expect(futurenet.config.networkPassphrase).toBe(Networks.FUTURENET)
     })
 

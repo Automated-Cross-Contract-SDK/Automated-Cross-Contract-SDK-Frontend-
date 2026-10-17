@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { effectScope } from 'vue'
+import { SorobanResurrect } from '@soroban-resurrect/sdk'
 import { useSorobanResurrectWatcher } from './useSorobanResurrectWatcher.js'
 import { withSetup } from './testUtils.js'
 
@@ -8,6 +10,7 @@ function makeFake(entries: unknown[] = []) {
   return {
     getExpiringSoonEntries: vi.fn().mockResolvedValue(entries),
     submitWithRestore: vi.fn(),
+    dispose: vi.fn(),
   }
 }
 
@@ -17,7 +20,10 @@ async function flush() {
 
 describe('useSorobanResurrectWatcher', () => {
   beforeEach(() => vi.useFakeTimers())
-  afterEach(() => vi.useRealTimers())
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.useRealTimers()
+  })
 
   it('starts on mount and updates expiring entries on each tick', async () => {
     const a = [{ keyBase64: 'k1', ttlLedgers: 10, isArchived: false }]
@@ -74,6 +80,41 @@ describe('useSorobanResurrectWatcher', () => {
     app.unmount()
     await vi.advanceTimersByTimeAsync(5000)
     expect(fake.getExpiringSoonEntries.mock.calls.length).toBe(before)
+  })
+
+  it('cleans up polling and owned clients when an effect scope ends', async () => {
+    const fake = makeFake([])
+    const scope = effectScope()
+    let api!: ReturnType<typeof useSorobanResurrectWatcher>
+    scope.run(() => {
+      api = useSorobanResurrectWatcher(NO_KEYS, {
+        resurrect: fake as never,
+        intervalMs: 1000,
+        autoStart: false,
+      })
+    })
+
+    api.start()
+    await flush()
+    expect(vi.getTimerCount()).toBe(1)
+    const callsBeforeDispose = fake.getExpiringSoonEntries.mock.calls.length
+    scope.stop()
+    expect(vi.getTimerCount()).toBe(0)
+
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(fake.getExpiringSoonEntries.mock.calls.length).toBe(callsBeforeDispose)
+    expect(fake.dispose).not.toHaveBeenCalled()
+
+    const dispose = vi.spyOn(SorobanResurrect.prototype, 'dispose')
+    const ownedScope = effectScope()
+    ownedScope.run(() => {
+      useSorobanResurrectWatcher(NO_KEYS, {
+        config: { rpcUrl: 'https://soroban-testnet.stellar.org' },
+        autoStart: false,
+      })
+    })
+    ownedScope.stop()
+    expect(dispose).toHaveBeenCalledTimes(1)
   })
 
   it('honours autoStart:false with manual start()/stop()', async () => {

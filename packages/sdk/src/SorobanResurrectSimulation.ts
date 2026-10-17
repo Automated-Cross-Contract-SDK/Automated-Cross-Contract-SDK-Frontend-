@@ -2,9 +2,15 @@ import { Transaction, rpc } from '@stellar/stellar-sdk'
 import { ArchivedLedgerEntry } from './types.js'
 import type { ResolvedSorobanResurrectConfig } from './types.js'
 import { SimulationCache } from './SimulationCache.js'
-import { isRestoreResponse, isSuccessResponse, isErrorResponse, extractArchivedKeys } from './Archiver.js'
+import {
+  isRestoreResponse,
+  isSuccessResponse,
+  isErrorResponse,
+  extractArchivedKeys,
+} from './Archiver.js'
 import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
 import type { ISorobanRpcClient } from './RpcClient.js'
+import { runWithSignal, throwIfAborted, type AbortSignalOptions } from './AbortUtils.js'
 
 /**
  * Handles transaction simulation and archived-entry detection for a single
@@ -47,11 +53,19 @@ export class SorobanResurrectSimulator {
     this._stateMgr = stateMgr
   }
 
+  get cache(): SimulationCache | undefined {
+    return this._cache
+  }
+
   /**
    * Re-binds this simulator to a new RPC client / config / cache in place,
    * without losing any other state. Used by `SorobanResurrect.switchNetwork`.
    */
-  rebind(server: ISorobanRpcClient, config: ResolvedSorobanResurrectConfig, cache: SimulationCache | undefined): void {
+  rebind(
+    server: ISorobanRpcClient,
+    config: Required<SorobanResurrectConfig>,
+    cache: SimulationCache | undefined,
+  ): void {
     this._server = server
     this._config = config
     this._cache = cache
@@ -72,19 +86,27 @@ export class SorobanResurrectSimulator {
    * @param transaction - The transaction to simulate.
    * @returns The raw simulation response (success, error, or restore-required).
    */
-  async simulate(transaction: Transaction): Promise<rpc.Api.SimulateTransactionResponse> {
+  async simulate(
+    transaction: Transaction,
+    options: AbortSignalOptions = {},
+  ): Promise<rpc.Api.SimulateTransactionResponse> {
+    const { signal } = options
+    throwIfAborted(signal)
     if (this._cache) {
       const cached = this._cache.get(transaction)
       if (cached) return cached
     }
 
-    this._stateMgr.setState('simulating', 'Simulating transaction...')
-
-    const response = await this._server.simulateTransaction(transaction)
-
-    if (this._cache) {
-      this._cache.set(transaction, response)
+    if (options.updateState !== false) {
+      this._stateMgr.setState('simulating', 'Simulating transaction...')
     }
+
+    const response = await runWithSignal(
+      () => this._server.simulateTransaction(transaction),
+      signal,
+    )
+
+    cache?.set(transaction, response)
 
     return response
   }
@@ -100,18 +122,31 @@ export class SorobanResurrectSimulator {
    * @param transaction - The transaction whose footprint to inspect.
    * @returns Array of archived ledger entries; empty if none detected or on error.
    */
-  async detectArchivedKeys(transaction: Transaction): Promise<ArchivedLedgerEntry[]> {
+  async detectArchivedKeys(
+    transaction: Transaction,
+    options: AbortSignalOptions = {},
+  ): Promise<ArchivedLedgerEntry[]> {
     const method = this._config.archiveDetectionMethod ?? 'simulation'
 
     try {
       if (method === 'direct') {
-        return await this._detectViaDirect(transaction)
+        return await runWithSignal(() => this._detectViaDirect(transaction), options.signal)
       }
-      return await this._detectViaSimulation(transaction)
+      return await this._detectViaSimulation(transaction, options)
     } catch (err) {
+      if (options.signal?.aborted) throw err
       console.warn('SorobanResurrect: archive detection error:', err)
       return []
     }
+  }
+
+  async detectArchivedKeysOrThrow(transaction: Transaction): Promise<ArchivedLedgerEntry[]> {
+    const method = this._config.archiveDetectionMethod ?? 'simulation'
+
+    if (method === 'direct') {
+      return this._detectViaDirect(transaction)
+    }
+    return this._detectViaSimulation(transaction)
   }
 
   /**
@@ -121,8 +156,11 @@ export class SorobanResurrectSimulator {
    * @param transaction - The transaction to check.
    * @returns `true` if restoration is required before submission.
    */
-  async needsRestore(transaction: Transaction): Promise<boolean> {
-    const keys = await this.detectArchivedKeys(transaction)
+  async needsRestore(
+    transaction: Transaction,
+    options: AbortSignalOptions = {},
+  ): Promise<boolean> {
+    const keys = await this.detectArchivedKeys(transaction, options)
     return keys.length > 0
   }
 
@@ -140,14 +178,29 @@ export class SorobanResurrectSimulator {
    * `config.archiveDetectionFallback` is not explicitly disabled, falls back
    * to the `'direct'` strategy so archived entries aren't silently missed.
    */
-  private async _detectViaSimulation(transaction: Transaction): Promise<ArchivedLedgerEntry[]> {
-    const response = await this.simulate(transaction)
+  private async _detectViaSimulation(
+    transaction: Transaction,
+    options: AbortSignalOptions,
+  ): Promise<ArchivedLedgerEntry[]> {
+    const response = await this.simulate(transaction, options)
+
+    if (response._parsed !== true) {
+      throw new IncompleteFootprintError(
+        'unparsed-response',
+        'the RPC response has _parsed=false, so archive status cannot be determined safely.',
+      )
+    }
 
     if (isRestoreResponse(response)) {
       return extractArchivedKeys(response)
     }
 
-    if (isSuccessResponse(response) || isErrorResponse(response)) {
+    if (isSuccessResponse(response)) {
+      readSimulationFootprint(response)
+      return []
+    }
+
+    if (isErrorResponse(response)) {
       return []
     }
 
@@ -161,7 +214,7 @@ export class SorobanResurrectSimulator {
         "falling back to the 'direct' archive detection strategy. " +
         'Set archiveDetectionFallback: false to disable this and pin a strategy explicitly.',
     )
-    return this._detectViaDirect(transaction)
+    return runWithSignal(() => this._detectViaDirect(transaction), options.signal)
   }
 
   /**
@@ -173,7 +226,11 @@ export class SorobanResurrectSimulator {
    * is not used.
    */
   private async _detectViaDirect(transaction: Transaction): Promise<ArchivedLedgerEntry[]> {
+    const server = this._server
     const { detectArchivedKeysViaDirect } = await import('./Archiver.js')
-    return detectArchivedKeysViaDirect(this._server, transaction)
+    return detectArchivedKeysViaDirect(this._server, transaction, {
+      chunkSize: this._config.archiveDetectionChunkSize,
+      concurrency: this._config.archiveDetectionConcurrency,
+    })
   }
 }

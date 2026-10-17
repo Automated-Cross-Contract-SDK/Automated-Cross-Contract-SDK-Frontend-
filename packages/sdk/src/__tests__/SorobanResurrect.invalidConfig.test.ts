@@ -6,13 +6,19 @@ import { InvalidInputError, ResurrectErrorCode } from '../errors.js'
 describe('SorobanResurrect — invalid config handling', () => {
   it('throws when constructed with an empty RPC URL', () => {
     expect(() => new SorobanResurrect({ rpcUrl: '' } as SorobanResurrectConfig)).toThrow(
-      'config.rpcUrl must be a non-empty string',
+      'Invalid config.rpcUrl',
     )
   })
 
   it('throws a descriptive error for an invalid RPC URL', () => {
     expect(() => new SorobanResurrect({ rpcUrl: 'not-a-url' })).toThrow(
-      'config.rpcUrl must be a valid URL',
+      'Invalid config.rpcUrl',
+    )
+  })
+
+  it('rejects non-HTTP RPC URLs', () => {
+    expect(() => new SorobanResurrect({ rpcUrl: 'ftp://rpc.example.com' })).toThrow(
+      'Invalid config.rpcUrl',
     )
   })
 
@@ -24,7 +30,7 @@ describe('SorobanResurrect — invalid config handling', () => {
           rpcUrl: 'https://soroban-testnet.stellar.org',
           networkPassphrase: 'not a real passphrase',
         }),
-    ).toThrow(/Invalid network passphrase/)
+    ).toThrow(/Invalid config\.networkPassphrase/)
     warnSpy.mockRestore()
   })
 
@@ -63,7 +69,33 @@ describe('SorobanResurrect — invalid config handling', () => {
         rpcUrl: 'https://soroban-testnet.stellar.org',
         pollIntervalMs: 0,
       }),
-    ).toThrow('config.pollIntervalMs must be a finite number greater than 0')
+    ).toThrow('Invalid config.pollIntervalMs')
+  })
+
+  it.each([
+    ['pollTimeoutMs', 0],
+    ['rpcTimeoutMs', Number.POSITIVE_INFINITY],
+    ['ttlWatchIntervalMs', -1],
+    ['rpcRetryCount', 1.5],
+    ['rpcRetryBackoffMs', -1],
+    ['rpcCircuitBreakerThreshold', 0],
+    ['rpcCircuitBreakerCooldownMs', -1],
+    ['ttlWatchThreshold', -1],
+    ['maxSequenceRetries', -1],
+    ['archiveDetectionChunkSize', 0],
+    ['archiveDetectionConcurrency', 1.5],
+    ['simulationCacheTtlMs', 0],
+    ['simulationCacheMaxSize', 0],
+    ['maxRestoreTxSizeBytes', 1.5],
+    ['restoreSizeWarnRatio', 1.1],
+  ])('identifies invalid timing or retry field %s', (field, value) => {
+    expect(
+      () =>
+        new SorobanResurrect({
+          rpcUrl: 'https://soroban-testnet.stellar.org',
+          [field]: value,
+        } as SorobanResurrectConfig),
+    ).toThrow(`config.${field}`)
   })
 
   it('throws when the restore fee multiplier is below one', () => {
@@ -72,7 +104,38 @@ describe('SorobanResurrect — invalid config handling', () => {
         rpcUrl: 'https://soroban-testnet.stellar.org',
         restoreFeeMultiplier: 0.5,
       }),
-    ).toThrow('config.restoreFeeMultiplier must be a finite number greater than or equal to 1')
+    ).toThrow('Invalid config.restoreFeeMultiplier')
+  })
+
+  it.each([-1, 1.5, '1.2', ''])('rejects an invalid restore-fee cap %s', (maxRestoreFeeStroops) => {
+    expect(
+      () =>
+        new SorobanResurrect({
+          rpcUrl: 'https://soroban-testnet.stellar.org',
+          maxRestoreFeeStroops,
+        } as SorobanResurrectConfig),
+    ).toThrow('config.maxRestoreFeeStroops')
+  })
+
+  it('accepts decimal integer strings for large restore-fee caps', () => {
+    expect(
+      () =>
+        new SorobanResurrect({
+          rpcUrl: 'https://soroban-testnet.stellar.org',
+          maxRestoreFeeStroops: '9007199254740993',
+        } as SorobanResurrectConfig),
+    ).not.toThrow()
+  })
+
+  it('rejects the fallback option when direct archive detection is selected', () => {
+    expect(
+      () =>
+        new SorobanResurrect({
+          rpcUrl: 'https://soroban-testnet.stellar.org',
+          archiveDetectionMethod: 'direct',
+          archiveDetectionFallback: true,
+        } as SorobanResurrectConfig),
+    ).toThrow('config.archiveDetectionFallback')
   })
 
   it('throws a typed INVALID_INPUT error for invalid configuration', () => {

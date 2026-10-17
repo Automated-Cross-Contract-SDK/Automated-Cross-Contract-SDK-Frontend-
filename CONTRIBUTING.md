@@ -7,6 +7,7 @@ Thank you for your interest in contributing! This document covers everything you
 ## Table of Contents
 
 - [Community & Discussions](#community--discussions)
+- [Triage & Issue Labels](#triage--issue-labels)
 - [Dev Environment Setup](#dev-environment-setup)
 - [Project Structure](#project-structure)
 - [Code Style](#code-style)
@@ -14,6 +15,7 @@ Thank you for your interest in contributing! This document covers everything you
 - [Commit Format](#commit-format)
 - [Pull Request Process](#pull-request-process)
 - [Dependency Updates](#dependency-updates)
+- [Package Support & Deprecation](#package-support--deprecation)
 - [Reporting Bugs](#reporting-bugs)
 - [Requesting Features](#requesting-features)
 
@@ -36,6 +38,33 @@ The issue tracker is reserved for **bugs** and **scoped feature requests**. Ever
 - Maintainers may convert an issue that is really a question into a Q&A discussion, and convert an
   agreed Idea into an issue with the appropriate `epic/*` label.
 - Planned work and phase ordering are documented in the [roadmap](./docs/roadmap.md).
+
+---
+
+## Triage & Issue Labels
+
+Maintainers rotate issue triage weekly. The maintainer on rotation owns new
+issues for that week and should provide a first response within **5 business
+days**. If that person is unavailable, another maintainer should pick up the
+issue rather than letting the response window lapse.
+
+When triaging, confirm that the issue is reproducible or sufficiently scoped,
+apply the relevant area/priority labels, and identify an owner for work that
+needs one. Use `help wanted` for work that needs an outside contributor or
+maintainer owner. Do not label a broad epic or multi-package project as a
+`good first issue`.
+
+A `good first issue` must be independently completable and its body must name
+the likely files or package to change and a command that verifies the result.
+Prefer a focused documentation, test, or isolated implementation task; split
+epics into smaller issues before inviting a newcomer to take them.
+
+The stale workflow marks issues stale after **60 days** without activity and
+closes them **14 days** later. Issues labelled `good first issue` or
+`help wanted` are exempt while they are actively recruiting a contributor.
+Pull requests are marked stale after **30 days** and closed **14 days** later;
+dependency update PRs are exempt. A contributor can keep an issue or PR open
+by commenting with a brief status update.
 
 ---
 
@@ -335,6 +364,15 @@ Dependabot (`.github/dependabot.yml`) opens npm update PRs every Monday, grouped
 Auto-merge is enabled by `.github/workflows/dependabot-auto-merge.yml`, which only acts on Dependabot-authored PRs in the `dev-dependencies` group. It relies on GitHub's native auto-merge, so a PR is never merged while CI is failing or pending — this requires "Allow auto-merge" to be enabled in the repository settings and CI to be a required status check on `main`. If a grouped devDependency update breaks CI, fix it on the Dependabot branch or close the PR and pin the offending package.
 
 GitHub Actions versions are updated weekly as separate PRs and reviewed manually.
+
+---
+
+## Package Support & Deprecation
+
+See [SUPPORT.md](./SUPPORT.md) for package support status, supported release
+windows, and pre-1.0 compatibility expectations. See
+[DEPRECATION.md](./DEPRECATION.md) for the public API deprecation and removal
+procedure.
 
 ---
 

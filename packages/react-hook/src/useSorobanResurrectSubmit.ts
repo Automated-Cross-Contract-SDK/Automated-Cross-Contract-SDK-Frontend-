@@ -33,6 +33,8 @@ export interface UseSorobanResurrectSubmitReturn {
   error: string | null
   /** Live workflow state snapshot from the SDK. */
   state: RestoreStateInfo
+  /** Cancel workflows started by this hook. Already-submitted transactions cannot be recalled. */
+  cancel: () => boolean
   /** Clear `result`/`error` and reset the SDK workflow state to idle. */
   reset: () => void
 }
@@ -78,44 +80,82 @@ export function useSorobanResurrectSubmit(
   // Keep callbacks fresh without re-subscribing / re-creating `submit`.
   const cbRef = useRef(options)
   cbRef.current = options
+  const mountedRef = useRef(false)
+  const requestIdRef = useRef(0)
+  const controllersRef = useRef(new Set<AbortController>())
 
   useEffect(() => {
+    mountedRef.current = true
     setState(resurrect.stateInfo ?? { state: 'idle', message: '' })
-    const unsub = resurrect.onStateChange((info) => setState(info))
-    return unsub
+    const unsub = resurrect.onStateChange((info) => {
+      if (mountedRef.current) setState(info)
+    })
+    return () => {
+      mountedRef.current = false
+      requestIdRef.current++
+      for (const controller of controllersRef.current) controller.abort()
+      controllersRef.current.clear()
+      unsub()
+    }
   }, [resurrect])
 
   const submit = useCallback(
     async (transaction: Transaction, wallet: WalletAdapter): Promise<ResurrectResult> => {
-      setResult(null)
-      setError(null)
+      const requestId = ++requestIdRef.current
+      const controller = new AbortController()
+      controllersRef.current.add(controller)
+      if (mountedRef.current) {
+        setResult(null)
+        setError(null)
+      }
 
       let outcome: ResurrectResult
       try {
-        outcome = await resurrect.submitWithRestore({ transaction, wallet })
+        outcome = await resurrect.submitWithRestore({
+          transaction,
+          wallet,
+          signal: controller.signal,
+        })
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         outcome = { success: false, archivedKeysDetected: 0, error: message }
+      } finally {
+        controllersRef.current.delete(controller)
       }
 
-      setResult(outcome)
       const errText = outcome.success ? null : outcome.error ?? 'Unknown error'
-      setError(errText)
+      if (mountedRef.current && requestId === requestIdRef.current) {
+        setResult(outcome)
+        setError(errText)
 
-      if (outcome.success) cbRef.current.onSuccess?.(outcome)
-      else if (errText) cbRef.current.onError?.(errText)
-      cbRef.current.onSettled?.(outcome, errText)
+        if (outcome.success) cbRef.current.onSuccess?.(outcome)
+        else if (errText) cbRef.current.onError?.(errText)
+        cbRef.current.onSettled?.(outcome, errText)
+      }
 
       return outcome
     },
     [resurrect],
   )
 
+  const cancel = useCallback(() => {
+    let cancelled = false
+    for (const controller of controllersRef.current) {
+      if (!controller.signal.aborted) {
+        controller.abort()
+        cancelled = true
+      }
+    }
+    return cancelled
+  }, [])
+
   const reset = useCallback(() => {
+    requestIdRef.current++
+    cancel()
     setResult(null)
     setError(null)
     resurrect.reset()
-  }, [resurrect])
+  }, [cancel, resurrect])
 
   return {
     submit,
@@ -123,6 +163,7 @@ export function useSorobanResurrectSubmit(
     result,
     error,
     state,
+    cancel,
     reset,
   }
 }
