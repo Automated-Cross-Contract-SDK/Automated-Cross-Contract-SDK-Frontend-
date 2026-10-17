@@ -628,6 +628,8 @@ export interface RestoreStateInfo {
   error?: string
 }
 
+export type TTLQueryChunkError = TTLQueryError;
+
 /**
  * Typed events emitted by SorobanResurrect for specific workflow transitions,
  * in addition to the general-purpose `onStateChange` observer.
@@ -1258,4 +1260,288 @@ export interface HistoryPersistenceOptions {
     serialize(value: string): string | Promise<string>;
     deserialize(value: string): string | Promise<string>;
   };
+}
+export type { ResurrectErrorCode } from './errors.js';
+
+/** State labels published by the SDK during recovery and TTL workflows. */
+export type RestoreState =
+  | 'idle'
+  | 'simulating'
+  | 'restore_needed'
+  | 'signing_restore'
+  | 'submitting_restore'
+  | 'confirming_restore'
+  | 'signing_original'
+  | 'submitting_original'
+  | 'estimating'
+  | 'watching_ttl'
+  | 'extending_ttl'
+  | 'success'
+  | 'error';
+
+/** Ledger key data needed for restore workflows; never includes signer secrets. */
+export interface ArchivedLedgerEntry {
+  /** Stellar SDK XDR ledger key used when building a restore footprint. */
+  key: xdr.LedgerKey;
+  /** Base64 XDR representation suitable for serialization. */
+  keyBase64: XdrBase64;
+  /** Stable public ledger-entry classification. */
+  entryType?: 'contractData' | 'contractCode' | 'other';
+  /** Expiration metadata, when available from a successful ledger query. */
+  liveUntilLedger?: number;
+  currentLedger?: number;
+  ttlLedgers?: number;
+}
+
+/** The wallet operations required by the SDK's transaction workflows. */
+export interface WalletAdapter {
+  isConnected(): Promise<boolean>;
+  getPublicKey(): Promise<string>;
+  signTransaction(
+    transactionXdr: XdrBase64 | string,
+    options?: { networkPassphrase?: string; network?: string },
+  ): Promise<XdrBase64 | string>;
+  getNetwork?(): Promise<string>;
+  signAuthEntry?(
+    authEntryXdr: XdrBase64,
+    options?: { networkPassphrase?: string; address?: string },
+  ): Promise<XdrBase64>;
+  readonly capabilities?: WalletCapabilities;
+}
+
+/** Optional wallet capability declarations consumed by SDK workflows. */
+export interface WalletCapabilities {
+  signTransaction?: boolean;
+  signAuthEntry?: boolean;
+  feeBump?: boolean;
+  hardware?: boolean;
+  blindSigning?: boolean;
+  multiAccount?: boolean;
+}
+
+export type WalletErrorCode =
+  | 'USER_REJECTED'
+  | 'NETWORK_MISMATCH'
+  | 'NOT_CONNECTED'
+  | 'UNSUPPORTED_CAPABILITY'
+  | 'SIGNING_FAILED'
+  | 'UNKNOWN';
+
+/** Wallet failure carrying a stable code for caller-side handling. */
+export class WalletError extends Error {
+  constructor(
+    readonly code: WalletErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'WalletError';
+  }
+}
+
+/** Full SDK configuration; all optional values receive defaults at construction. */
+export interface SorobanResurrectConfig {
+  rpcUrl: string;
+  networkPassphrase?: string;
+  rpcClient?: ISorobanRpcClient;
+  pollIntervalMs?: number;
+  pollTimeoutMs?: number;
+  /** Maximum time to wait for the initial transaction simulation. */
+  simulationTimeoutMs?: number;
+  /** Maximum time to wait for wallet transaction signing. */
+  walletSigningTimeoutMs?: number;
+  /** Maximum time to wait for a restore transaction to be confirmed. */
+  restoreConfirmationTimeoutMs?: number;
+  /** Maximum time to wait for submission of the original transaction. */
+  originalSubmissionTimeoutMs?: number;
+  restoreFeeMultiplier?: number;
+  maxRestoreFeeStroops?: number | string;
+  maxSequenceRetries?: number;
+  archiveDetectionMethod?: 'simulation' | 'direct';
+  archiveDetectionFallback?: boolean;
+  archiveDetectionChunkSize?: number;
+  archiveDetectionConcurrency?: number;
+  restoreSizeWarnRatio?: number;
+  maxRestoreTxSizeBytes?: number;
+  throwOnRestoreSizeLimit?: boolean;
+  rpcTimeoutMs?: number;
+  rpcRetryCount?: number;
+  rpcRetryBackoffMs?: number;
+  rpcCircuitBreakerThreshold?: number;
+  rpcCircuitBreakerCooldownMs?: number;
+  ttlWatchIntervalMs?: number;
+  ttlWatchThreshold?: number;
+  ttlWatchThresholdLedgers?: number;
+  ttlWatchAutoExtend?: boolean;
+  restoreTxMemo?: Memo;
+  restoreTxMemoText?: string;
+  useSSE?: boolean;
+  enableSimulationCache?: boolean;
+  simulationCacheTtlMs?: number;
+  simulationCacheMaxSize?: number;
+  logger?: Logger;
+}
+
+/** Options for direct archived-key detection. */
+export interface ArchiveDetectionOptions {
+  chunkSize?: number;
+  concurrency?: number;
+}
+
+/** Simulation response returned by Soroban RPC. */
+export type SimulateResponse = import('@stellar/stellar-sdk').rpc.Api.SimulateTransactionResponse;
+
+/** Result of a recovery submission or direct restore. */
+export interface ResurrectResult {
+  success: boolean;
+  archivedKeysDetected: number;
+  restoreTxHash?: string;
+  originalTxHash?: string;
+  error?: string;
+  errorCode?: ResurrectErrorCode | WalletErrorCode;
+  historyId?: string;
+  sequenceRetries?: number;
+  diagnostics?: TxDiagnostics;
+  onchainError?: import('./TransactionFailure.js').OnchainError;
+  dryRun?: boolean;
+  dryRunResult?: DryRunResult;
+}
+
+/** Structured status snapshot emitted to workflow observers. */
+export interface RestoreStateInfo {
+  state: RestoreState;
+  message: string;
+  archivedKeys: ArchivedLedgerEntry[];
+  error?: string;
+}
+
+/** Dry-run preview returned without wallet calls or transaction submission. */
+export interface DryRunResult {
+  wouldNeedRestore: boolean;
+  archivedKeys: ArchivedLedgerEntry[];
+  estimatedRestoreFee: string;
+  simulationError?: string;
+}
+
+/** Parsed diagnostics from a failed transaction response. */
+export interface TxDiagnostics {
+  events: string[];
+  failedOpIndex?: number;
+  revertReason?: string;
+  resultCodes?: string[];
+  rawEventsXdr?: string[];
+}
+
+/** Callback options shared by arbitrary restore and restore-and-submit calls. */
+export interface RestoreKeysOptions {
+  onSigningRestore?: () => void;
+  onSubmittingRestore?: () => void;
+  onRestoreSubmitted?: (hash: string) => void;
+  onRestoreConfirmed?: (hash: string) => void;
+}
+
+/** Inputs and lifecycle callbacks for an automatic restore-and-submit workflow. */
+export interface SubmitWithRestoreOptions extends RestoreKeysOptions {
+  transaction: Transaction;
+  wallet: WalletAdapter;
+  onRestoreNeeded?: (keys: ArchivedLedgerEntry[]) => void;
+  onSigningOriginal?: () => void;
+  onOriginalSubmitted?: (hash: string) => void;
+  onRestoreFailed?: (error: string) => void;
+  restoreTxMemo?: Memo;
+  restoreTxMemoText?: string;
+  feeBumpConfig?: FeeBumpConfig;
+  dryRun?: boolean;
+}
+
+/** Sponsor interface used for fee-bump transactions. */
+export interface FeeBumpSponsor {
+  getPublicKey(): Promise<string>;
+  signFeeBump(
+    feeBumpXdr: XdrBase64,
+    options?: { networkPassphrase?: string; network?: string },
+  ): Promise<XdrBase64 | string>;
+}
+
+/** Fee-bump submission settings. */
+export interface FeeBumpConfig {
+  sponsor: FeeBumpSponsor;
+  feeBumpFee?: string;
+}
+
+/** Storage interface used by optional durable transaction history. */
+export interface HistoryStorage {
+  getItem(key: string): string | null | Promise<string | null>;
+  setItem(key: string, value: string): void | Promise<void>;
+  removeItem?(key: string): void | Promise<void>;
+}
+
+/** Configuration for persisting transaction history. */
+export interface HistoryPersistenceOptions {
+  storage: HistoryStorage;
+  key?: string;
+  mode?: 'full' | 'minimal';
+  serializer?: {
+    serialize(plain: string): string | Promise<string>;
+    deserialize(stored: string): string | Promise<string>;
+  };
+}
+
+/** Hardware-wallet adapter contract. */
+export interface HardwareWalletAdapter extends WalletAdapter {
+  readonly type: 'ledger' | 'trezor';
+  connect(): Promise<void>;
+  disconnect(): Promise<void>;
+}
+
+export interface LedgerAdapterConfig {
+  transport?: unknown;
+  accountIndex?: number;
+}
+
+export interface TrezorAdapterConfig {
+  manifest?: Record<string, unknown>;
+  trezorConnect?: unknown;
+  accountIndex?: number;
+}
+
+/** Log severity accepted by SDK logging integrations. */
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+/** Structured context attached to SDK log calls. */
+export interface LogContext {
+  requestId?: string;
+  method?: string;
+  durationMs?: number;
+  ok?: boolean;
+  error?: string;
+  [key: string]: unknown;
+}
+
+/** Timing record for an individual RPC request. */
+export interface RpcTimingEvent {
+  method: string;
+  durationMs: number;
+  ok: boolean;
+  requestId?: string;
+  error?: string;
+}
+
+/** Typed event payloads published by the SDK. */
+export interface SorobanResurrectEvents {
+  stateChange: (info: RestoreStateInfo) => void;
+  restoreNeeded: (keys: ArchivedLedgerEntry[]) => void;
+  restoreSubmitted: (hash: string) => void;
+  restoreConfirmed: (hash: string) => void;
+  originalSubmitted: (hash: string) => void;
+  restoreComplete: (result: ResurrectResult) => void;
+  error: (message: string) => void;
+  networkChanged: (event: {
+    previous: { rpcUrl: string; networkPassphrase: string };
+    current: { rpcUrl: string; networkPassphrase: string };
+  }) => void;
+  ttlLow: (entries: import('./TTLHelpers.js').LedgerEntryTTLInfo[]) => void;
+  ttlExtended: (event: {
+    restoreTxHash: string;
+    entries: import('./TTLHelpers.js').LedgerEntryTTLInfo[];
+  }) => void;
 }

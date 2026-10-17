@@ -28,7 +28,14 @@ import {
 } from './TTLHelpers.js'
 import type { LedgerEntryTTLInfo, QueryLedgerTTLOptions, TTLQueryResult } from './TTLHelpers.js'
 import { NETWORK_PRESETS } from './constants.js'
-import { watchTTL, type TTLWatchHandle, type TTLWatchOptions } from './TTLWatch.js'
+import {
+  extendLedgerTTL,
+  watchTTL,
+  type ExtendLedgerTTLOptions,
+  type ExtendLedgerTTLResult,
+  type TTLWatchHandle,
+  type TTLWatchOptions,
+} from './TTLWatch.js'
 import type { SorobanNetworkName } from './constants.js'
 import type { AbortSignalOptions } from './AbortUtils.js'
 
@@ -783,5 +790,17 @@ export class SorobanResurrect {
     ledgersThreshold = 100_000,
   ): Promise<LedgerEntryTTLInfo[]> {
     return getExpiringSoonEntries(this._server, keys, ledgersThreshold)
+  }
+
+  /**
+   * Estimates and explicitly confirms a persistent-entry TTL extension before
+   * requesting a wallet signature. The callback receives the fee estimate and
+   * can decline without any signing or submission.
+   */
+  async extendLedgerTTL(
+    keys: xdr.LedgerKey[],
+    options: ExtendLedgerTTLOptions,
+  ): Promise<ExtendLedgerTTLResult> {
+    return extendLedgerTTL(this._server, this._config, keys, options)
   }
 }

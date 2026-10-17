@@ -107,6 +107,17 @@ export function validateConfigShape(config: SorobanResurrectConfig): void {
     validateNumber('pollTimeoutMs', config.pollTimeoutMs, 0, true)
   }
 
+  for (const field of [
+    'simulationTimeoutMs',
+    'walletSigningTimeoutMs',
+    'restoreConfirmationTimeoutMs',
+    'originalSubmissionTimeoutMs',
+  ] as const) {
+    if (config[field] !== undefined) {
+      validateNumber(field, config[field], 0, true)
+    }
+  }
+
   if (config.restoreFeeMultiplier !== undefined) {
     validateNumber('restoreFeeMultiplier', config.restoreFeeMultiplier, 1, false)
   }
@@ -236,6 +247,10 @@ export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
     logger: config.logger ?? NOOP_LOGGER,
     pollIntervalMs: config.pollIntervalMs ?? POLL_INTERVAL_MS,
     pollTimeoutMs: config.pollTimeoutMs ?? POLL_TIMEOUT_MS,
+    simulationTimeoutMs: config.simulationTimeoutMs ?? RPC_TIMEOUT_MS,
+    walletSigningTimeoutMs: config.walletSigningTimeoutMs ?? 120_000,
+    restoreConfirmationTimeoutMs: config.restoreConfirmationTimeoutMs ?? POLL_TIMEOUT_MS,
+    originalSubmissionTimeoutMs: config.originalSubmissionTimeoutMs ?? RPC_TIMEOUT_MS,
     restoreFeeMultiplier: config.restoreFeeMultiplier ?? RESTORE_FEE_MULTIPLIER,
     rpcTimeoutMs: config.rpcTimeoutMs ?? RPC_TIMEOUT_MS,
     rpcRetryCount: config.rpcRetryCount ?? RPC_RETRY_COUNT,

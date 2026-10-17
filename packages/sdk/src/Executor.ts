@@ -580,6 +580,8 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
         networkPassphrase,
         config,
         server,
+        signingTimeoutMs: signingTimeout,
+        submissionTimeoutMs: originalSubmissionTimeout,
         onSigning: onSigningOriginal,
         onSigningFeeBump,
         signal,

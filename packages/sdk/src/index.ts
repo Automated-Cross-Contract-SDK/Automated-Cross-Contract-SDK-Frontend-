@@ -148,6 +148,7 @@ export type {
   LedgerEntryTTLInfo,
   TTLQueryResult,
   LedgerKeyEntryType,
+  TTLUnavailableReason,
   QueryLedgerTTLOptions,
 } from './TTLHelpers.js'
 export {
@@ -162,7 +163,13 @@ export type { ChunkedFetchOptions } from './ledgerChunks.js'
 // Proactive TTL watching (resurrect.watchTTL)
 // ---------------------------------------------------------------------------
 export { watchTTL } from './TTLWatch.js'
-export type { TTLWatchOptions, TTLWatchHandle } from './TTLWatch.js'
+export type {
+  TTLWatchOptions,
+  TTLWatchHandle,
+  ExtendLedgerTTLOptions,
+  ExtendLedgerTTLResult,
+  TTLExtensionEstimate,
+} from './TTLWatch.js'
 
 // ---------------------------------------------------------------------------
 // Fee calculation (returned by SorobanResurrect.estimateRestoreCost)
