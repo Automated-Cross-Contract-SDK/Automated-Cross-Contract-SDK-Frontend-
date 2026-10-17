@@ -8,6 +8,10 @@ the SDK when the config changes and disposes the instance and SDK subscriptions
 when the active Vue effect scope ends. It also works in a manually-created
 `effectScope()`. Use it when a component needs its own instance.
 
+Wallet cancellation resolves with the SDK's failed `ResurrectResult` rather
+than throwing; the same result is stored in `lastResult`. The state listener is
+removed when the component unmounts.
+
 ```ts
 const { state, isProcessing, submitWithRestore, reset, cancel } = useSorobanResurrect(config)
 

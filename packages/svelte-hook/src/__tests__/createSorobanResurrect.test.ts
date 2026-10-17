@@ -198,4 +198,19 @@ describe('createSorobanResurrect', () => {
     expect(mockReset).toHaveBeenNthCalledWith(1, undefined)
     expect(mockReset).toHaveBeenNthCalledWith(2, 'error')
   })
+
+  it('keeps a rejected wallet result as an error result instead of marking it successful', async () => {
+    const rejected = {
+      success: false,
+      archivedKeysDetected: 1,
+      error: 'User rejected the request',
+    }
+    mockSubmitWithRestore.mockResolvedValue(rejected)
+    const store = createSorobanResurrect(writable(testConfig))
+    const batch = store.submitBatch([{ transaction: {} as never, wallet: {} as never }])
+
+    await expect(batch.done).resolves.toEqual([rejected])
+    expect(get(batch.items[0])).toEqual({ status: 'error', result: rejected })
+    expect(get(store.lastResult)).toEqual(rejected)
+  })
 })

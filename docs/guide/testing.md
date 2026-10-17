@@ -26,6 +26,12 @@ It covers exactly the six RPC methods the SDK uses. Any object — a `vi.fn()` /
 implements these six methods can be used wherever the SDK expects an RPC
 client, with no casting required.
 
+The SDK property-based suite also generates ContractData and ContractCode
+ledger keys, checks that XDR parsing preserves their type and produces
+idempotent canonical base64, and verifies that invalid ledger-key
+discriminants are rejected. A fixed fast-check seed keeps those cases
+reproducible in CI; set `FC_SEED` locally to explore different generated keys.
+
 ## Injecting a test double (recommended)
 
 Pass your test double as `config.rpcClient` when constructing `SorobanResurrect`.
@@ -112,7 +118,14 @@ clean) plus two `sendTransaction` responses (restore, then original) — is
 enough to drive the entire state machine (`restore_needed` →
 `signing_restore` → `submitting_restore` → `confirming_restore` →
 `signing_original` → `submitting_original` → `success`) deterministically,
-with no network access.
+with no network access. A full workflow test should also verify that rebuilding
+preserves the original operations and that each submitted envelope matches the
+XDR returned by its corresponding wallet-signing call.
+
+Wallet-rejection integration tests should cover both signing prompts
+separately: rejecting the restore signature must send neither transaction,
+while rejecting the rebuilt original signature may send the confirmed restore
+transaction but must never send the unsigned original transaction.
 
 ## Free functions
 

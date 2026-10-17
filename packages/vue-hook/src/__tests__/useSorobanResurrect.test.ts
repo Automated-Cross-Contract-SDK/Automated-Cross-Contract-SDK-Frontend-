@@ -223,6 +223,19 @@ describe('useSorobanResurrect', () => {
     expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
+  it('returns and retains a wallet rejection as a failed result', async () => {
+    const rejected = {
+      success: false,
+      archivedKeysDetected: 0,
+      error: 'User rejected the request',
+    }
+    mockSubmitWithRestore.mockResolvedValue(rejected)
+    const { api } = mountComposable(ref(testConfig))
+
+    await expect(api().submitWithRestore({} as never, {} as never)).resolves.toBe(rejected)
+    expect(api().lastResult.value).toBe(rejected)
+  })
+
   it('delegates detectArchivedKeys to the SDK instance', async () => {
     const keys = [{ keyBase64: 'AAAA' }]
     mockDetectArchivedKeys.mockResolvedValue(keys)

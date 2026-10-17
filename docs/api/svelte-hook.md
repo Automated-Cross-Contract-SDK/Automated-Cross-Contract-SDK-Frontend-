@@ -86,6 +86,11 @@ so a UI can render per-item progress reactively:
 {/each}
 ```
 
+A resolved failed result (including a wallet cancellation) sets that item's
+status to `error`, preserves the result on the item and in `lastResult`, and
+does not reject `done`. `destroy()` removes both the config and SDK-state
+subscriptions; call it from Svelte's `onDestroy()`.
+
 ### `estimate(transaction)`
 
 Simulates the transaction, detects archived keys, and returns a `FeeEstimate`

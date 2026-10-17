@@ -153,6 +153,7 @@ describe('full restore workflow integration', () => {
   it('drives the full restore-and-resubmit workflow through executeWithRestore in the correct order', async () => {
     const server = makeIntegrationServer(callLog)
     const wallet = makeWallet()
+    const originalTx = makeSampleTx()
 
     const onRestoreNeeded = vi.fn()
     const onSigningRestore = vi.fn()
@@ -165,7 +166,7 @@ describe('full restore workflow integration', () => {
 
     const result = await executeWithRestore({
       server,
-      transaction: makeSampleTx(),
+      transaction: originalTx,
       wallet,
       config: defaultConfig,
       onRestoreNeeded,
@@ -203,6 +204,21 @@ describe('full restore workflow integration', () => {
 
     // Wallet signs both the restore and the rebuilt original transaction.
     expect(wallet.signTransaction).toHaveBeenCalledTimes(2)
+    expect(server.simulateTransaction).toHaveBeenCalledTimes(2)
+
+    const rebuiltOriginal = vi.mocked(server.simulateTransaction).mock.calls[1][0]
+    expect(rebuiltOriginal).toBeInstanceOf(Transaction)
+    if (rebuiltOriginal instanceof Transaction) {
+      expect(rebuiltOriginal.operations.map((operation) => operation.type)).toEqual(
+        originalTx.operations.map((operation) => operation.type),
+      )
+    }
+
+    // Each submitted envelope must be the exact envelope returned by the
+    // corresponding wallet-signing call, in restore-then-original order.
+    expect(vi.mocked(server.sendTransaction).mock.calls.map(([tx]) => tx.toXDR())).toEqual(
+      vi.mocked(wallet.signTransaction).mock.calls.map(([signedXdr]) => signedXdr),
+    )
 
     // Callbacks fire in the expected order with the right payloads.
     expect(onRestoreNeeded).toHaveBeenCalledWith([
@@ -464,6 +480,50 @@ describe('full restore workflow integration', () => {
 
     // Only the restore transaction was sent — the original was never rebuilt or submitted.
     expect(server.sendTransaction).toHaveBeenCalledTimes(1)
+    expect(callLog).not.toContain('sendTransaction:original')
+  })
+
+  it('distinguishes rejection at restore signing and never submits the unsigned restore tx', async () => {
+    const server = makeIntegrationServer(callLog)
+    const wallet = makeWallet()
+    vi.mocked(wallet.signTransaction).mockRejectedValueOnce(
+      new Error('User rejected restore signing'),
+    )
+
+    const result = await executeWithRestore({
+      server,
+      transaction: makeSampleTx(),
+      wallet,
+      config: defaultConfig,
+    })
+
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('User rejected restore signing')
+    expect(wallet.signTransaction).toHaveBeenCalledTimes(1)
+    expect(server.sendTransaction).not.toHaveBeenCalled()
+    expect(callLog).not.toContain('sendTransaction:restore')
+    expect(callLog).not.toContain('sendTransaction:original')
+  })
+
+  it('distinguishes rejection at original signing and never submits the unsigned original tx', async () => {
+    const server = makeIntegrationServer(callLog)
+    const wallet = makeWallet()
+    vi.mocked(wallet.signTransaction)
+      .mockImplementationOnce(async (tx: string) => tx)
+      .mockRejectedValueOnce(new Error('User rejected original signing'))
+
+    const result = await executeWithRestore({
+      server,
+      transaction: makeSampleTx(),
+      wallet,
+      config: defaultConfig,
+    })
+
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('User rejected original signing')
+    expect(wallet.signTransaction).toHaveBeenCalledTimes(2)
+    expect(server.sendTransaction).toHaveBeenCalledTimes(1)
+    expect(callLog).toContain('sendTransaction:restore')
     expect(callLog).not.toContain('sendTransaction:original')
   })
 
