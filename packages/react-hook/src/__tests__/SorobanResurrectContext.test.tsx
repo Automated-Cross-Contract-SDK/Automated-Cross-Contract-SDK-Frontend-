@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, renderHook, screen, act } from '@testing-library/react'
-import React from 'react'
+import React, { StrictMode } from 'react'
 import { SorobanResurrectProvider, useSorobanResurrectContext } from '../SorobanResurrectContext.js'
 import { SorobanResurrect } from '@soroban-resurrect/sdk'
 
 const mockOnStateChange = vi.fn()
 const mockReset = vi.fn()
+const mockDispose = vi.fn()
 const mockDetectArchivedKeys = vi.fn()
 const mockSubmitWithRestore = vi.fn()
 const mockCancel = vi.fn()
@@ -16,6 +17,7 @@ vi.mock('@soroban-resurrect/sdk', () => ({
   SorobanResurrect: vi.fn().mockImplementation(() => ({
     onStateChange: mockOnStateChange,
     reset: mockReset,
+    dispose: mockDispose,
     detectArchivedKeys: mockDetectArchivedKeys,
     submitWithRestore: mockSubmitWithRestore,
     cancel: mockCancel,
@@ -93,6 +95,39 @@ describe('SorobanResurrectProvider', () => {
     unmount()
     expect(unsubscribe).toHaveBeenCalledTimes(1)
     expect(mockCancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('disposes Strict Mode clients and subscriptions across cleanup and remount', () => {
+    const unsubscribes: ReturnType<typeof vi.fn>[] = []
+    mockOnStateChange.mockImplementation(() => {
+      const unsubscribe = vi.fn()
+      unsubscribes.push(unsubscribe)
+      return unsubscribe
+    })
+    const element = (
+      <StrictMode>
+        <SorobanResurrectProvider config={testConfig}>
+          <span>strict</span>
+        </SorobanResurrectProvider>
+      </StrictMode>
+    )
+
+    const firstMount = render(element)
+    expect(vi.mocked(SorobanResurrect)).toHaveBeenCalledTimes(2)
+    expect(mockDispose).toHaveBeenCalledTimes(1)
+    expect(unsubscribes.map((unsubscribe) => unsubscribe.mock.calls.length)).toEqual([1, 0])
+
+    firstMount.unmount()
+    expect(mockDispose).toHaveBeenCalledTimes(2)
+    expect(unsubscribes.map((unsubscribe) => unsubscribe.mock.calls.length)).toEqual([1, 1])
+
+    const secondMount = render(element)
+    expect(vi.mocked(SorobanResurrect)).toHaveBeenCalledTimes(4)
+    expect(mockDispose).toHaveBeenCalledTimes(3)
+    secondMount.unmount()
+
+    expect(mockDispose).toHaveBeenCalledTimes(4)
+    expect(unsubscribes.map((unsubscribe) => unsubscribe.mock.calls.length)).toEqual([1, 1, 1, 1])
   })
 
   it('updates state when listener fires', async () => {

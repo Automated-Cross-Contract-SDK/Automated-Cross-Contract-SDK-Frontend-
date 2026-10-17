@@ -1,8 +1,11 @@
-import { rpc, Transaction, TransactionBuilder } from '@stellar/stellar-sdk'
-import {
+import { rpc, Transaction, TransactionBuilder, xdr } from '@stellar/stellar-sdk'
+import type {
   ArchivedLedgerEntry,
+  DryRunResult,
+  ExpiredTransactionInfo,
   ResurrectResult,
   RestoreKeysOptions,
+  SubmitLifecycleEvent,
   SubmitWithRestoreOptions,
   WalletAdapter,
 } from './types.js'
@@ -11,17 +14,26 @@ import { executeWithRestore, sendTransaction as _sendTransaction } from './Execu
 import {
   buildRestoreTransaction,
   buildBatchRestoreTransaction,
+  buildRestoreTransactionFromKeys,
   buildOriginalAfterRestore,
+  resolveRestoreMemo,
   waitForTransaction,
+  extractXdrOperations,
+  getExpiredTransactionInfo,
 } from './Restorer.js'
-import { isRestoreResponse } from './Archiver.js'
+import {
+  isRestoreResponse,
+  isErrorResponse,
+  isSuccessResponse,
+  extractArchivedKeys,
+} from './Archiver.js'
 import { TransactionHistory, TransactionHistoryEntry } from './TransactionHistory.js'
 import { attachHistoryPersistence, type HistoryPersistenceHandle } from './HistoryPersistence.js'
-import type { HistoryPersistenceOptions } from './types.js'
 import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
 import { SorobanResurrectSimulator } from './SorobanResurrectSimulation.js'
-import type { ISorobanRpcClient } from './RpcClient.js'
 import { asTxHash, asHistoryEntryId } from './branded-types.js'
+import type { AbortSignalOptions } from './AbortUtils.js'
+import { runWithSignal } from './AbortUtils.js'
 
 /**
  * Handles all transaction execution concerns for a `SorobanResurrect` instance:
@@ -44,6 +56,7 @@ export class SorobanResurrectExecutor {
   private readonly _simulator: SorobanResurrectSimulator
   private readonly _history: TransactionHistory
   private readonly _historyPersistence: HistoryPersistenceHandle | null
+  private readonly _inFlightRequests = new Map<string, Promise<ResurrectResult>>()
 
   /**
    * @param server    - Soroban RPC client instance.
@@ -77,6 +90,87 @@ export class SorobanResurrectExecutor {
    */
   get historyHydrated(): Promise<void> {
     return this._historyPersistence?.hydrated ?? Promise.resolve()
+  }
+
+  /** Stops history persistence when this executor is no longer in use. */
+  dispose(): void {
+    this._historyPersistence?.detach()
+  }
+
+  /**
+   * Simulates a transaction and returns restore requirements, fee estimate,
+   * and operation types without accessing a wallet or submitting a transaction.
+   */
+  async previewRestore(transaction: Transaction): Promise<DryRunResult> {
+    const intendedOperations = extractXdrOperations(transaction).map(
+      (operation) => operation.body().switch().name,
+    )
+
+    let response: rpc.Api.SimulateTransactionResponse
+    try {
+      response = await this._simulator.simulate(transaction, { updateState: false })
+    } catch (error) {
+      const simulationError = error instanceof Error ? error.message : String(error)
+      return {
+        wouldNeedRestore: false,
+        intendedOperations,
+        archivedKeysDetected: 0,
+        archivedKeys: [],
+        simulationError,
+        failure: createFailureGuidance('SIMULATION_FAILED'),
+      }
+    }
+
+    if (isErrorResponse(response)) {
+      return {
+        wouldNeedRestore: false,
+        intendedOperations,
+        archivedKeysDetected: 0,
+        archivedKeys: [],
+        simulationError: response.error,
+        failure: createFailureGuidance('SIMULATION_FAILED'),
+      }
+    }
+
+    if (isRestoreResponse(response)) {
+      const archivedKeys = extractArchivedKeys(response)
+      const minResourceFee = Number(response.minResourceFee)
+      if (!Number.isSafeInteger(minResourceFee) || minResourceFee < 0) {
+        return {
+          wouldNeedRestore: true,
+          intendedOperations,
+          archivedKeysDetected: archivedKeys.length,
+          archivedKeys,
+          simulationError: 'Simulation returned an invalid minimum resource fee',
+          failure: createFailureGuidance('SIMULATION_FAILED'),
+        }
+      }
+      return {
+        wouldNeedRestore: true,
+        intendedOperations,
+        archivedKeysDetected: archivedKeys.length,
+        archivedKeys,
+        estimatedRestoreFee: asFeeStroops(calculateRestoreFee(minResourceFee, this._config)),
+      }
+    }
+
+    if (isSuccessResponse(response)) {
+      return {
+        wouldNeedRestore: false,
+        intendedOperations,
+        archivedKeysDetected: 0,
+        archivedKeys: [],
+      }
+    }
+
+    return {
+      wouldNeedRestore: false,
+      intendedOperations,
+      archivedKeysDetected: 0,
+      archivedKeys: [],
+      simulationError: 'Simulation returned an unrecognized response',
+      failure: createFailureGuidance('UNEXPECTED_SIMULATION_RESPONSE'),
+    }
   }
 
   /**
@@ -130,8 +224,10 @@ export class SorobanResurrectExecutor {
     sourcePublicKey: string,
     transaction: Transaction,
     simulationResponse?: rpc.Api.SimulateTransactionRestoreResponse,
+    options: AbortSignalOptions = {},
   ): Promise<Transaction> {
-    const response = simulationResponse ?? (await this._simulator.simulate(transaction))
+    const response =
+      simulationResponse ?? (await this._simulator.simulate(transaction, options))
 
     if (!isRestoreResponse(response)) {
       throw new Error('No archived keys detected — restore transaction not needed')
@@ -142,7 +238,9 @@ export class SorobanResurrectExecutor {
       sourcePublicKey,
       transactionData: response.transactionData.build(),
       minResourceFee: parseInt(response.minResourceFee, 10),
+      latestLedger: response.latestLedger,
       config: this._config,
+      signal: options.signal,
     })
   }
 
@@ -166,60 +264,83 @@ export class SorobanResurrectExecutor {
   async restoreKeys(
     keys: xdr.LedgerKey[],
     wallet: WalletAdapter,
-    opts?: RestoreKeysOptions,
+    opts: RestoreKeysOptions & AbortSignalOptions = {},
   ): Promise<ResurrectResult> {
+    assertBatchSize(keys.length, this._config.maxBatchSize, 'restoreKeys')
     const stateMgr = this._stateMgr
     const emitter = stateMgr.emitter
+    const { signal } = opts
     let historyId: HistoryEntryId | undefined
+    let restoreHash: TxHash | undefined
 
     try {
+      throwIfAborted(signal)
       if (keys.length === 0) {
         throw new Error('restoreKeys: at least one ledger key is required')
       }
 
-      const isConnected = await wallet.isConnected()
+      const isConnected = await runWithSignal(() => wallet.isConnected(), signal)
       if (!isConnected) {
         throw new Error('Wallet is not connected')
       }
 
-      const publicKey = await wallet.getPublicKey()
+      const publicKey = await runWithSignal(() => wallet.getPublicKey(), signal)
       const networkPassphrase = this._config.networkPassphrase
 
-      const restoreTx = await buildRestoreTransactionFromKeys({
-        server: this._server,
-        sourcePublicKey: publicKey,
-        keys,
-        config: this._config,
-      })
+      const restoreTx = await runWithSignal(
+        () =>
+          buildRestoreTransactionFromKeys({
+            server: this._server,
+            sourcePublicKey: publicKey,
+            keys,
+            config: this._config,
+            signal,
+          }),
+        signal,
+      )
 
       historyId = this._history.add(restoreTx)
 
       stateMgr.setState('signing_restore', 'Awaiting wallet signature for restore transaction...')
       opts?.onSigningRestore?.()
-      const signedXdr = await wallet.signTransaction(asXdrBase64(restoreTx.toXDR()), {
-        networkPassphrase,
-      })
+      const walletOptions = signal ? { networkPassphrase, signal } : { networkPassphrase }
+      const signedXdr = await runWithSignal(
+        () => wallet.signTransaction(asXdrBase64(restoreTx.toXDR()), walletOptions),
+        signal,
+      )
 
       const signedTx = TransactionBuilder.fromXDR(signedXdr, networkPassphrase)
       if (!(signedTx instanceof Transaction)) {
         throw new Error('Failed to parse signed restore transaction')
       }
 
+      await assertRestoreTransactionFresh(this._server, signedTx, restoreTx)
+
       stateMgr.setState('submitting_restore', 'Submitting restore transaction...')
       opts?.onSubmittingRestore?.()
-      const sendResult = await this._server.sendTransaction(signedTx)
-      const restoreHash = asTxHash(sendResult.hash)
+      const sendResult = await runWithSignal(
+        () => this._server.sendTransaction(signedTx),
+        signal,
+      )
+      restoreHash = asTxHash(sendResult.hash)
       emitter.emit('restoreSubmitted', restoreHash)
       opts?.onRestoreSubmitted?.(restoreHash)
 
       stateMgr.setState('confirming_restore', 'Waiting for restore confirmation...')
       const status = this._config.useSSE
-        ? await waitForTransactionSSE(this._server, restoreHash, this._config.pollTimeoutMs)
+        ? await waitForTransactionSSE(
+            this._server,
+            restoreHash,
+            this._config.pollTimeoutMs,
+            this._config.rpcUrl,
+            { signal },
+          )
         : await waitForTransaction(
             this._server,
             restoreHash,
             this._config.pollIntervalMs,
             this._config.pollTimeoutMs,
+            { signal },
           )
 
       if (status.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
@@ -246,8 +367,11 @@ export class SorobanResurrectExecutor {
       const result: ResurrectResult = {
         success: false,
         archivedKeysDetected: keys.length,
+        restoreTxHash: restoreHash,
         error: message,
+        ...(err instanceof ResurrectError ? { errorCode: err.code } : {}),
         historyId,
+        errorCode: signal?.aborted ? 'ABORTED' : 'UNKNOWN_ERROR',
       }
       if (historyId) {
         this._history.update(historyId, result)
@@ -264,8 +388,12 @@ export class SorobanResurrectExecutor {
    * @param wallet      - Wallet adapter used for signing.
    * @returns Result with transaction hash on success.
    */
-  async sendTransaction(transaction: Transaction, wallet: WalletAdapter): Promise<ResurrectResult> {
-    return _sendTransaction(this._server, transaction, wallet, this._config)
+  async sendTransaction(
+    transaction: Transaction,
+    wallet: WalletAdapter,
+    options: AbortSignalOptions = {},
+  ): Promise<ResurrectResult> {
+    return _sendTransaction(this._server, transaction, wallet, this._config, options)
   }
 
   /**
@@ -278,10 +406,6 @@ export class SorobanResurrectExecutor {
    * @param wallet - Wallet adapter used for signing.
    * @returns {@link ResurrectResult}; never throws.
    */
-  async restoreKeys(keys: xdr.LedgerKey[], wallet: WalletAdapter): Promise<ResurrectResult> {
-    return _restoreKeys({ server: this._server, keys, wallet, config: this._config })
-  }
-
   /**
    * Submits a transaction with automatic archive restoration.
    *
@@ -297,7 +421,7 @@ export class SorobanResurrectExecutor {
    * @returns {@link ResurrectResult} with outcome, hashes, and `historyId`.
    */
   async submitWithRestore(
-    options: SubmitWithRestoreOptions & { signal?: AbortSignal },
+    options: SubmitWithRestoreOptions & AbortSignalOptions,
   ): Promise<ResurrectResult> {
     const {
       transaction,
@@ -312,22 +436,53 @@ export class SorobanResurrectExecutor {
       onRestoreFailed,
     } = options
 
+    if (options.dryRun) {
+      const dryRunResult = await this.previewRestore(transaction)
+      const simulationError = dryRunResult.simulationError
+      return {
+        success: simulationError === undefined,
+        dryRun: true,
+        dryRunResult,
+        archivedKeysDetected: dryRunResult.archivedKeysDetected,
+        ...(simulationError
+          ? {
+              error: simulationError,
+              errorCode: dryRunResult.failure?.code ?? 'SIMULATION_FAILED',
+              failure: dryRunResult.failure ?? createFailureGuidance('SIMULATION_FAILED'),
+            }
+          : {}),
+      }
+    }
+
+    const historyId = this._history.add(transaction)
+    const stateMgr = this._stateMgr
+    const emitter = stateMgr.emitter
+    const emitLifecycle = (event: SubmitLifecycleEvent): void => {
+      const payload = { ...event, requestId: event.requestId ?? options.requestId }
+      emitter.emit('workflowLifecycle', payload)
+      options.onLifecycleEvent?.(payload)
+    }
+
+    // Per-call restore-tx memo override (falls back to instance config).
+    const effectiveConfig = {
+      ...this._config,
+      ...(options.restoreTxMemo !== undefined || options.restoreTxMemoText !== undefined
+        ? {
+            restoreTxMemo: options.restoreTxMemo,
+            restoreTxMemoText: options.restoreTxMemoText,
+          }
+        : {}),
+    }
+
+    const restoreConfig = configForWalletRestore(effectiveConfig, wallet)
+    validateRestoreMemoConfig(restoreConfig)
+
     const historyId = this._history.add(transaction)
     const stateMgr = this._stateMgr
     const emitter = stateMgr.emitter
 
-    // Per-call restore-tx memo override (falls back to instance config).
-    const effectiveConfig =
-      options.restoreTxMemo !== undefined || options.restoreTxMemoText !== undefined
-        ? {
-            ...this._config,
-            restoreTxMemo: options.restoreTxMemo ?? this._config.restoreTxMemo,
-            restoreTxMemoText: options.restoreTxMemoText ?? this._config.restoreTxMemoText,
-          }
-        : this._config
-
     const result = await executeWithRestore({
-      server: this._server,
+      server: options.retry ? new RetryingRpcClient(this._server, options.retry) : this._server,
       transaction,
       wallet,
       config: effectiveConfig,
@@ -357,7 +512,10 @@ export class SorobanResurrectExecutor {
       },
 
       onRestoreConfirmed: (txHash: string) => {
-        stateMgr.setState('submitting_original', 'Restore confirmed. Preparing original transaction...')
+        stateMgr.setState(
+          'submitting_original',
+          'Restore confirmed. Preparing original transaction...',
+        )
         emitter.emit('restoreConfirmed', asTxHash(txHash))
         onRestoreConfirmed?.(asTxHash(txHash))
       },
@@ -368,12 +526,12 @@ export class SorobanResurrectExecutor {
       },
 
       onOriginalSubmitted: (txHash: TxHash) => {
-        stateMgr.setState('success', 'Original transaction submitted successfully')
         emitter.emit('originalSubmitted', asTxHash(txHash))
         onOriginalSubmitted?.(asTxHash(txHash))
       },
 
       onRestoreFailed: (error: string) => {
+        stateMgr.setError(error)
         emitter.emit('error', error)
         onRestoreFailed?.(error)
       },
@@ -383,16 +541,28 @@ export class SorobanResurrectExecutor {
       },
     })
 
-    this._history.update(historyId, result)
+    const finalResult = { ...result, historyId }
+    this._history.update(historyId, finalResult)
 
-    if (!result.success) {
-      stateMgr.setError(result.error ?? 'Unknown error')
-      emitter.emit('error', result.error ?? 'Unknown error')
+    if (!finalResult.success) {
+      stateMgr.setError(finalResult.error ?? 'Unknown error')
+      emitter.emit('error', finalResult.error ?? 'Unknown error')
+    } else {
+      const message =
+        finalResult.confirmationStatus === 'submitted'
+          ? 'Original transaction submitted successfully'
+          : 'Original transaction confirmed successfully'
+      stateMgr.setState('success', message)
     }
 
-    emitter.emit('restoreComplete', result)
+    emitLifecycle({
+      phase: finalResult.success ? 'completed' : 'failed',
+      result: finalResult,
+      error: finalResult.error,
+    })
+    emitter.emit('restoreComplete', finalResult)
 
-    return { ...result, historyId }
+    return finalResult
   }
 
   /**
@@ -407,7 +577,11 @@ export class SorobanResurrectExecutor {
    * @returns Result of the retry attempt.
    * @throws {Error} If no history entry exists for `entryId`.
    */
-  async retry(entryId: string, wallet: WalletAdapter): Promise<ResurrectResult> {
+  async retry(
+    entryId: string,
+    wallet: WalletAdapter,
+    options: AbortSignalOptions = {},
+  ): Promise<ResurrectResult> {
     const id = asHistoryEntryId(entryId)
     const entry = this._history.get(id)
     if (!entry) {
@@ -423,6 +597,7 @@ export class SorobanResurrectExecutor {
       transaction: entry.transaction,
       wallet,
       config: this._config,
+      signal: options.signal,
 
       onSigningRestore: () => {
         stateMgr.setState('signing_restore', 'Awaiting wallet signature for restore transaction...')
@@ -446,15 +621,19 @@ export class SorobanResurrectExecutor {
       onSigningOriginal: () => {
         stateMgr.setState('signing_original', 'Signing original transaction...')
       },
-      onOriginalSubmitted: (_txHash: string) => {
-        stateMgr.setState('success', 'Original transaction submitted successfully')
-      },
     })
 
     this._history.update(id, result)
 
     if (!result.success) {
       stateMgr.setError(result.error ?? 'Unknown error')
+    } else {
+      stateMgr.setState(
+        'success',
+        result.confirmationStatus === 'submitted'
+          ? 'Original transaction submitted successfully'
+          : 'Original transaction confirmed successfully',
+      )
     }
 
     return result
@@ -472,13 +651,19 @@ export class SorobanResurrectExecutor {
   async buildBatchRestoreTx(
     sourcePublicKey: string,
     transactions: Transaction[],
+    options: AbortSignalOptions = {},
   ): Promise<Transaction | null> {
-    const { restoreTx } = await buildBatchRestoreTransaction({
-      server: this._server,
-      sourcePublicKey,
-      transactions,
-      config: this._config,
-    })
+    const { restoreTx } = await runWithSignal(
+      () =>
+        buildBatchRestoreTransaction({
+          server: this._server,
+          sourcePublicKey,
+          transactions,
+          config: this._config,
+          signal: options.signal,
+        }),
+      options.signal,
+    )
     return restoreTx
   }
 
@@ -507,34 +692,87 @@ export class SorobanResurrectExecutor {
    *   is built and paid for by `items[0].wallet`).
    * @returns Array of results in the same order as the input.
    */
-  async submitBatchWithRestore(items: SubmitWithRestoreOptions[]): Promise<ResurrectResult[]> {
+  async submitBatchWithRestore(
+    items: SubmitWithRestoreOptions[],
+    options: AbortSignalOptions = {},
+  ): Promise<ResurrectResult[]> {
     if (items.length === 0) return []
-    if (items.length === 1) return [await this.submitWithRestore(items[0])]
+    if (items.length === 1) {
+      return [await this.submitWithRestore({ ...items[0], signal: options.signal })]
+    }
+
+    const restoreConfigs = items.map((item) => {
+      const hasMemoOverride =
+        item.restoreTxMemo !== undefined || item.restoreTxMemoText !== undefined
+      const config = hasMemoOverride
+        ? {
+            ...this._config,
+            restoreTxMemo: item.restoreTxMemo,
+            restoreTxMemoText: item.restoreTxMemoText,
+          }
+        : this._config
+      validateRestoreMemoConfig(config)
+      return config
+    })
 
     const wallet = items[0].wallet
+    const { signal: sharedSignal } = options
     const transactions = items.map((item) => item.transaction)
 
-    const isConnected = await wallet.isConnected()
-    if (!isConnected) {
-      const error = 'Wallet is not connected'
-      return items.map(() => ({ success: false, archivedKeysDetected: 0, error }))
-    }
-    const publicKey = await wallet.getPublicKey()
+    let publicKey: string
+    let restoreTx: Transaction | null
+    let archivedKeysByTx: ArchivedLedgerEntry[][]
+    try {
+      const isConnected = await runWithSignal(() => wallet.isConnected(), sharedSignal)
+      if (!isConnected) {
+        const error = 'Wallet is not connected'
+        return items.map(() => ({ success: false, archivedKeysDetected: 0, error }))
+      }
+      publicKey = await runWithSignal(() => wallet.getPublicKey(), sharedSignal)
 
-    const { restoreTx, archivedKeysByTx } = await buildBatchRestoreTransaction({
-      server: this._server,
-      sourcePublicKey: publicKey,
-      transactions,
-      config: this._config,
-    })
+      const batch = await runWithSignal(
+        () =>
+          buildBatchRestoreTransaction({
+            server: this._server,
+            sourcePublicKey: publicKey,
+            transactions,
+            config: this._config,
+            signal: sharedSignal,
+          }),
+        sharedSignal,
+      )
+      restoreTx = batch.restoreTx
+      archivedKeysByTx = batch.archivedKeysByTx
+    } catch (err) {
+      if (!sharedSignal?.aborted) throw err
+      const error = err instanceof Error ? err.message : String(err)
+      this._stateMgr.setError(error)
+      this._stateMgr.emitter.emit('error', error)
+      return items.map(() => ({
+        success: false,
+        archivedKeysDetected: 0,
+        error,
+        errorCode: 'ABORTED',
+      }))
+    }
 
     if (!restoreTx) {
       // Nothing archived across the batch — no shared restore needed.
       const results: ResurrectResult[] = []
       for (const item of items) {
-        results.push(await this.submitWithRestore(item))
+        results.push(await this.submitWithRestore({ ...item, signal: sharedSignal }))
       }
       return results
+    }
+    const memoSignature = (config: (typeof restoreConfigs)[number]): string => {
+      const memo = resolveRestoreMemo(undefined, config)
+      return JSON.stringify(memo ? [memo.type, memo.value] : ['none'])
+    }
+    if (restoreConfigs.some((config) => memoSignature(config) !== memoSignature(restoreConfigs[0]))) {
+      throw new ResurrectError(
+        'INVALID_RESTORE_MEMO',
+        'submitBatchWithRestore builds one shared restore transaction; all items must use the same restore memo configuration.',
+      )
     }
 
     const networkPassphrase = this._config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
@@ -543,7 +781,7 @@ export class SorobanResurrectExecutor {
     const stateMgr = this._stateMgr
     const emitter = stateMgr.emitter
 
-    let restoreHash: TxHash
+    let restoreHash: TxHash | undefined
     try {
       stateMgr.setArchivedKeys(archivedKeysByTx.flat())
       stateMgr.setState(
@@ -556,21 +794,33 @@ export class SorobanResurrectExecutor {
         'signing_restore',
         'Awaiting wallet signature for batch restore transaction...',
       )
-      const signedXdr = await wallet.signTransaction(asXdrBase64(restoreTx.toXDR()), {
-        networkPassphrase,
-      })
+      const walletOptions = sharedSignal
+        ? { networkPassphrase, signal: sharedSignal }
+        : { networkPassphrase }
+      const signedXdr = await runWithSignal(
+        () => wallet.signTransaction(asXdrBase64(restoreTx.toXDR()), walletOptions),
+        sharedSignal,
+      )
       const signedTx = TransactionBuilder.fromXDR(signedXdr, networkPassphrase)
       if (!(signedTx instanceof Transaction)) {
         throw new Error('Failed to parse signed batch restore transaction')
       }
 
+      await assertRestoreTransactionFresh(this._server, signedTx, restoreTx)
+
       stateMgr.setState('submitting_restore', 'Submitting batch restore transaction...')
-      const sent = await this._server.sendTransaction(signedTx)
+      const sent = await runWithSignal(() => this._server.sendTransaction(signedTx), sharedSignal)
       restoreHash = asTxHash(sent.hash)
       emitter.emit('restoreSubmitted', restoreHash)
 
       stateMgr.setState('confirming_restore', 'Waiting for batch restore confirmation...')
-      const status = await waitForTransaction(this._server, restoreHash, pollInterval, pollTimeout)
+      const status = await waitForTransaction(
+        this._server,
+        restoreHash,
+        pollInterval,
+        pollTimeout,
+        { signal: sharedSignal },
+      )
       if (status.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
         throw new Error('Batch restore transaction failed')
       }
@@ -585,31 +835,41 @@ export class SorobanResurrectExecutor {
       emitter.emit('error', message)
       return items.map((_, i) => ({
         success: false,
+        restoreTxHash,
         archivedKeysDetected: archivedKeysByTx[i]?.length ?? 0,
         error: message,
+        errorCode: sharedSignal?.aborted ? 'ABORTED' : 'UNKNOWN_ERROR',
       }))
     }
 
     const results: ResurrectResult[] = []
     for (let i = 0; i < items.length; i++) {
       const item = items[i]
+      const { signal } = options
       try {
-        const preparedTx = await buildOriginalAfterRestore(
-          this._server,
-          item.transaction,
-          networkPassphrase,
-          item.transaction.fee,
+        const preparedTx = await runWithSignal(
+          () =>
+            buildOriginalAfterRestore(
+              this._server,
+              item.transaction,
+              networkPassphrase,
+              item.transaction.fee,
+              signal,
+            ),
+          signal,
         )
         item.onSigningOriginal?.()
-        const signedXdr = await item.wallet.signTransaction(asXdrBase64(preparedTx.toXDR()), {
-          networkPassphrase,
-        })
+        const walletOptions = signal ? { networkPassphrase, signal } : { networkPassphrase }
+        const signedXdr = await runWithSignal(
+          () => item.wallet.signTransaction(asXdrBase64(preparedTx.toXDR()), walletOptions),
+          signal,
+        )
         const signedTx = TransactionBuilder.fromXDR(signedXdr, networkPassphrase)
         if (!(signedTx instanceof Transaction)) {
           throw new Error('Failed to parse signed transaction')
         }
 
-        const sent = await this._server.sendTransaction(signedTx)
+        const sent = await runWithSignal(() => this._server.sendTransaction(signedTx), signal)
         const hash = asTxHash(sent.hash)
         item.onOriginalSubmitted?.(hash)
         emitter.emit('originalSubmitted', hash)
@@ -618,22 +878,49 @@ export class SorobanResurrectExecutor {
           success: true,
           originalTxHash: hash,
           restoreTxHash: restoreHash,
-          archivedKeysDetected: archivedKeysByTx[i]?.length ?? 0,
+          archivedKeysDetected,
         })
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
+        stateMgr.setError(message)
         item.onRestoreFailed?.(message)
         emitter.emit('error', message)
+        if (err instanceof OriginalTransactionExpiredError) {
+          results.push({
+            success: false,
+            restoreTxHash: restoreHash,
+            archivedKeysDetected,
+            error: message,
+            errorCode: err.code,
+            failure: createFailureGuidance(err.code, 'rebuild'),
+            expiredTransaction: err.expiredTransaction,
+          })
+          continue
+        }
+        if (err instanceof ResurrectError) {
+          results.push({
+            success: false,
+            restoreTxHash: restoreHash,
+            archivedKeysDetected,
+            error: message,
+            errorCode: err.code,
+            failure: createFailureGuidance(err.code, 'rebuild'),
+          })
+          continue
+        }
         results.push({
           success: false,
           restoreTxHash: restoreHash,
-          archivedKeysDetected: archivedKeysByTx[i]?.length ?? 0,
+          archivedKeysDetected,
           error: message,
+          errorCode: signal?.aborted ? 'ABORTED' : 'UNKNOWN_ERROR',
         })
       }
     }
 
-    stateMgr.setState('success', 'Batch submission complete')
+    if (results.every((result) => result.success)) {
+      stateMgr.setState('success', 'Batch submission complete')
+    }
     return results
   }
 }

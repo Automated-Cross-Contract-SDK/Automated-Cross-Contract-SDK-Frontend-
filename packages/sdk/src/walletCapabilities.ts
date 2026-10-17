@@ -1,4 +1,5 @@
-import { ResurrectError, ResurrectErrorCode } from './errors.js'
+import { ResurrectError } from './errors.js'
+import type { ResurrectErrorCode } from './errors.js'
 import type { WalletAdapter, WalletCapabilities } from './types.js'
 
 /**
@@ -50,11 +51,10 @@ export function assertWalletCapability(
 ): void {
   if (wallet.capabilities?.[flag] === false) {
     throw new ResurrectError(
+      'UNSUPPORTED_WALLET_CAPABILITY',
       `${context}: the connected wallet declares it does not support "${flag}" ` +
         `(capabilities.${flag} === false). Use a wallet that supports this feature ` +
         `or remove the code path that requires it.`,
-      ResurrectErrorCode.UNSUPPORTED_WALLET_CAPABILITY,
-      { capability: flag, context },
     )
   }
 }

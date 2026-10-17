@@ -1,5 +1,6 @@
 import { SorobanResurrectConfig } from '../SorobanResurrectConfig';
 import defaults from './defaults.json';
+import { validateRestoreMemoConfig } from '../memoValidation.js';
 
 /**
  * Resolves a partial {@link SorobanResurrectConfig} into a fully-populated
@@ -49,19 +50,10 @@ function assertBoolean(value: unknown, field: string): void {
   }
 }
 
-function assertString(value: unknown, field: string): void {
-  if (typeof value !== 'string') {
-    throw new Error(
-      `Invalid config field "${field}": expected a string, received ${JSON.stringify(
-        value,
-      )}`,
-    );
-  }
-}
-
 function validateConfig(config: SorobanResurrectConfig): void {
   assertPositiveInteger(config.archiveDetectionChunkSize, 'archiveDetectionChunkSize');
   assertPositiveInteger(config.archiveDetectionConcurrency, 'archiveDetectionConcurrency');
+  assertPositiveInteger(config.maxBatchSize, 'maxBatchSize');
   assertNonNegativeInteger(config.maxRestoreFeeStroops, 'maxRestoreFeeStroops');
   assertPositiveInteger(config.rpcTimeoutMs, 'rpcTimeoutMs');
   assertNonNegativeInteger(config.rpcRetryCount, 'rpcRetryCount');
@@ -71,7 +63,6 @@ function validateConfig(config: SorobanResurrectConfig): void {
   assertPositiveInteger(config.ttlWatchIntervalMs, 'ttlWatchIntervalMs');
   assertNonNegativeInteger(config.ttlWatchThreshold, 'ttlWatchThreshold');
   assertBoolean(config.ttlWatchAutoExtend, 'ttlWatchAutoExtend');
-  assertString(config.restoreTxMemo, 'restoreTxMemo');
-  assertString(config.restoreTxMemoText, 'restoreTxMemoText');
+  validateRestoreMemoConfig(config);
   assertNonNegativeInteger(config.maxSequenceRetries, 'maxSequenceRetries');
 }

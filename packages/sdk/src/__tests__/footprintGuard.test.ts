@@ -91,6 +91,7 @@ async function build(config: SorobanResurrectConfig) {
     sourcePublicKey: kp.publicKey(),
     transactionData: new SorobanDataBuilder().build(),
     minResourceFee: 12345,
+    latestLedger: 100,
     config,
     account,
   })

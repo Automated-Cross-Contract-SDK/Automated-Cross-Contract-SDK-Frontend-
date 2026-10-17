@@ -1,4 +1,4 @@
-import { Account, Keypair, SorobanDataBuilder, rpc, xdr } from '@stellar/stellar-sdk'
+import { Account, Address, Keypair, SorobanDataBuilder, rpc, xdr } from '@stellar/stellar-sdk'
 
 /**
  * Canned Soroban RPC responses for every step of the restore flow:
@@ -9,6 +9,7 @@ import { Account, Keypair, SorobanDataBuilder, rpc, xdr } from '@stellar/stellar
  */
 
 const LATEST_LEDGER = 1000
+const NEAR_EXPIRY_LEDGERS = 10
 
 function sorobanData(readWrite: xdr.LedgerKey[] = []): SorobanDataBuilder {
   return new SorobanDataBuilder().setFootprint([], readWrite)
@@ -18,11 +19,60 @@ function sorobanData(readWrite: xdr.LedgerKey[] = []): SorobanDataBuilder {
 export function archivedKey(seed = 0): xdr.LedgerKey {
   return xdr.LedgerKey.contractData(
     new xdr.LedgerKeyContractData({
-      contract: xdr.ScAddress.scAddressTypeAccount(Keypair.random().xdrAccountId()),
+      contract: Address.contract(Buffer.alloc(32, seed + 1)).toScAddress(),
       key: xdr.ScVal.scvU32(seed),
       durability: xdr.ContractDataDurability.persistent(),
     }),
   )
+}
+
+export type LedgerEntryFixtureStatus =
+  'active' | 'near-expiry' | 'archived' | 'missing' | 'unsupported'
+
+export interface LedgerEntryFixture {
+  status: LedgerEntryFixtureStatus
+  key: xdr.LedgerKey
+  currentLedger: number
+  response: rpc.Api.GetLedgerEntriesResponse
+}
+
+/**
+ * Creates a deterministic ledger-entry response for a TTL state.
+ *
+ * `archived` entries are returned with an expired live-until ledger, while
+ * `missing` entries are omitted as they are by `getLedgerEntries`.
+ */
+export function ledgerEntryFixture(
+  status: LedgerEntryFixtureStatus,
+  seed = 0,
+  currentLedger = LATEST_LEDGER,
+): LedgerEntryFixture {
+  const key =
+    status === 'unsupported'
+      ? xdr.LedgerKey.account(
+          new xdr.LedgerKeyAccount({
+            accountId: Keypair.fromRawEd25519Seed(Buffer.alloc(32, seed + 1)).xdrAccountId(),
+          }),
+        )
+      : archivedKey(seed)
+  const liveUntilLedgerSeq =
+    status === 'active'
+      ? currentLedger + NEAR_EXPIRY_LEDGERS * 10
+      : status === 'near-expiry'
+        ? currentLedger + NEAR_EXPIRY_LEDGERS
+        : status === 'unsupported'
+          ? currentLedger + NEAR_EXPIRY_LEDGERS * 10
+          : currentLedger - 1
+
+  return {
+    status,
+    key,
+    currentLedger,
+    response: {
+      latestLedger: currentLedger,
+      entries: status === 'missing' ? [] : [{ key, liveUntilLedgerSeq }],
+    } as unknown as rpc.Api.GetLedgerEntriesResponse,
+  }
 }
 
 /** Simulation succeeded; no archived entries in the footprint. */

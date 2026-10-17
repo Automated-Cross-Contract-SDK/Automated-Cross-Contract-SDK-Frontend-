@@ -32,7 +32,9 @@ import {
   type QueryLedgerTTLOptions,
 } from './TTLHelpers.js'
 import { fetchLedgerEntriesChunked } from './ledgerChunks.js'
-import { DEFAULT_EXPIRING_SOON_LEDGERS } from './ttl.js'
+
+/** Default threshold (in ledgers) below which a live contract entry is reported as expiring soon. */
+export const DEFAULT_EXPIRING_SOON_LEDGERS = 100
 
 // ---------------------------------------------------------------------------
 // Contract scan
@@ -164,12 +166,18 @@ export async function getExpiringEntriesForContract(
 
   const { entries, currentLedger, queriedAt } = await queryLedgerTTL(server, keys, opts)
 
-  const expiringSoon = entries.filter((e) => !e.isArchived && e.ttlLedgers <= expiringWithinLedgers)
+  const expiringSoon = entries.filter(
+    (e) => !e.isArchived && e.ttlLedgers !== undefined && e.ttlLedgers <= expiringWithinLedgers,
+  )
   const archived: ArchivedLedgerEntry[] = entries
     .filter((e) => e.isArchived)
     .map((e) => ({
       key: xdr.LedgerKey.fromXDR(e.keyBase64, 'base64'),
       keyBase64: e.keyBase64,
+      entryType: e.entryType,
+      liveUntilLedger: e.liveUntilLedger,
+      currentLedger: e.currentLedger,
+      ttlLedgers: e.ttlLedgers,
     }))
 
   return { contractId, entries, expiringSoon, archived, currentLedger, queriedAt }

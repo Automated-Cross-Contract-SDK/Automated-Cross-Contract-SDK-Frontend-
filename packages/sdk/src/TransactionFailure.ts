@@ -58,6 +58,8 @@ export interface ParsableTransactionResponse {
   status: rpc.Api.GetTransactionStatus | string
   resultXdr?: MaybeXdr<xdr.TransactionResult>
   diagnosticEventsXdr?: MaybeXdr<xdr.DiagnosticEvent>[]
+  /** Decoded diagnostics as returned by `rpc.Server.getTransaction`. */
+  diagnosticEvents?: MaybeXdr<xdr.DiagnosticEvent>[]
 }
 
 interface ScErrorNative {
@@ -269,7 +271,7 @@ export function parseTransactionFailure(
   if (!failed) return undefined
 
   const result = decodeResult(response.resultXdr)
-  const events = decodeEvents(response.diagnosticEventsXdr)
+  const events = decodeEvents(response.diagnosticEventsXdr ?? response.diagnosticEvents)
 
   let txResultCode = 'unknown'
   let opInfo: { failedOperationIndex?: number; operationResultCode?: string } = {}

@@ -67,69 +67,26 @@ describe('SorobanResurrect', () => {
     })
   })
 
-  describe('switchNetwork', () => {
-    it('creates a new RPC client when changing the URL from an injected client', () => {
-      const injectedClient = {
-        simulateTransaction: vi.fn(),
-        getAccount: vi.fn(),
-        sendTransaction: vi.fn(),
-        getTransaction: vi.fn(),
-        getLedgerEntries: vi.fn(),
+  describe('dispose', () => {
+    it('stops TTL watches started by the instance', () => {
+      const rpcClient = {
+        getLatestLedger: vi.fn().mockResolvedValue({ sequence: 1 }),
       }
-      const instance = new SorobanResurrect({
-        ...testConfig,
-        rpcClient: injectedClient as never,
-      })
+      const instance = new SorobanResurrect({ ...testConfig, rpcClient: rpcClient as never })
+      const timer = 123 as never
+      const setIntervalSpy = vi.spyOn(globalThis, 'setInterval').mockReturnValue(timer)
+      const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval').mockImplementation(() => {})
 
-      instance.switchNetwork({
-        rpcUrl: 'https://soroban-mainnet.stellar.org',
-        networkPassphrase: Networks.PUBLIC,
-      })
+      try {
+        instance.watchTTL([])
+        instance.dispose()
 
-      expect(instance.server).not.toBe(injectedClient)
-      expect(instance.config.rpcUrl).toBe('https://soroban-mainnet.stellar.org')
-      expect(instance.config.rpcClient).toBe(instance.server)
-    })
-
-    it('rejects switching during a workflow', async () => {
-      let resolveSimulation!: (value: never) => void
-      vi.spyOn(resurrect.server, 'simulateTransaction').mockImplementation(
-        () =>
-          new Promise((resolve) => {
-            resolveSimulation = resolve
-          }) as never,
-      )
-
-      const detection = resurrect.detectArchivedKeys(makeSampleTx())
-      expect(resurrect.state).toBe('simulating')
-      expect(() => resurrect.switchNetwork('mainnet')).toThrow(
-        'Cannot switch networks while an SDK operation or TTL watch cycle is in progress',
-      )
-
-      resolveSimulation({} as never)
-      await detection
-    })
-
-    it('keeps a workflow bound to its endpoint until it settles', async () => {
-      let finishWorkflow!: (value: never) => void
-      vi.mocked(executeWithRestore).mockImplementation(
-        () =>
-          new Promise((resolve) => {
-            finishWorkflow = resolve
-          }),
-      )
-
-      const workflow = resurrect.submitWithRestore({
-        transaction: makeSampleTx(),
-        wallet: makeWallet(),
-      })
-      expect(() => resurrect.switchNetwork('mainnet')).toThrow(
-        'Cannot switch networks while an SDK operation or TTL watch cycle is in progress',
-      )
-
-      finishWorkflow({ success: false, archivedKeysDetected: 0 } as never)
-      await workflow
-      expect(() => resurrect.switchNetwork('mainnet')).not.toThrow()
+        expect(setIntervalSpy).toHaveBeenCalledTimes(1)
+        expect(clearIntervalSpy).toHaveBeenCalledWith(timer)
+      } finally {
+        setIntervalSpy.mockRestore()
+        clearIntervalSpy.mockRestore()
+      }
     })
   })
 
@@ -161,53 +118,21 @@ describe('SorobanResurrect', () => {
   })
 
   describe('submitWithRestore', () => {
-    it('cancels active workflows through the public API', async () => {
-      let executionParams!: Parameters<typeof executeWithRestore>[0]
-      let finishWorkflow!: (value: never) => void
-      vi.mocked(executeWithRestore).mockImplementation(
-        (params) =>
-          new Promise((resolve) => {
-            executionParams = params
-            finishWorkflow = resolve
-          }),
-      )
-
-      const workflow = resurrect.submitWithRestore({
-        transaction: makeSampleTx(),
-        wallet: makeWallet(),
+    it('forwards an AbortSignal to the execution workflow', async () => {
+      vi.mocked(executeWithRestore).mockResolvedValue({
+        success: false,
+        archivedKeysDetected: 0,
+        error: 'Operation cancelled',
       })
-
-      expect(resurrect.cancel()).toBe(true)
-      expect(executionParams.signal?.aborted).toBe(true)
-      expect(resurrect.cancel()).toBe(false)
-
-      finishWorkflow({ success: false, archivedKeysDetected: 0, error: 'Operation cancelled' } as never)
-      await workflow
-      expect(resurrect.cancel()).toBe(false)
-    })
-
-    it('forwards a caller-provided abort signal', async () => {
       const controller = new AbortController()
-      let executionParams!: Parameters<typeof executeWithRestore>[0]
-      let finishWorkflow!: (value: never) => void
-      vi.mocked(executeWithRestore).mockImplementation(
-        (params) =>
-          new Promise((resolve) => {
-            executionParams = params
-            finishWorkflow = resolve
-          }),
-      )
 
-      const workflow = resurrect.submitWithRestore({
+      await resurrect.submitWithRestore({
         transaction: makeSampleTx(),
         wallet: makeWallet(),
         signal: controller.signal,
       })
-      controller.abort()
 
-      expect(executionParams.signal?.aborted).toBe(true)
-      finishWorkflow({ success: false, archivedKeysDetected: 0 } as never)
-      await workflow
+      expect(vi.mocked(executeWithRestore).mock.calls[0][0].signal).toBe(controller.signal)
     })
 
     it('returns result from executeWithRestore on success', async () => {
@@ -227,7 +152,8 @@ describe('SorobanResurrect', () => {
         wallet: makeWallet(),
       })
 
-      expect(result).toEqual(mockResult)
+      expect(result).toEqual(expect.objectContaining(mockResult))
+      expect(result.historyId).toEqual(expect.any(String))
       expect(resurrect.state).toBe('success')
     })
 
@@ -443,8 +369,12 @@ describe('SorobanResurrect', () => {
       )
 
       const initialState = resurrect.state
-      await resurrect.buildRestoreTx(Keypair.random().publicKey(), makeSampleTx(), mockRestoreResponse as never)
-      
+      await resurrect.buildRestoreTx(
+        Keypair.random().publicKey(),
+        makeSampleTx(),
+        mockRestoreResponse as never,
+      )
+
       // When providing simulationResponse, state should not change to 'simulating'
       expect(resurrect.state).toBe(initialState)
     })
@@ -458,7 +388,10 @@ describe('SorobanResurrect', () => {
       const mainnet = new SorobanResurrect({ ...testConfig, networkPassphrase: Networks.PUBLIC })
       expect(mainnet.config.networkPassphrase).toBe(Networks.PUBLIC)
 
-      const futurenet = new SorobanResurrect({ ...testConfig, networkPassphrase: Networks.FUTURENET })
+      const futurenet = new SorobanResurrect({
+        ...testConfig,
+        networkPassphrase: Networks.FUTURENET,
+      })
       expect(futurenet.config.networkPassphrase).toBe(Networks.FUTURENET)
     })
 

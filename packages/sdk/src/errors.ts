@@ -1,3 +1,5 @@
+import type { ExpiredTransactionInfo } from './types.js'
+
 /**
  * Structured error codes for ResurrectResult — similar to GraphQL's
  * `extensions.code` pattern. Consumers can branch on these codes
@@ -34,6 +36,11 @@ export type ResurrectErrorCode =
   | 'SIMULATION_FAILED'
 
   /**
+   * The computed restore fee exceeds the configured fee cap.
+   */
+  | 'RESTORE_FEE_CAP_EXCEEDED'
+
+  /**
    * The restore transaction was signed but could not be parsed from XDR.
    * This is usually a wallet adapter bug or a network passphrase mismatch.
    */
@@ -52,16 +59,34 @@ export type ResurrectErrorCode =
   | 'ORIGINAL_TX_PARSE_FAILED'
 
   /**
-   * The submitted original transaction did not reach `SUCCESS` status
-   * within the polling timeout.
+   * The submitted original transaction reached a terminal `FAILED` status.
    */
   | 'ORIGINAL_TX_FAILED'
+
+  /** The original transaction expired during restoration and needs approval to rebuild. */
+  | 'ORIGINAL_TRANSACTION_EXPIRED'
+
+  /** Caller-provided replacement time bounds are invalid or already expired. */
+  | 'INVALID_REBUILD_TIME_BOUNDS'
+
+  /**
+   * Transaction confirmation polling timed out before a terminal status.
+   * Inspect the transaction hash; the network outcome may still be pending.
+   */
+  | 'CONFIRMATION_TIMEOUT'
 
   /**
    * The simulation response was not a recognised type (not success, error,
    * or restore). This indicates a Soroban RPC API change or an SDK bug.
    */
   | 'UNEXPECTED_SIMULATION_RESPONSE'
+
+  /**
+   * A restore response did not include a complete, usable footprint.
+   * Check `result.error` for the response condition; no restore transaction
+   * was constructed or submitted.
+   */
+  | 'INCOMPLETE_FOOTPRINT'
 
   /**
    * The connected wallet declared that it does not support a required
@@ -71,11 +96,42 @@ export type ResurrectErrorCode =
    */
   | 'UNSUPPORTED_WALLET_CAPABILITY'
 
+  /** A restore memo is invalid or exceeds Stellar's 28-byte text memo limit. */
+  | 'INVALID_RESTORE_MEMO'
+
+  /** A caller exceeded a configured batch-size limit. */
+  | 'BATCH_SIZE_EXCEEDED'
+
+  /** A wallet returned a fee-bump envelope when a plain transaction was signed. */
+  | 'UNEXPECTED_FEE_BUMP_ENVELOPE'
+
+  /** A wallet returned a transaction with different requested transaction data. */
+  | 'SIGNED_TRANSACTION_MISMATCH'
+
+  /** Archive detection failed for one or more entries in a batch. */
+  | 'ARCHIVE_DETECTION_BATCH_FAILED'
+
+  /**
+   * The estimated restore fee exceeded the configured cap. Review the fee
+   * limit or wait until the network fee is lower.
+   */
+  | 'RESTORE_FEE_CAP_EXCEEDED'
+
+  /** The restoreKeys call received no ledger keys. */
+  | 'INVALID_RESTORE_KEYS'
+
   /**
    * An unexpected JavaScript exception was thrown during the workflow.
    * Check `result.error` for the exception message.
    */
   | 'UNKNOWN_ERROR'
+  | 'RESTORE_FEE_CAP_EXCEEDED'
+
+  /**
+   * The caller aborted the workflow. A transaction already submitted to the
+   * network cannot be cancelled; inspect its hash/status before retrying.
+   */
+  | 'ABORTED'
 
 /**
  * Structured error thrown by SDK methods that use exception-based error
@@ -105,6 +161,20 @@ export class ResurrectError extends Error {
     if (Error.captureStackTrace) {
       Error.captureStackTrace(this, ResurrectError)
     }
+  }
+}
+
+/** Typed error raised when rebuilding would otherwise extend an expired transaction. */
+export class OriginalTransactionExpiredError extends ResurrectError {
+  readonly expiredTransaction: ExpiredTransactionInfo
+
+  constructor(expiredTransaction: ExpiredTransactionInfo) {
+    super(
+      'ORIGINAL_TRANSACTION_EXPIRED',
+      'Original transaction time bounds have expired; explicit approval is required to rebuild',
+    )
+    this.name = 'OriginalTransactionExpiredError'
+    this.expiredTransaction = expiredTransaction
   }
 }
 

@@ -16,6 +16,7 @@ import type {
   RestoreWatchStatus,
   SorobanResurrectProviderProps,
   ResolvedResurrectOptions,
+  SorobanResurrectContextValue,
 } from '../index.js'
 import type {
   RestoreStateInfo,
@@ -31,6 +32,7 @@ type PublicExports =
   | 'SorobanResurrectProvider'
   | 'useSorobanResurrectContext'
   | 'useOptionalSorobanResurrectContext'
+  | 'useSorobanResurrectSelector'
   | 'SorobanResurrectContext'
   | 'useSorobanResurrect'
   | 'useSorobanResurrectSubmit'
@@ -92,4 +94,9 @@ test('provider props and shared option types exist', () => {
   expectTypeOf<SorobanResurrectProviderProps>().toHaveProperty('config')
   expectTypeOf<ResolvedResurrectOptions>().toHaveProperty('config')
   expectTypeOf<ResolvedResurrectOptions>().toHaveProperty('resurrect')
+})
+
+test('selector hook is public and exposes a typed context value', () => {
+  expectTypeOf<SorobanResurrectContextValue['state']>().toEqualTypeOf<RestoreStateInfo>()
+  expectTypeOf<typeof hook.useSorobanResurrectSelector>().toBeFunction()
 })

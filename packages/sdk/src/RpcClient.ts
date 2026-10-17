@@ -69,6 +69,7 @@ import {
   RPC_CIRCUIT_BREAKER_THRESHOLD,
   RPC_CIRCUIT_BREAKER_COOLDOWN_MS,
 } from './constants.js'
+import type { SubmitRetryOptions } from './types.js'
 
 // ---------------------------------------------------------------------------
 // Interface
@@ -122,6 +123,14 @@ export interface ISorobanRpcClient {
    * Used as the starting point for TTL calculations and SSE streaming.
    */
   getLatestLedger(): Promise<rpc.Api.GetLatestLedgerResponse>
+
+  /**
+   * Optional network metadata probes used by `checkNetworkCapabilities`.
+   * Custom clients may omit these methods; compatibility is then reported
+   * as unknown rather than assumed.
+   */
+  getNetwork?(): Promise<unknown>
+  getVersionInfo?(): Promise<unknown>
 
   /**
    * The base URL of the underlying RPC endpoint, if known.
@@ -222,6 +231,14 @@ export class SorobanRpcClient implements ISorobanRpcClient {
 
   getLatestLedger(): Promise<rpc.Api.GetLatestLedgerResponse> {
     return this.ensureServer().getLatestLedger()
+  }
+
+  getNetwork(): Promise<unknown> {
+    return this.ensureServer().getNetwork()
+  }
+
+  getVersionInfo(): Promise<unknown> {
+    return this.ensureServer().getVersionInfo()
   }
 }
 
@@ -377,6 +394,20 @@ export class ResilientRpcClient implements ISorobanRpcClient {
     return this._call(() => this._inner.getLatestLedger())
   }
 
+  getNetwork(): Promise<unknown> {
+    if (!this._inner.getNetwork) {
+      return Promise.reject(new Error('The wrapped RPC client does not implement getNetwork().'))
+    }
+    return this._call(() => this._inner.getNetwork!())
+  }
+
+  getVersionInfo(): Promise<unknown> {
+    if (!this._inner.getVersionInfo) {
+      return Promise.reject(new Error('The wrapped RPC client does not implement getVersionInfo().'))
+    }
+    return this._call(() => this._inner.getVersionInfo!())
+  }
+
   private async _call<T>(fn: () => Promise<T>): Promise<T> {
     const now = Date.now()
     if (this._circuitOpenUntil > now) {
@@ -420,4 +451,151 @@ export function wrapWithResilience(
   opts?: RpcResilienceOptions,
 ): ISorobanRpcClient {
   return new ResilientRpcClient(client, opts)
+}
+
+const TRANSIENT_ERROR_CODES = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'EAI_AGAIN',
+  'ETIMEDOUT',
+  'EPIPE',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_SOCKET',
+])
+
+const DETERMINISTIC_ERROR = /\b(tx_bad_seq|tx_bad_auth|tx_invalid|tx_malformed|tx_failed|tx_soroban_invalid|tx_insufficient_fee|op_?[a-z0-9_]*failed|contract(?:error| failure| reverted| trap)|invalid transaction|signature rejected|wallet rejected)\b/i
+
+function property(value: unknown, key: string): unknown {
+  if (typeof value !== 'object' || value === null || !(key in value)) return undefined
+  return (value as Record<string, unknown>)[key]
+}
+
+/**
+ * Returns true only for failures that can plausibly recover without changing
+ * a transaction or asking the wallet to sign again. RPC response objects that
+ * describe simulation/transaction failures are deliberately not retried.
+ */
+export function isRetryableRpcError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  if (DETERMINISTIC_ERROR.test(message)) return false
+
+  const response = property(error, 'response')
+  const status =
+    property(error, 'status') ??
+    property(error, 'statusCode') ??
+    property(response, 'status')
+  if (typeof status === 'number') {
+    return status === 408 || status === 425 || status === 429 || (status >= 500 && status <= 599)
+  }
+
+  const code = property(error, 'code') ?? property(property(error, 'cause'), 'code')
+  if (typeof code === 'string' && TRANSIENT_ERROR_CODES.has(code.toUpperCase())) return true
+
+  return /fetch failed|failed to fetch|network (?:error|request failed)|socket hang up|connection reset|temporarily unavailable|service unavailable|gateway timeout|timed out|http 5\d\d|status code 5\d\d/i.test(
+    message,
+  )
+}
+
+function retryDelay(baseDelayMs: number, maxDelayMs: number, retryIndex: number): number {
+  const capped = Math.min(baseDelayMs * 2 ** retryIndex, maxDelayMs)
+  return Math.round(capped * (0.5 + Math.random()))
+}
+
+/** RPC error created when Soroban explicitly asks the client to try again. */
+export class RetryableRpcServerError extends Error {
+  constructor(status: string) {
+    super(`Soroban RPC requested a retry (${status})`)
+    this.name = 'RetryableRpcServerError'
+  }
+}
+
+/**
+ * Wraps RPC calls with opt-in retries for transient transport failures and
+ * Soroban's explicit TRY_AGAIN_LATER submission response. Wallet operations
+ * are never wrapped, and deterministic RPC errors are passed through.
+ */
+export class RetryingRpcClient implements ISorobanRpcClient {
+  private readonly maxRetries: number
+  private readonly baseDelayMs: number
+  private readonly maxDelayMs: number
+
+  constructor(
+    private readonly inner: ISorobanRpcClient,
+    options: SubmitRetryOptions = {},
+  ) {
+    this.maxRetries = options.maxRetries ?? 3
+    this.baseDelayMs = options.baseDelayMs ?? 250
+    this.maxDelayMs = options.maxDelayMs ?? 5000
+
+    if (!Number.isInteger(this.maxRetries) || this.maxRetries < 0) {
+      throw new Error('retry.maxRetries must be a non-negative integer')
+    }
+    if (!Number.isFinite(this.baseDelayMs) || this.baseDelayMs < 0) {
+      throw new Error('retry.baseDelayMs must be a finite non-negative number')
+    }
+    if (!Number.isFinite(this.maxDelayMs) || this.maxDelayMs < this.baseDelayMs) {
+      throw new Error('retry.maxDelayMs must be finite and greater than or equal to baseDelayMs')
+    }
+  }
+
+  get serverURL(): string | undefined {
+    return this.inner.serverURL
+  }
+
+  simulateTransaction(transaction: Transaction): Promise<rpc.Api.SimulateTransactionResponse> {
+    return this.call(() => this.inner.simulateTransaction(transaction))
+  }
+
+  sendTransaction(
+    transaction: Transaction | import('@stellar/stellar-sdk').FeeBumpTransaction,
+  ): Promise<rpc.Api.SendTransactionResponse> {
+    return this.call(
+      () => this.inner.sendTransaction(transaction),
+      (response) => String(response.status) === 'TRY_AGAIN_LATER',
+    )
+  }
+
+  getTransaction(hash: string): Promise<rpc.Api.GetTransactionResponse> {
+    return this.call(() => this.inner.getTransaction(hash))
+  }
+
+  getAccount(publicKey: string): Promise<Account> {
+    return this.call(() => this.inner.getAccount(publicKey))
+  }
+
+  getLedgerEntries(...keys: xdr.LedgerKey[]): Promise<rpc.Api.GetLedgerEntriesResponse> {
+    return this.call(() => this.inner.getLedgerEntries(...keys))
+  }
+
+  getLatestLedger(): Promise<rpc.Api.GetLatestLedgerResponse> {
+    return this.call(() => this.inner.getLatestLedger())
+  }
+
+  private async call<T>(
+    invoke: () => Promise<T>,
+    shouldRetryResponse: (response: T) => boolean = () => false,
+  ): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+      let response: T
+      try {
+        response = await invoke()
+      } catch (error) {
+        if (!isRetryableRpcError(error) || attempt >= this.maxRetries) throw error
+        await new Promise((resolve) =>
+          setTimeout(resolve, retryDelay(this.baseDelayMs, this.maxDelayMs, attempt)),
+        )
+        continue
+      }
+
+      if (!shouldRetryResponse(response)) return response
+      if (attempt >= this.maxRetries) {
+        throw new RetryableRpcServerError(String(property(response, 'status')))
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, retryDelay(this.baseDelayMs, this.maxDelayMs, attempt)),
+      )
+    }
+  }
 }

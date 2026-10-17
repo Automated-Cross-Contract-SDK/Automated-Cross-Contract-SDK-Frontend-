@@ -2,6 +2,11 @@
 
 The `@soroban-resurrect/react-hook` package is built for React 18+. Wrap the part of your app that submits transactions in a `SorobanResurrectProvider`, then read state from `useSorobanResurrectContext()` anywhere inside it.
 
+The provider creates its SDK instance after the client commits and disposes it
+when its config changes or it unmounts. TTL watcher hooks tie their polling
+intervals to the component lifecycle, including React Strict Mode's
+development-only setup/cleanup replay.
+
 ## Setup
 
 ```bash
@@ -59,6 +64,23 @@ function WithdrawButton() {
   // same API as the context version
 }
 ```
+
+## Avoiding unrelated renders
+
+For a component that only needs one workflow field, use
+`useSorobanResurrectSelector` instead of subscribing to the entire context:
+
+```tsx
+import { useSorobanResurrectSelector } from '@soroban-resurrect/react-hook'
+
+function RestoreSpinner() {
+  const isProcessing = useSorobanResurrectSelector((value) => value.isProcessing)
+  return isProcessing ? <span>Restoring…</span> : null
+}
+```
+
+The component updates only when the selected field changes. The full context
+hook remains useful when several fields or actions are needed.
 
 ## Tips
 

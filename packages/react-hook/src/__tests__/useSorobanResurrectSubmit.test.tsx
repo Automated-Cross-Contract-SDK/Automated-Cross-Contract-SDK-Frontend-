@@ -111,21 +111,27 @@ describe('useSorobanResurrectSubmit', () => {
   })
 
   it('surfaces a failed ResurrectResult as error and calls onError', async () => {
-    const failResult = { success: false, archivedKeysDetected: 0, error: 'boom' }
+    const failResult = {
+      success: false,
+      archivedKeysDetected: 0,
+      error: 'User rejected the request',
+    }
     fake.submitWithRestore.mockResolvedValue(failResult)
     const onError = vi.fn()
+    const onSettled = vi.fn()
 
     const { result } = renderHook(() =>
-      useSorobanResurrectSubmit({ resurrect: fake as never, onError }),
+      useSorobanResurrectSubmit({ resurrect: fake as never, onError, onSettled }),
     )
 
     await act(async () => {
       await result.current.submit(tx, wallet)
     })
 
-    expect(result.current.error).toBe('boom')
+    expect(result.current.error).toBe('User rejected the request')
     expect(result.current.result).toEqual(failResult)
-    expect(onError).toHaveBeenCalledWith('boom')
+    expect(onError).toHaveBeenCalledWith('User rejected the request')
+    expect(onSettled).toHaveBeenCalledWith(failResult, 'User rejected the request')
   })
 
   it('converts a thrown error into a failure result', async () => {

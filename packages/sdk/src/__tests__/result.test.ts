@@ -26,25 +26,25 @@ describe('result helpers', () => {
     expect(outcome._unsafeUnwrapErr().message).toBe('async boom')
   })
 
-  it('returns a safe result for archive extraction failures', () => {
+  it('returns extraction failures as Err instead of treating them as an empty restore', () => {
     const response = {
       _parsed: false,
     } as any
 
     const outcome = extractArchivedKeysSafe(response)
 
-    expect(outcome.isOk()).toBe(true)
-    expect(outcome._unsafeUnwrap()).toEqual([])
+    expect(outcome.isErr()).toBe(true)
+    expect(outcome._unsafeUnwrapErr().message).toContain('unparsed-response')
   })
 
-  it('returns a safe result for footprint extraction failures', () => {
+  it('returns success footprint extraction failures as Err', () => {
     const response = {
       _parsed: false,
     } as any
 
     const outcome = extractFootprintFromSuccessSafe(response)
 
-    expect(outcome.isOk()).toBe(true)
-    expect(outcome._unsafeUnwrap()).toEqual({ readOnly: [], readWrite: [] })
+    expect(outcome.isErr()).toBe(true)
+    expect(outcome._unsafeUnwrapErr().message).toContain('unparsed-response')
   })
 })

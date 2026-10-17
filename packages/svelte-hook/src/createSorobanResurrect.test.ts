@@ -7,6 +7,7 @@ const mockReset = vi.fn()
 const mockDetectArchivedKeys = vi.fn()
 const mockSubmitWithRestore = vi.fn()
 const mockSimulate = vi.fn()
+const mockDispose = vi.fn()
 
 let stateListener: (info: unknown) => void = () => {}
 
@@ -21,7 +22,9 @@ vi.mock('@soroban-resurrect/sdk', () => ({
     },
     reset: mockReset,
     detectArchivedKeys: mockDetectArchivedKeys,
+    estimateRestoreFee: vi.fn().mockResolvedValue('100'),
     submitWithRestore: mockSubmitWithRestore,
+    dispose: mockDispose,
     simulate: mockSimulate,
   })),
 }))
@@ -31,6 +34,7 @@ const config = writable({ rpcUrl: 'https://soroban-testnet.stellar.org' })
 describe('createSorobanResurrect — reset / batch / derived stores', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockDispose.mockReset()
     mockDetectArchivedKeys.mockResolvedValue([])
     mockSimulate.mockResolvedValue({ minResourceFee: '100' })
   })

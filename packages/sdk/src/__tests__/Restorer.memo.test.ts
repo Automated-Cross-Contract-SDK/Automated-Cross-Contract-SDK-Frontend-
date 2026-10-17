@@ -20,6 +20,7 @@ async function build(configExtra: Record<string, unknown>, memo?: Memo): Promise
     sourcePublicKey: kp.publicKey(),
     transactionData: new SorobanDataBuilder().build(),
     minResourceFee: 100,
+    latestLedger: 100,
     config: { rpcUrl: 'https://test', networkPassphrase: Networks.TESTNET, ...configExtra },
     ...(memo ? { memo } : {}),
   })

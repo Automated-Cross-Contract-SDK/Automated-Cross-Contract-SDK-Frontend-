@@ -103,6 +103,48 @@ function WithdrawButton() {
 }
 ```
 
+## Choosing an approach
+
+If you already use Soroban RPC and only need a single, application-specific
+restore flow, you may prefer to maintain that small flow yourself. See
+[Manual restore flow vs. the SDK](/guide/comparison) for the trade-offs,
+dependencies, and bundle-size measurement command.
+
+## Cancelling a restore workflow
+
+Pass an `AbortSignal` to cancel further SDK work, including simulation waits,
+wallet prompts that honor the signal, and transaction-confirmation polling:
+
+```typescript
+const controller = new AbortController()
+const result = await sr.submitWithRestore({
+  transaction: tx,
+  wallet,
+  signal: controller.signal,
+})
+
+// Call from a cancel button or when the owning view is disposed:
+controller.abort()
+
+if (!result.success && result.errorCode === 'ABORTED') {
+  // A transaction already submitted may still complete on-chain.
+}
+```
+
+`AbortSignalOptions` is exported as a stable type. A `{ signal }` options object
+is accepted by `simulate`, `detectArchivedKeys`, `detectArchivedKeysBatch`,
+`needsRestore`, `estimateRestoreCost`, `buildRestoreTx` (after its optional
+simulation response), `buildBatchRestoreTx`, `sendTransaction`, `retry`, and
+`restoreKeys`. `submitWithRestore` accepts `signal` in its options object, and
+`submitBatchWithRestore(items, { signal })` uses one signal for the whole batch.
+Existing calls that omit a signal are unchanged.
+
+Cancellation stops the SDK from starting later steps and clears polling timers
+and temporary abort listeners. Wallet adapters may ignore the signal, and the
+Stellar SDK's RPC methods do not expose request cancellation; an in-flight RPC
+or wallet prompt may therefore finish in the background. Aborting cannot undo a
+submitted transaction, so inspect its returned hash/status before retrying.
+
 ## Next Steps
 
 - Walk through common patterns in the [Tutorial](/guide/tutorial)
