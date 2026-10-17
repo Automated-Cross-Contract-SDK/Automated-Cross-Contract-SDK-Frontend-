@@ -173,7 +173,7 @@ describe('Archiver', () => {
       const key3 = { toXDR: () => 'key-3', switch: () => ({ name: 'contractCode' }) }
       const response = makeMockRestoreResponse()
       Object.defineProperty(response.transactionData, 'getFootprint', {
-        value: () => ({ readOnly: () => [], readWrite: () => [key1, key2, key3] }),
+        value: () => ({ readOnly: () => [], readWrite: () => [key3, key1, key2] }),
       })
 
       const keys = extractArchivedKeys(response)
@@ -229,6 +229,21 @@ describe('Archiver', () => {
       const result = await detectArchivedEntries(server, keys)
       expect(result.length).toBe(1)
       expect(result[0].keyBase64).toBe('base64-2')
+    })
+
+    it('returns missing entries in canonical key order, independent of input order', async () => {
+      const liveKey = { toXDR: () => 'live' } as unknown as xdr.LedgerKey
+      const laterKey = { toXDR: () => 'z-key' } as unknown as xdr.LedgerKey
+      const earlierKey = { toXDR: () => 'a-key' } as unknown as xdr.LedgerKey
+      const server = {
+        getLedgerEntries: vi.fn().mockResolvedValue({
+          entries: [{ key: liveKey }],
+        }),
+      } as unknown as rpc.Server
+
+      const result = await detectArchivedEntries(server, [laterKey, liveKey, earlierKey])
+
+      expect(result.map((entry) => entry.keyBase64)).toEqual(['a-key', 'z-key'])
     })
 
     it('treats all keys in a chunk as archived when the request fails', async () => {

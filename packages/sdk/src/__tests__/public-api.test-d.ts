@@ -8,6 +8,7 @@
  * Run with: `npm run test:types -w packages/sdk`
  */
 import { expectTypeOf, test } from 'vitest'
+import { xdr } from '@stellar/stellar-sdk'
 import * as sdk from '../index.js'
 import type {
   WalletAdapter,
@@ -113,6 +114,7 @@ type PublicExports =
   | 'createRequestId'
   | 'LoggingRpcClient'
   | 'withRpcLogging'
+  | 'serializeLedgerKey'
 
 test('all documented public exports are present on the barrel', () => {
   expectTypeOf<PublicExports>().toMatchTypeOf<keyof typeof sdk>()
