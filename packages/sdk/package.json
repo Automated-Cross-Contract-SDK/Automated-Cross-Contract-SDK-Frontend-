@@ -45,7 +45,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@stellar/stellar-sdk": "12.3.0",
+    "@stellar/stellar-sdk": "17.2.1",
     "@xstate/fsm": "2.0.1",
     "@soroban-resurrect/core": "0.1.0"
   },
