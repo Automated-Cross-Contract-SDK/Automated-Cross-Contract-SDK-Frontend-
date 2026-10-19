@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "react": "18.2.0",
-    "react-native": "0.74.5",
+    "react-native": "0.88.0",
     "react-native-get-random-values": "^1.11.0",
     "react-native-url-polyfill": "^2.0.0",
     "buffer": "^6.0.3",
