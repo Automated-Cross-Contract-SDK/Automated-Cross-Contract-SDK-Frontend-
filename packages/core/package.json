@@ -21,7 +21,7 @@
     "lint": "eslint 'src/**/*.{ts,tsx}'"
   },
   "devDependencies": {
-    "tsup": "8.5.1",
-    "typescript": "^5.9.2"
+    "tsup": "9.0.0",
+    "typescript": "^7.0.2"
   }
 }
