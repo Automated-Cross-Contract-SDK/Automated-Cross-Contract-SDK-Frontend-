@@ -3,6 +3,53 @@
 This document describes the public API surface of the SDK. For integration guides see
 [`docs/integrations/adapters-and-wallets.md`](./integrations/adapters-and-wallets.md).
 
+## Error categories
+
+The SDK exposes a stable, documented set of public error categories. Each error thrown by the
+public API carries a `category` field drawn from the `ErrorCategory` union below. These
+categories are part of the public interface and are **stable**: new categories may be added in
+minor releases, but existing category names will not be renamed or removed without a major
+version bump. See the [troubleshooting guide](./guide/troubleshooting.md) for likely causes and
+safe recovery steps for each category.
+
+```ts
+type ErrorCategory =
+  | "NETWORK"
+  | "RPC"
+  | "SIMULATION"
+  | "SIGNATURE"
+  | "THRESHOLD"
+  | "ARCHIVED_ENTRY"
+  | "INSUFFICIENT_FEE"
+  | "WALLET"
+  | "VALIDATION"
+  | "UNKNOWN";
+
+interface SdkError extends Error {
+  /** Stable public error category. */
+  category: ErrorCategory;
+  /** Optional underlying cause (e.g. the raw RPC error). */
+  cause?: unknown;
+}
+```
+
+| Category | Meaning |
+| --- | --- |
+| `NETWORK` | Transport-level failure reaching the network (DNS, timeout, connection reset). |
+| `RPC` | The RPC endpoint returned an error response. |
+| `SIMULATION` | Transaction simulation failed before submission. |
+| `SIGNATURE` | A signature was missing, malformed, or failed verification. |
+| `THRESHOLD` | Not enough signatures were collected to meet the multisig threshold. |
+| `ARCHIVED_ENTRY` | A footprint key is archived and must be restored before use. |
+| `INSUFFICIENT_FEE` | The submitted fee was below the required minimum. |
+| `WALLET` | The wallet adapter rejected or could not complete the request. |
+| `VALIDATION` | Input failed client-side validation before any network call. |
+| `UNKNOWN` | An error that could not be classified; inspect `cause`. |
+
+> **Migration note:** if you previously matched on raw error messages or RPC error strings,
+> switch to matching on `error.category`. Message text is not part of the stable interface and
+> may change between releases.
+
 ## MultiSig restore
 
 N-of-M restore support is provided by `MultiSigWalletAdapter`, `MultiSigSigner`,
@@ -82,8 +129,9 @@ const receipt = await adapter.submitWithRestore(result);
 If a signer refuses (throws or returns an error), `collectSignatures` records the failure in
 the returned `SignatureCollectionResult` rather than aborting the whole flow. As long as the
 number of successful signatures still meets `config.threshold`, the result can be passed to
-`submitWithRestore`. If the threshold is not met, `submitWithRestore` rejects and the partial
-result can be retained to collect the remaining signatures later.
+`submitWithRestore`. If the threshold is not met, `submitWithRestore` rejects with a
+`THRESHOLD` category error and the partial result can be retained to collect the remaining
+signatures later.
 
 ### Types
 
@@ -226,35 +274,6 @@ import {
 } from "@sdk/scanning";
 
 // Contract scan: instance + wasm code are discovered automatically, but storage
-// keys MUST be supplied by the caller.
-const contractResult = await getExpiringEntriesForContract(contractId, {
-  expiringSoonLedgers: DEFAULT_EXPIRING_SOON_LEDGERS,
-  instance: instanceKey,
-  wasmCode: wasmCodeKey,
-  storageKeys: [balanceKey, allowanceKey],
-});
+// keys
 
-if (contractResult.instance?.expiringSoon) {
-  console.warn("contract instance is expiring soon");
-}
-for (const entry of contractResult.storage) {
-  if (entry.expiringSoon) {
-    console.warn("storage entry expiring soon", entry.key);
-  }
-}
-
-// Account scan: presence of the account and its trustlines.
-const accountResult = await getExpiringEntriesForAccount(accountId, {
-  trustlines: [usdcTrustlineKey],
-});
-```
-
-### When to use scanning vs. `detectArchivedKeys`
-
-| API | Basis | Use when |
-| --- | --- | --- |
-| `getExpiringEntriesForContract` / `getExpiringEntriesForAccount` | Explicit keys you supply | You know which keys matter and want a transaction-free, read-only check. |
-| `detectArchivedKeys` | Transaction footprint | You have a transaction and want to know which of its footprint keys are archived. |
-
-Use the scanning APIs for proactive, transaction-free monitoring; use `detectArchivedKeys`
-when you already have a transaction and need to inspect its footprint.
+/* … truncated 1239 chars — edit only what you need near the top … */
