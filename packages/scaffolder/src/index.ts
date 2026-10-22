@@ -178,8 +178,33 @@ function renderTemplate(template: string, projectName: string): Record<string, s
 }
 
 /**
+ * Detect which of the rendered files already exist in the target directory.
+ * Returns the sorted list of relative paths that would be overwritten.
+ */
+export async function detectExistingFiles(
+  targetDir: string,
+  files: Record<string, string>,
+): Promise<string[]> {
+  const resolvedTarget = path.resolve(targetDir);
+  const existing: string[] = [];
+  for (const relative of Object.keys(files).sort()) {
+    if (await pathExists(path.join(resolvedTarget, relative))) {
+      existing.push(relative);
+    }
+  }
+  return existing;
+}
+
+/**
  * Scaffold a project. In non-interactive mode all options must be supplied
  * up front; the returned file list is sorted for deterministic output.
+ *
+ * Safe overwrite: if any rendered file already exists in the target directory
+ * and `force` is not set, the scaffold aborts before writing anything.
+ *
+ * Rollback: if a write fails partway through, every file written during this
+ * run is removed (and any pre-existing files overwritten under `force` are
+ * restored) so no partially generated project is left behind.
  */
 export async function scaffold(options: ScaffoldOptions): Promise<ScaffoldResult> {
   const { targetDir, projectName, template, force, nonInteractive } = options;
@@ -203,23 +228,69 @@ export async function scaffold(options: ScaffoldOptions): Promise<ScaffoldResult
   }
 
   const resolvedTarget = path.resolve(targetDir);
-  if ((await pathExists(resolvedTarget)) && !force) {
+  const rendered = renderTemplate(template, projectName);
+
+  const existing = await detectExistingFiles(resolvedTarget, rendered);
+  if (existing.length > 0 && !force) {
     throw new ScaffoldError(
-      `Target directory already exists: ${resolvedTarget}. Use --force to overwrite.`,
+      `Target contains existing files: ${existing.join(', ')}. ` +
+        'Use --force to overwrite.',
     );
   }
 
-  const rendered = renderTemplate(template, projectName);
   const written: string[] = [];
+  const createdDirs: string[] = [];
+  const backups = new Map<string, string>();
 
-  for (const relative of Object.keys(rendered).sort()) {
-    const absolute = path.join(resolvedTarget, relative);
-    await fs.mkdir(path.dirname(absolute), { recursive: true });
-    await fs.writeFile(absolute, rendered[relative], 'utf8');
-    written.push(relative);
+  try {
+    for (const relative of Object.keys(rendered).sort()) {
+      const absolute = path.join(resolvedTarget, relative);
+      const dir = path.dirname(absolute);
+      if (!(await pathExists(dir))) {
+        await fs.mkdir(dir, { recursive: true });
+        createdDirs.push(dir);
+      }
+      if (await pathExists(absolute)) {
+        backups.set(absolute, await fs.readFile(absolute, 'utf8'));
+      }
+      await fs.writeFile(absolute, rendered[relative], 'utf8');
+      written.push(relative);
+    }
+  } catch (error) {
+    await rollback(written, backups, createdDirs, resolvedTarget);
+    const message = error instanceof Error ? error.message : String(error);
+    throw new ScaffoldError(`Scaffolding failed and was rolled back: ${message}`);
   }
 
   return { targetDir: resolvedTarget, files: written.sort() };
+}
+
+async function rollback(
+  written: string[],
+  backups: Map<string, string>,
+  createdDirs: string[],
+  resolvedTarget: string,
+): Promise<void> {
+  for (const relative of written) {
+    const absolute = path.join(resolvedTarget, relative);
+    try {
+      const previous = backups.get(absolute);
+      if (previous !== undefined) {
+        await fs.writeFile(absolute, previous, 'utf8');
+      } else {
+        await fs.rm(absolute, { force: true });
+      }
+    } catch {
+      // Best-effort cleanup; continue restoring remaining files.
+    }
+  }
+  for (const dir of createdDirs.reverse()) {
+    try {
+      await fs.rmdir(dir);
+    } catch {
+      // Directory not empty or already gone; leave it in place.
+    }
+  }
 }
 
 /**
