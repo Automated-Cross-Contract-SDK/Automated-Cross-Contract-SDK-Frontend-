@@ -10,7 +10,15 @@
   "notes": [
     "Baseline for scripts/benchmark-imports.mjs (cold import wall-time per package entry, in ms).",
     "Regenerate on a CI-class runner with: npm run benchmark:imports:update",
-    "Entries missing here are reported as 'new' and never fail the gate, so this file must be populated once for the gate to be active."
+    "Entries missing here are reported as 'new' and never fail the gate, so this file must be populated once for the gate to be active.",
+    "budgets defines the per-entry-point performance budget: maxImportMs is the cold import wall-time ceiling and maxDeltaRatio is the allowed regression ratio versus the recorded baseline. An entry fails CI when its measured import time exceeds maxImportMs or regresses beyond maxDeltaRatio."
   ],
+  "budgets": {
+    "default": {
+      "maxImportMs": 250,
+      "maxDeltaRatio": 0.5
+    },
+    "entries": {}
+  },
   "entries": {}
 }

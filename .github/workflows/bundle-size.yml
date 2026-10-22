@@ -22,3 +22,7 @@ jobs:
       # Per-entry-point gzip budgets + tree-shaking fixture. Fails naming the
       # offending entry point. See CONTRIBUTING.md "Bundle budgets".
       - run: node scripts/check-bundle-budgets.mjs --summary "$GITHUB_STEP_SUMMARY"
+
+      # Import-cost budgets: measures the cost of importing each public entry
+      # point in isolation and fails when a budget is exceeded.
+      - run: node scripts/check-import-cost-budgets.mjs --summary "$GITHUB_STEP_SUMMARY"

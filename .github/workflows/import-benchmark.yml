@@ -24,6 +24,9 @@ jobs:
       - name: Measure cold import time per package entry
         run: npm run benchmark:imports -- --summary "$GITHUB_STEP_SUMMARY" --json import-benchmark.json
 
+      - name: Enforce performance budgets per entry point
+        run: npm run benchmark:budgets -- --report import-benchmark.json --summary "$GITHUB_STEP_SUMMARY"
+
       - name: Upload benchmark report
         if: always()
         uses: actions/upload-artifact@v4
