@@ -27,6 +27,97 @@ npm install @soroban-resurrect/react-hook
 - A Soroban RPC endpoint (Testnet, Futurenet, or Mainnet)
 - A wallet that can sign Soroban transaction XDR (Freighter, xBull, or a custom signer)
 
+## Local Soroban RPC environment
+
+For offline development and reproducible tests, run a local Soroban RPC node
+instead of pointing at a public endpoint. The steps below produce a
+reproducible environment that the SDK and examples can target.
+
+### Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) 24+ (or a native `stellar` CLI install)
+- The [Stellar CLI](https://developers.stellar.org/docs/tools/developer-tools/cli/stellar-cli) (`stellar`)
+- Node.js 20+ (matches the SDK requirement above)
+
+### Start the local network
+
+```bash
+# Start a local Stellar network (core + Soroban RPC) in the background.
+stellar network start local
+
+# The RPC endpoint is now available at:
+#   http://localhost:8000/soroban/rpc
+# The network passphrase for the local network is:
+#   Standalone Network ; February 2017
+```
+
+To stop the network when you're done:
+
+```bash
+stellar network stop local
+```
+
+### Configure the SDK
+
+Point the SDK at the local endpoint. The local network uses its own
+passphrase, so pass it explicitly rather than relying on a preset:
+
+```typescript
+import { SorobanResurrect } from '@soroban-resurrect/sdk'
+
+const sr = new SorobanResurrect({
+  rpcUrl: 'http://localhost:8000/soroban/rpc',
+  networkPassphrase: 'Standalone Network ; February 2017',
+})
+```
+
+You can also set these via environment variables for the examples:
+
+```bash
+export SOROBAN_RPC_URL=http://localhost:8000/soroban/rpc
+export SOROBAN_NETWORK_PASSPHRASE="Standalone Network ; February 2017"
+```
+
+### Verify endpoint readiness
+
+Before running examples, confirm the endpoint is reachable and healthy. The
+`@soroban-resurrect/sdk` package ships a helper with a stable interface:
+
+```typescript
+import { checkSorobanRpcReadiness } from '@soroban-resurrect/sdk'
+
+const status = await checkSorobanRpcReadiness({
+  rpcUrl: 'http://localhost:8000/soroban/rpc',
+  timeoutMs: 5000,
+})
+
+if (!status.ready) {
+  console.error('Soroban RPC not ready:', status.reason)
+  process.exit(1)
+}
+
+console.log('Soroban RPC ready:', status.latestLedger)
+```
+
+`checkSorobanRpcReadiness` resolves to a `SorobanRpcReadiness` object:
+
+| Field          | Type      | Description                                              |
+| -------------- | --------- | -------------------------------------------------------- |
+| `ready`        | `boolean` | `true` when the endpoint responded with a valid ledger.  |
+| `latestLedger` | `number?` | Latest ledger sequence reported by the endpoint.         |
+| `reason`       | `string?` | Human-readable failure reason when `ready` is `false`.    |
+
+It returns `ready: false` (rather than throwing) for unreachable endpoints,
+timeouts, and malformed responses, so it is safe to call in CI and scripts.
+
+### Compatibility notes
+
+- The helper targets the same Soroban RPC version as `@stellar/stellar-sdk`
+  `^12.0.0`; older RPC nodes that do not implement `getLatestLedger` will
+  report `ready: false` with a `reason` describing the unsupported method.
+- Public endpoints (Testnet/Futurenet/Mainnet) work with the same helper —
+  swap `rpcUrl` and `networkPassphrase` accordingly.
+
 ## Quick Start (Direct SDK)
 
 ```typescript
