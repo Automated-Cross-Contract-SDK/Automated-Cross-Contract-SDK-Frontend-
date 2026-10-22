@@ -71,6 +71,36 @@ function ArchivedKeysBanner({ archivedKeys }: { archivedKeys: ArchivedLedgerEntr
 }
 ```
 
+### Estimating restore fees and asking for consent
+
+Restore fees are separate from the original transaction cost. Estimate both,
+show them side by side, and only proceed once the user explicitly consents to
+the extra restore fee. See [Restore fees](/guide/restore-fees) for the full
+fee model and consent patterns.
+
+```typescript
+const estimate = await sr.estimateRestoreFees(tx)
+// estimate.originalFee  — cost of the original transaction
+// estimate.restoreFee   — extra cost to restore archived entries
+// estimate.totalFee     — originalFee + restoreFee
+
+const consent = await requestConsent({
+  title: 'Restore required',
+  body:
+    `This transaction needs ${estimate.archivedKeys.length} archived ` +
+    `entries restored.\n\n` +
+    `Original transaction fee: ${formatStroops(estimate.originalFee)}\n` +
+    `Restore fee: ${formatStroops(estimate.restoreFee)}\n` +
+    `Total: ${formatStroops(estimate.totalFee)}`,
+  confirmLabel: 'Pay restore fee and continue',
+  cancelLabel: 'Cancel',
+})
+
+if (!consent) return // user declined — do not submit
+
+const result = await sr.submitWithRestore({ transaction: tx, wallet })
+```
+
 ### Full submit flow with error handling
 
 ```typescript

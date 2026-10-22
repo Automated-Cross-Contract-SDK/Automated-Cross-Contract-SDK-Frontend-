@@ -66,6 +66,70 @@ the number it returns is the number you will pay:
 Always call `estimateRestoreCost` before signing a restore so you can reason
 about what you will pay and surface the cap to your users.
 
+## Estimating restore fees
+
+`estimateRestoreCost` is the stable, documented interface for fee estimation.
+It takes the same inputs the restore path uses and returns the exact fee the
+restore will charge, so callers never have to re-implement the formula.
+
+```ts
+import { estimateRestoreCost } from '@stellar/restore';
+
+const estimate = await estimateRestoreCost({
+  minResourceFee,          // from the restore simulation
+  restoreFeeMultiplier,    // defaults to 1
+  maxRestoreFeeStroops,    // optional cap
+});
+
+// estimate.feeStroops is the exact amount the restore will charge.
+// estimate.capped is true when the cap clamped the fee.
+```
+
+Estimate **before** you build or sign the restore transaction, and pass the
+result into your consent UI. Because the estimate uses the same formula as the
+restore path, the number you show the user is the number they will pay.
+
+## Distinguishing restore fees from the original transaction cost
+
+A restore fee is **not** the cost of the original transaction. They are
+separate charges and must be presented separately:
+
+- **Original transaction cost** — the fee paid when the original transaction
+  was first submitted. It is already settled and is not charged again by a
+  restore.
+- **Restore fee** — the additional fee paid now to bring the archived entry
+  back into the live ledger. It is computed by the formula above and is the
+  only new cost a restore introduces.
+
+When you present costs to users, label them explicitly (for example,
+"Original transaction fee (already paid)" and "Restore fee (charged now)") and
+never sum them into a single "total" that implies the original fee is being
+charged again. The restore fee is the amount that requires fresh consent.
+
+## User-consent UX patterns
+
+A restore spends the user's funds, so it requires explicit consent. The
+following patterns keep consent clear and auditable:
+
+1. **Estimate first, then ask.** Call `estimateRestoreCost` before showing any
+   prompt. Never ask for consent to an unknown amount.
+2. **Show the fee and its basis.** Display the restore fee in stroops (and a
+   human-readable unit if you have one), and state that it is separate from the
+   original transaction cost.
+3. **Surface the cap.** If `estimate.capped` is true, tell the user the fee was
+   clamped to `maxRestoreFeeStroops` so the number is not surprising.
+4. **Explain what is being restored.** Name the archived entries being restored
+   so the user understands what the fee buys.
+5. **Require an explicit action.** Use a distinct confirm control (not a
+default-focused button) so consent is deliberate, and record the accepted
+estimate alongside the signed transaction for auditability.
+6. **Handle staleness.** If the ledger-bounds window elapses while the prompt
+   is open, the SDK fails without submitting. Re-estimate and re-prompt rather
+   than silently reusing the old consent.
+
+These patterns rely only on the stable `estimateRestoreCost` interface and the
+restore error codes documented below, so they remain valid across SDK versions.
+
 ## Restore preamble freshness
 
 Restore transactions use ledger bounds derived from the simulation's
@@ -123,6 +187,8 @@ is at or below the cap and therefore not clamped.
 - The footprint-size guard is evaluated first and warns when close to the limit
   and throws when over it.
 - Use `estimateRestoreCost` to preview the exact fee before signing.
+- Present the restore fee separately from the original transaction cost and
+  obtain explicit consent using the patterns above.
 
 ## Architecture decision record: rebuilding the original transaction
 
@@ -172,26 +238,4 @@ transaction. The rebuilt transaction is what gets signed and submitted.
 ### Mechanism
 
 1. **Sequence numbers.** The rebuild reads the source account's current
-   sequence number and sets it on the rebuilt transaction. It does not carry
-   over the sequence number from the restored transaction, which may have been
-   consumed or superseded.
-2. **Simulation data.** The rebuild uses the restore simulation's
-   `latestLedger` to derive ledger bounds within
-   `RESTORE_TX_LEDGER_BOUNDS_WINDOW` (30 ledgers) and applies the 30-second time
-   bound. The footprint and `minResourceFee` come from the same simulation, so
-   the fee formula above is evaluated against current data.
-3. **Caller responsibilities.** The caller must:
-   - request a new signature for the rebuilt transaction, since the previous
-     signature no longer applies;
-   - surface the new ledger range and time bound to users when the wallet
-     displays preconditions;
-   - handle the rebuild-and-resign error by retrying the flow, not by
-     resubmitting the stale transaction.
-
-### Consequences
-
-- Callers must be prepared to sign more than once if the window elapses.
-- The SDK never submits a transaction whose bounds or sequence number are
-  stale; it fails fast and asks for a rebuild instead.
-- Any change to the restore flow must preserve the invariant that the signed
-  transaction is rebuilt from current simulation data.
+   sequence number and sets it on the rebuilt transacti

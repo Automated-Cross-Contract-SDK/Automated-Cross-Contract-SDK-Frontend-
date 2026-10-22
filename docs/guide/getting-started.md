@@ -103,6 +103,59 @@ function WithdrawButton() {
 }
 ```
 
+## Estimating restore fees and asking for consent
+
+Restoring archived entries is a separate on-chain transaction with its own fee,
+so it costs more than the original transaction alone. Estimate it up front with
+`estimateRestoreCost` and present the two costs separately before asking the
+user to sign:
+
+```typescript
+const estimate = await sr.estimateRestoreCost(tx)
+
+if (estimate.requiresRestore) {
+  // estimate.originalFee and estimate.restoreFee are stroops (strings)
+  console.log('Original tx fee:', estimate.originalFee)
+  console.log('Restore fee:', estimate.restoreFee)
+  console.log('Total:', estimate.totalFee)
+  console.log('Archived keys:', estimate.archivedKeys.length)
+}
+```
+
+`estimateRestoreCost` returns a stable `RestoreCostEstimate` shape:
+`{ requiresRestore, originalFee, restoreFee, totalFee, archivedKeys }`. Fees are
+returned as stroop strings to avoid precision loss; format them for display in
+your UI. When `requiresRestore` is `false`, `restoreFee` is `'0'` and
+`totalFee === originalFee`, so you can render the same component in both cases.
+
+### Consent UX patterns
+
+- **Show both costs.** Always display the original transaction fee and the
+  restore fee as distinct line items, plus the total. Never fold the restore fee
+  into the original cost silently — users should see why the total is higher.
+- **Explain the restore.** A short note ("Your account data expired and must be
+  restored before this transaction can run") prevents the fee from looking like
+  an unexplained surcharge.
+- **Require explicit consent.** Only call `submitWithRestore` after the user
+  confirms the estimate. If they decline, do not submit anything.
+- **Re-estimate on retry.** Fees can change between attempts; call
+  `estimateRestoreCost` again before re-prompting rather than reusing a stale
+  estimate.
+- **Handle the no-restore path.** If `requiresRestore` is `false`, skip the
+  consent step and submit normally.
+
+```tsx
+const estimate = await sr.estimateRestoreCost(tx)
+if (estimate.requiresRestore && !(await confirmRestoreFee(estimate))) {
+  return // user declined — nothing submitted
+}
+const result = await sr.submitWithRestore({ transaction: tx, wallet })
+```
+
+See [Restore fees](/guide/restore-fees) for the full fee model and
+[History persistence](/guide/history-persistence) for how restore outcomes are
+recorded.
+
 ## Choosing an approach
 
 If you already use Soroban RPC and only need a single, application-specific
