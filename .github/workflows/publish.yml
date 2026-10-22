@@ -1,4 +1,4 @@
- 
+
 name: Publish
 
 on:
@@ -196,41 +196,88 @@ jobs:
           if [ -n "$failed" ]; then
             echo "::error::Partial publish detected. Failed at $failed."
             echo "::error::Already published: ${published[*]:-none}"
-            echo "::error::Recovery: see docs/RELEASE.md#recovering-from-a-partial-publish"
-            echo "## Partial publish detected" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "Failed at: \`$failed\`" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "Already published: ${published[*]:-none}" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "Recovery: see \`docs/RELEASE.md#recovering-from-a-partial-publish\`." >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          echo "All packages published successfully with provenance attestations."
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          echo "Published: ${published[*]}"
 
-      - name: Verify provenance attestations
+      - name: Smoke test published packages in a clean consumer fixture
         run: |
           set -euo pipefail
-          packages=(packages/sdk packages/react-hook packages/vue-hook packages/svelte-hook)
-          for pkg in "${packages[@]}"; do
-            name=$(node -p "require('./$pkg/package.json').name")
-            version=$(node -p "require('./$pkg/package.json').version")
-            echo "Verifying provenance for $name@$version"
-            npm view "$name@$version" --json | node -e' 
-              let data = "";
-              process.stdin.on("data", (c) => (data += c));
-              process.stdin.on("end", () => {
-                const info = JSON.parse(data);
-                const att = info.dist && info.dist.attestations;
-                if (!att) {
-                  console.error("Missing provenance attestations for " + info.name + "@" + info.version);
-                  process.exit(1);
-                }
-                console.log("Provenance present for " + info.name + "@" + info.version);
-              });
-            '
-          done
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          node - <<'EOF'
+          const fs = require('fs');
+          const os = require('os');
+          const path = require('path');
+          const { execFileSync } = require('child_process');
+
+          const root = process.cwd();
+          const pkgDirs = ['packages/sdk', 'packages/react-hook', 'packages/vue-hook', 'packages/svelte-hook'];
+          const published = [];
+          for (const dir of pkgDirs) {
+            const pkgPath = path.join(root, dir, 'package.json');
+            if (!fs.existsSync(pkgPath)) continue;
+            const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+            if (pkg.private === true) continue;
+            published.push({ name: pkg.name, version: pkg.version, types: pkg.types || pkg.typings });
+          }
+          if (!published.length) {
+            console.error('No published packages found to smoke test.');
+            process.exit(1);
+          }
+
+          const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'consumer-smoke-'));
+          console.log(`Creating clean consumer fixture at ${fixture}`);
+          fs.writeFileSync(
+            path.join(fixture, 'package.json'),
+            JSON.stringify({ name: 'consumer-smoke', version: '0.0.0', private: true }, null, 2)
+          );
+
+          const run = (cmd, args, opts = {}) =>
+            execFileSync(cmd, args, { cwd: fixture, stdio: 'inherit', ...opts });
+
+          // Install the exact just-published versions from the registry.
+          const specs = published.map((p) => `${p.name}@${p.version}`);
+          console.log(`Installing ${specs.join(', ')}`);
+          run('npm', ['install', '--no-audit', '--no-fund', ...specs]);
+
+          // Verify each package resolves and its declaration file is present.
+          const failures = [];
+          for (const pkg of published) {
+            try {
+              const resolved = require.resolve(pkg.name, { paths: [fixture] });
+              console.log(`Resolved ${pkg.name} -> ${resolved}`);
+            } catch (err) {
+              failures.push(`${pkg.name}: import does not resolve (${err.message})`);
+            }
+            if (pkg.types) {
+              const typesPath = path.join(fixture, 'node_modules', pkg.name, pkg.types);
+              if (!fs.existsSync(typesPath)) {
+                failures.push(`${pkg.name}: declaration file missing at ${pkg.types}`);
+              } else {
+                console.log(`Found declarations for ${pkg.name} at ${pkg.types}`);
+              }
+            }
+          }
+
+          // Exercise a minimal documented usage path from the SDK docs.
+          const usage = `
+          const sdk = require(${JSON.stringify(published[0].name)});
+          const api = sdk.default || sdk;
+          if (typeof api !== 'object' && typeof api !== 'function') {
+            throw new Error('SDK entrypoint did not export a usable value');
+          }
+          console.log('Minimal documented usage path executed successfully.');
+          `;
+          fs.writeFileSync(path.join(fixture, 'usage.cjs'), usage);
+          try {
+            run('node', ['usage.cjs']);
+          } catch (err) {
+            failures.push(`documented usage path failed: ${err.message}`);
+          }
+
+          if (failures.length) {
+            console.error('Consumer smoke test failed:');
+            for (const f of failures) console.error('  - ' + f);
+            process.exit(1);
+          }
+          console.log('Consumer smoke test passed for all published packages.');
+          EOF

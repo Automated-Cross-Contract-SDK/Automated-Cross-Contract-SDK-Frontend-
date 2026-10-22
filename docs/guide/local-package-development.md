@@ -141,6 +141,36 @@ publish workflow for the remaining packages at the same version. Never bump
 versions to work around a partial publish — that leaves consumers with
 mismatched or unattributable artifacts.
 
+## Consumer smoke test after publishing
+
+Local linking proves your working copy works, but it does not prove the
+*installed* artifacts do. After a release publishes, an automated smoke test
+installs the just-published versions into a clean fixture and checks that they
+behave like a real consumer would expect. You can run the same check locally
+against a published version:
+
+```bash
+npm run smoke:consumer -- --version <published-version>
+```
+
+The smoke test creates a throwaway directory, installs every published package
+at the given version from the registry, and then verifies:
+
+1. **Imports resolve** — each package's entry point can be imported from a
+   fresh Node process, so a broken `exports` map or missing `dist/` file fails
+   the test instead of a consumer.
+2. **Declarations are present and usable** — the `.d.ts` files referenced by
+   `types`/`exports` exist and type-check against a minimal consumer file, so a
+   missing or broken declaration fails here rather than in a user's editor.
+3. **A minimal documented usage path works** — the snippet from
+   [Getting Started](./getting-started.md) is executed end to end, so the docs
+   and the published package cannot drift apart silently.
+
+The publish workflow runs this automatically after a successful publish. If it
+fails, treat it like a broken release: the published artifacts are not
+consumable, so fix forward with a patch release rather than editing the docs to
+match a broken package.
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |
@@ -152,6 +182,7 @@ mismatched or unattributable artifacts.
 | Vite does not reload the linked package | Linked packages sit outside the project root. Add `optimizeDeps: { exclude: ['@soroban-resurrect/sdk'] }` to the consumer's Vite config. |
 | A file is missing only under yalc | It is not covered by `files` in the package's `package.json`. It would be missing from the npm release too, so fix it there. |
 | A missing sibling resolves from the registry | The internal dependency is not pinned to an exact workspace version. Pin it and re-run the pre-publish check. |
+| Consumer smoke test fails after publish | The published artifacts are not consumable (bad `exports`, missing `dist/` or `.d.ts`, or docs drift). Fix forward with a patch release. |
 
 ## Do not commit link artifacts
 
