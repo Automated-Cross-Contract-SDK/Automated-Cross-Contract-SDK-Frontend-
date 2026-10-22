@@ -192,11 +192,73 @@ simulation response), `buildBatchRestoreTx`, `sendTransaction`, `retry`, and
 `submitBatchWithRestore(items, { signal })` uses one signal for the whole batch.
 Existing calls that omit a signal are unchanged.
 
-Cancellation stops the SDK from starting later steps and clears polling timers
-and temporary abort listeners. Wallet adapters may ignore the signal, and the
-Stellar SDK's RPC methods do not expose request cancellation; an in-flight RPC
-or wallet prompt may therefore finish in the background. Aborting cannot undo a
-submitted transaction, so inspect its returned hash/status before retrying.
+## Upgrading between SDK major versions
+
+This SDK follows [semantic versioning](https://semver.org/). Patch and minor
+releases are backward compatible; **major** releases may change public APIs,
+remove deprecated behavior, or raise peer-dependency floors. This section is the
+migration policy and the upgrade path for consumers.
+
+### Migration policy
+
+- **Deprecation before removal.** A public API is marked `@deprecated` (with a
+  replacement in the JSDoc) for at least one minor release before it is removed
+  in the next major. Deprecated APIs keep working until the major that removes
+  them.
+- **Documented breaking changes.** Every major release ships a changelog entry
+  listing removed/renamed APIs, changed signatures, and new peer-dependency
+  requirements.
+- **Peer-dependency floors.** A major may raise the minimum
+  `@stellar/stellar-sdk` (and `react` for the hook package) version. Check the
+  release notes before upgrading.
+- **No silent behavior changes.** Changes to restore detection, fee estimation,
+  or confirmation semantics are called out explicitly in the changelog.
+
+### Upgrade steps
+
+1. **Read the changelog** for the target major and note every removed or renamed
+   API and any peer-dependency bumps.
+2. **Bump the peer dependencies first** — upgrade `@stellar/stellar-sdk` (and
+   `react` for the hook package) to the versions the new major requires, then
+   upgrade `@soroban-resurrect/sdk` and `@soroban-resurrect/react-hook`.
+3. **Fix deprecation warnings.** Run your build/tests with deprecation warnings
+   enabled and replace each deprecated call with its documented replacement
+   before moving to the next major.
+4. **Update changed signatures.** Adjust call sites for renamed options, changed
+   return shapes, or new required fields flagged in the changelog.
+5. **Re-run your test suite** against the new major, including the no-restore
+   path and the restore path, before shipping.
+
+### API changes between major versions
+
+| Area | Change | Migration |
+| --- | --- | --- |
+| Restore cost | `estimateRestoreCost` returns `RestoreCostEstimate` with stroop-string fees | Read `originalFee`/`restoreFee`/`totalFee` as strings; format for display |
+| Cancellation | `{ signal }` options object accepted across the SDK | Pass `signal` in the options object; omitting it is unchanged |
+| Batch restore | `submitBatchWithRestore(items, { signal })` uses one signal for the batch | Pass a single signal for the whole batch |
+
+Consult the [API Reference](/api/sdk) for the current stable surface of each
+method and type.
+
+### Deprecations and replacements
+
+Deprecated APIs are annotated with `@deprecated` in the type definitions and
+list their replacement in the JSDoc. When you see a deprecation warning:
+
+- Switch to the documented replacement immediately — deprecated APIs are
+  removed in the next major.
+- If no replacement is listed, open an issue so the migration path can be
+  documented before removal.
+
+### Compatibility notes
+
+- **Runtime.** Node.js 20+ and the browser targets listed under
+  [Requirements](#requirements) apply to all supported majors.
+- **Peer dependencies.** Keep `@stellar/stellar-sdk` and `react` within the
+  ranges declared by the installed major; mismatches surface as peer-dependency
+  warnings at install time.
+- **Rollback.** If a major breaks your integration, pin the previous major and
+  file an issue describing the regression before upgrading again.
 
 ## Next Steps
 

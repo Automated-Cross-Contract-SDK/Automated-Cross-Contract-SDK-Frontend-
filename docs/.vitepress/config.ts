@@ -35,6 +35,7 @@ export default defineConfig({
             { text: 'Restore Fees and Limits', link: '/guide/restore-fees' },
             { text: 'History Persistence', link: '/guide/history-persistence' },
             { text: 'Troubleshooting', link: '/guide/troubleshooting' },
+            { text: 'Upgrading Between Major Versions', link: '/guide/migration' },
             { text: 'Local Development', link: '/guide/local-development' },
             { text: 'Local Package Development', link: '/guide/local-package-development' },
           ],
