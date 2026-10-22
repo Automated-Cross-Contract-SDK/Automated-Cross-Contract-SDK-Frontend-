@@ -176,103 +176,76 @@ Add it as a dev dependency of the workspace you are testing:
 { "devDependencies": { "@soroban-resurrect/testing": "0.0.0" } }
 ```
 
+## Mutation testing for transaction-safety invariants
+
+Line coverage tells you a test *ran* a line; it does not tell you the test
+would *fail* if that line were subtly wrong. For the transaction and
+wallet-handling paths — where a silent change could submit an altered amount,
+the wrong destination, or an unsigned envelope — we run mutation testing with
+[Stryker](https://stryker-mutator.io/) scoped to those modules only.
+
+### Configuration
+
+Mutation testing is configured in `stryker.config.json` at the repo root. The
+interface is stable and documented here so maintainers can run it
+reproducibly:
+
+| Setting        | Value                                                                 |
+| -------------- | --------------------------------------------------------------------- |
+| `mutate`       | `src/transaction/**/*.ts`, `src/wallet/**/*.ts` (excluding `*.test.ts`) |
+| `testRunner`   | `vitest`                                                              |
+| `mutators`     | `ArithmeticOperator`, `ConditionalExpression`, `EqualityOperator`, `LogicalOperator`, `BlockStatement`, `StringLiteral` |
+| `thresholds`   | `high: 90`, `low: 80`, `break: 80`                                    |
+| `timeoutMS`    | `30000`                                                               |
+| `concurrency`  | `4`                                                                   |
+| `reporters`    | `clear-text`, `progress`, `html`, `json`                              |
+
+Only the transaction and wallet modules are mutated — the rest of the
+codebase is out of scope, keeping runs fast and focused on the invariants
+that matter for safety.
+
+### Running
+
+```bash
+npm run test:mutation
+```
+
+This runs Stryker against the configured targets using the existing Vitest
+suite. The run fails (non-zero exit) when the mutation score drops below the
+`break` threshold, so it can gate CI.
+
+### Interpreting surviving mutants
+
+A **surviving mutant** is a change to the source that no test caught. For the
+transaction-safety targets, treat every survivor as a potential gap:
+
+- **Altered amount / destination** — a survivor in amount or address handling
+  means a test does not assert the exact value submitted. Add an assertion on
+  the built envelope (amount, destination, memo) rather than only on success.
+- **Unsafe submission** — a survivor around signing or send guards means a
+  test does not prove an unsigned or unconfirmed transaction is rejected. Add
+  a negative test that asserts `sendTransaction` was *not* called.
+- **Boundary conditions** — survivors on comparisons (e.g. fee/ledger bounds)
+  usually mean an off-by-one boundary is untested. Add cases at the exact
+  boundary and one past it.
+
+Kill survivors by tightening assertions, not by adding `// Stryker disable`
+comments. Only disable a mutator for genuinely equivalent mutants, and add a
+comment explaining why.
+
+### Compatibility notes
+
+- Mutation testing is a dev-only tool; it adds no runtime dependency and does
+  not affect published packages.
+- The `break` threshold starts at the measured baseline. Raise it as survivors
+  are killed; do not lower it to make a run pass.
+- Stryker requires the Vitest suite to pass first — fix failing tests before
+  interpreting mutation results.
+
 ## Coverage gates
 
 The SDK's test command enforces explicit branch and line-coverage floors for three critical restore
 modules. The current floors reflect the measured baseline and prevent regressions while coverage
 grows:
 
-| Behavior                         | Module                                                   |
-| -------------------------------- | -------------------------------------------------------- |
-| Archived-key detection           | `packages/sdk/src/Archiver.ts` — 45% branches, 65% lines |
-| Restore transaction construction | `packages/sdk/src/Restorer.ts` — 35% branches, 35% lines |
-| Execution orchestration          | `packages/sdk/src/Executor.ts` — 40% branches, 50% lines |
-
-Run `npm run test -w packages/sdk -- --coverage` to generate the report and fail the command if a
-module-specific floor is missed. Add tests and raise the floors as the modules' coverage improves.
-
-### Walkthrough: archive detected → restore → resubmit
-
-```typescript
-import { describe, it, expect } from 'vitest'
-import { Keypair, Networks, Operation, TransactionBuilder } from '@stellar/stellar-sdk'
-import { SorobanResurrect } from '@soroban-resurrect/sdk'
-import { createMockRpcClient, fixtures, scenarios } from '@soroban-resurrect/testing'
-
-const signer = Keypair.random()
-const wallet = {
-  isConnected: async () => true,
-  getPublicKey: async () => signer.publicKey(),
-  signTransaction: async (xdr: string) => xdr,
-}
-
-function makeTx() {
-  return new TransactionBuilder(fixtures.account(signer.publicKey()), {
-    fee: '100',
-    networkPassphrase: Networks.TESTNET,
-  })
-    .addOperation(Operation.restoreFootprint({}))
-    .setTimeout(30)
-    .build()
-}
-
-describe('restore flow', () => {
-  it('detects, restores, confirms and resubmits', async () => {
-    // 1. Script the network: the first simulation reports an archived
-    //    footprint, the re-simulation after the restore succeeds.
-    const rpcClient = createMockRpcClient(scenarios.restore())
-
-    const sr = new SorobanResurrect({
-      rpcUrl: 'http://mock',
-      networkPassphrase: Networks.TESTNET,
-      rpcClient,
-      pollIntervalMs: 1,
-    })
-
-    // 2. Detect: the restore preamble surfaces the archived keys.
-    const archived = await sr.detectArchivedKeys(makeTx())
-    expect(archived.length).toBeGreaterThan(0)
-
-    // 3. Restore + resubmit in one call.
-    const result = await sr.submitWithRestore({ transaction: makeTx(), wallet })
-    expect(result).toBeDefined()
-
-    // 4. Assert the RPC choreography: restore tx sent and confirmed,
-    //    then the original re-simulated and resubmitted.
-    expect(rpcClient.calls.filter((c) => c === 'sendTransaction')).toHaveLength(2)
-    expect(rpcClient.calls).toContain('getTransaction')
-  })
-
-  it('surfaces a restore simulation error', async () => {
-    const rpcClient = createMockRpcClient(scenarios.restoreSimulationError())
-    const sr = new SorobanResurrect({
-      rpcUrl: 'http://mock',
-      networkPassphrase: Networks.TESTNET,
-      rpcClient,
-    })
-    await expect(sr.submitWithRestore({ transaction: makeTx(), wallet })).rejects.toThrow()
-  })
-
-  it('reports tx_bad_seq on resubmission', async () => {
-    const rpcClient = createMockRpcClient(scenarios.badSequence())
-    const sr = new SorobanResurrect({
-      rpcUrl: 'http://mock',
-      networkPassphrase: Networks.TESTNET,
-      rpcClient,
-      pollIntervalMs: 1,
-    })
-    await expect(sr.submitWithRestore({ transaction: makeTx(), wallet })).rejects.toThrow()
-  })
-})
-```
-
-Omitting `serverURL` from the script (the default) makes confirmation fall
-back to polling, so no SSE server is needed. Pass `serverURL` only when you
-also stub `EventSource`.
-
-### Migrating an existing ad-hoc stub
-
-Replace the hand-written object with `createMockRpcClient({ ... })`, moving
-each `mockResolvedValueOnce` chain into the matching `simulate` / `send` /
-`getTransaction` array. The response objects are the same shapes, so test
-behaviour does not change.
+| Behavior                         | Module                            
