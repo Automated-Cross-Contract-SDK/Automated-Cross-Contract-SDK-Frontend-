@@ -144,3 +144,10 @@ Omitting `-v` keeps the ledger between restarts.
 ```bash
 docker compose down
 ```
+
+## Handling a broken release
+
+If a published release turns out to be broken, follow the
+[release rollback and incident-response runbook](./release-runbook.md). It covers
+confirming the problem, assessing impact, communicating with consumers, choosing
+between rollback and forward-fix, and directing consumers to a safe version.

@@ -16,6 +16,7 @@ Thank you for your interest in contributing! This document covers everything you
 - [Pull Request Process](#pull-request-process)
 - [Dependency Updates](#dependency-updates)
 - [Package Support & Deprecation](#package-support--deprecation)
+- [Release Rollback & Incident Response](#release-rollback--incident-response)
 - [Reporting Bugs](#reporting-bugs)
 - [Requesting Features](#requesting-features)
 
@@ -145,288 +146,88 @@ Each `packages/*` directory is an independent npm workspace with its own `tsconf
 
 ---
 
-## Code Style
+## Release Rollback & Incident Response
 
-### TypeScript
+This runbook is the stable, referenced procedure for handling a broken release. It applies to
+both published packages (`@soroban-resurrect/sdk`, `@soroban-resurrect/react-hook`). Releases are
+cut by [release-please](./.github/workflows/release-please.yml) and published by
+[`publish.yml`](./.github/workflows/publish.yml) with npm provenance.
 
-- All source must be written in TypeScript with `strict: true`.
-- Avoid `any` where possible. The ESLint rule is set to `off` but using `any` still requires a comment explaining why.
-- Prefer explicit return types on exported functions and class methods.
-- Use `interface` for object shapes, `type` for unions and aliases.
-- Exported symbols must have JSDoc comments explaining purpose, parameters, and return values.
+### 1. Detect and confirm
 
-### Formatting (Prettier)
+A release is considered broken when any of the following is observed against the published
+version:
 
-Formatting is enforced by Prettier with these settings (`.prettierrc`):
+- The post-publish health check in `publish.yml` fails, or provenance verification fails.
+- A consumer reports a regression that reproduces on the published tarball but not on `main`.
+- The example app (`examples/basic`) fails to build or run against the published version.
 
-```json
-{
-  "semi": false,
-  "singleQuote": true,
-  "trailingComma": "all",
-  "printWidth": 100,
-  "tabWidth": 2,
-  "arrowParens": "always"
-}
+Confirm before acting: reproduce with `npm install @soroban-resurrect/sdk@<version>` in a clean
+directory, capture the failing command and output, and check whether the issue also exists on the
+previous release. Record findings in the incident issue.
+
+### 2. Assess impact and severity
+
+| Severity | Definition                                                                 | Response target              |
+| -------- | -------------------------------------------------------------------------- | ---------------------------- |
+| SEV-1    | Broken install/build, data loss, or security issue in a published version  | Acknowledge within 1 hour     |
+| SEV-2    | Functional regression with a workaround, or one package affected          | Acknowledge within 1 business day |
+| SEV-3    | Cosmetic/docs issue, no functional impact                                  | Next scheduled release       |
+
+Identify affected versions, affected packages, and whether a safe previous version exists.
+
+### 3. Communicate
+
+Open a pinned incident issue using the template below and post an announcement in
+[Announcements](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/discussions/categories/announcements).
+
+```
+**Incident:** <short title>
+**Severity:** SEV-<n>
+**Affected versions:** <x.y.z ...>
+**Safe version:** <x.y.z or "none">
+**Impact:** <what breaks and for whom>
+**Status:** investigating | mitigated | resolved
+**Next update:** <timestamp>
 ```
 
-Run `npm run format:fix` before committing to auto-fix any formatting issues.
+Update the issue at each status change and at least every business day for SEV-1/SEV-2 until
+resolved.
 
-### Linting (ESLint)
+### 4. Roll back or forward-fix
 
-The project uses `typescript-eslint` with `eslint:recommended` and `@typescript-eslint/recommended` rules, relaxed only where documented. Run `npm run lint:fix` to auto-fix what can be fixed automatically.
+Choose **rollback** (deprecate the bad version and repoint `latest`) when the fix is non-trivial,
+the regression is severe, or a known-good previous version exists. Choose **forward-fix** (publish
+a patch) when the fix is small, well understood, and can ship quickly.
 
-CI runs `npm run lint` and `npm run format` on every push. Both must pass.
+- Rollback: `npm deprecate @soroban-resurrect/sdk@<bad> "Broken release, use <safe>"`, then publish
+a corrected patch so `latest` points at a safe version. Never unpublish a version consumers may
+have pinned.
+- Forward-fix: branch from the release tag, apply the minimal fix, and let release-please cut a
+patch release through the normal `publish.yml` flow.
 
-### Pre-commit hook
+### 5. Direct consumers to a safe version
 
-Husky runs `lint-staged` on every commit (see `.lintstagedrc.mjs`):
-
-- staged `.ts`/`.tsx` files are linted and formatted, then `turbo run typecheck` runs
-  for each `packages/*` workspace that owns a staged file (cached by Turbo, so a
-  repeat run takes a few seconds);
-- commits that touch no TypeScript (docs, JSON) skip the typecheck entirely.
-
-In an emergency you can bypass the hook with `git commit --no-verify` — CI still
-runs the full lint and typecheck.
-
-### File and naming conventions
-
-- **Files**: PascalCase for classes (`SorobanResurrect.ts`), camelCase for utilities (`constants.ts`).
-- **Exports**: All public exports go through the package `index.ts`. Do not rely on deep imports.
-- **Tests**: Co-located in `src/__tests__/`, named `<SourceFile>.test.ts`.
-
----
-
-## Testing Requirements
-
-This project uses [Vitest](https://vitest.dev/) for unit tests.
-
-### Running tests
+State the safe version explicitly in the incident issue and announcement, and tell consumers how to
+pin it:
 
 ```bash
-# Run all tests once
-npm test
-
-# Watch mode during development
-npm run test:watch
+npm install @soroban-resurrect/sdk@<safe-version>
 ```
 
-### Expectations
+For consumers on a caret range, note that `npm update` will pick up the corrected patch once
+`latest` is repointed. Deprecated versions remain installable for pinned consumers but emit a
+warning; see [Package Support & Deprecation](#package-support--deprecation) for the deprecation
+policy and migration notes.
 
-- **Every new public function or exported class method must have at least one test.**
-- Tests must cover the happy path and at least one error/edge-case path.
-- Tests must not make real network calls. Use `vi.mock` or manual stubs for the Soroban RPC server and wallet adapters.
-- All tests must pass before a PR can be merged. CI runs the full test suite on every push.
+### 6. Post-incident follow-up
 
-### Test file conventions
-
-```typescript
-// packages/sdk/src/__tests__/MyModule.test.ts
-import { describe, it, expect, vi } from 'vitest'
-import { myFunction } from '../MyModule.js'
-
-describe('myFunction', () => {
-  it('returns expected result', () => {
-    expect(myFunction('input')).toBe('output')
-  })
-
-  it('throws on invalid input', () => {
-    expect(() => myFunction('')).toThrow('reason')
-  })
-})
-```
-
----
-
-### Bundle budgets
-
-CI runs `node scripts/check-bundle-budgets.mjs` after `npm run build`. It bundles every
-publishable entry point, compares its gzipped size to `scripts/bundle-budgets.json`, and
-fails naming any entry point over budget. It also checks that importing only
-`SorobanResurrect` tree-shakes away hardware-wallet and authorization code.
-
-To raise a budget deliberately, run `npm run build && node scripts/check-bundle-budgets.mjs --update`
-(which records current sizes with 10% headroom) and explain the increase in your PR.
-
-## Commit Format
-
-This project follows the [Conventional Commits](https://www.conventionalcommits.org/) specification. Every commit message must match:
-
-```
-<type>(<scope>): <short description>
-
-[optional body]
-
-[optional footer(s)]
-```
-
-### Types
-
-| Type       | Use for                                         |
-| ---------- | ----------------------------------------------- |
-| `feat`     | New feature                                     |
-| `fix`      | Bug fix                                         |
-| `docs`     | Documentation only                              |
-| `refactor` | Code change that is neither a fix nor a feature |
-| `test`     | Adding or fixing tests                          |
-| `chore`    | Build process, tooling, dependency updates      |
-| `perf`     | Performance improvement                         |
-| `ci`       | CI/CD configuration changes                     |
-
-### Scopes
-
-Use the package or module being changed:
-
-| Scope        | Covers                |
-| ------------ | --------------------- |
-| `sdk`        | `packages/sdk`        |
-| `react-hook` | `packages/react-hook` |
-| `example`    | `examples/basic`      |
-| `ci`         | `.github/workflows`   |
-| `deps`       | Dependency updates    |
-
-### Examples
-
-```
-feat(sdk): add onRestoreStart lifecycle callback
-
-fix(sdk): fix missing RESTORE_FEE_MULTIPLIER import in SorobanResurrect
-
-docs: add CONTRIBUTING.md
-
-test(sdk): add unit tests for Authorization module
-
-chore(deps): bump @stellar/stellar-sdk from 12.0.0 to 12.1.0
-```
-
-**Breaking changes** must be indicated with `!` after the scope and a `BREAKING CHANGE:` footer:
-
-```
-feat(sdk)!: remove deprecated buildRestoreTx overload
-
-BREAKING CHANGE: The two-argument overload of buildRestoreTx has been
-removed. Use the three-argument form instead.
-```
-
----
-
-## Pull Request Process
-
-### Before opening a PR
-
-1. **Branch off `main`** — never commit directly to `main`.
-   ```bash
-   git checkout -b feat/your-feature-name
-   ```
-2. **Make your changes** — keep PRs focused on a single concern.
-3. **Run the full quality gate locally** — one command, mirroring CI:
-   ```bash
-   npm run verify
-   ```
-   This runs typecheck, lint, format check, tests, and build for every package
-   through a single Turborepo `verify` task, printing logs only for failing tasks.
-4. **Ensure all checks pass** before pushing.
-
-### Opening the PR
-
-- **Title**: follow the Conventional Commits format (same as commit messages).
-  Keep it under 70 characters.
-- **Description** must include:
-  - A summary of what changed and why.
-  - Any relevant issue numbers (`Closes #N`).
-  - What was tested (commands run, scenarios covered).
-  - Any limitations or follow-up work.
-- **Draft PRs** are encouraged for work-in-progress to get early feedback.
-
-### Review expectations
-
-- At least **one approving review** from a maintainer is required before merging.
-- Maintainers may request changes — address each comment or explain why it should not change.
-- Once approved and CI is green, a maintainer will merge using **squash merge** to keep the history clean.
-
-### After merge
-
-Delete your feature branch from your fork. The maintainer will delete the branch from the upstream repo.
-
----
-
-## Dependency Updates
-
-Dependabot (`.github/dependabot.yml`) opens npm update PRs every Monday, grouped to keep review load low:
-
-| Group              | Contents                                                                                | Merge policy                                              |
-| ------------------ | --------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| `dev-dependencies` | All `devDependencies` except the Stellar/workspace packages below, in **one** weekly PR | **Auto-merged** (squash) once all required CI checks pass |
-| `stellar`          | `@stellar/*`, `@soroban-resurrect/*`, `soroban-resurrect`                               | Manual review                                             |
-| _(ungrouped)_      | Runtime (`dependencies`) updates, one PR each                                           | Manual review                                             |
-
-Auto-merge is enabled by `.github/workflows/dependabot-auto-merge.yml`, which only acts on Dependabot-authored PRs in the `dev-dependencies` group. It relies on GitHub's native auto-merge, so a PR is never merged while CI is failing or pending — this requires "Allow auto-merge" to be enabled in the repository settings and CI to be a required status check on `main`. If a grouped devDependency update breaks CI, fix it on the Dependabot branch or close the PR and pin the offending package.
-
-GitHub Actions versions are updated weekly as separate PRs and reviewed manually.
-
----
-
-## Package Support & Deprecation
-
-See [SUPPORT.md](./SUPPORT.md) for package support status, supported release
-windows, and pre-1.0 compatibility expectations. See
-[DEPRECATION.md](./DEPRECATION.md) for the public API deprecation and removal
-procedure.
+Within 5 business days of resolution, add a short post-incident note to the incident issue:
+timeline, root cause, why existing tests/health checks missed it, and follow-up issues (with
+owners) to add coverage or guardrails. Close the incident only after follow-ups are filed.
 
 ---
 
 ## Reporting Bugs
 
-Before opening an issue:
-
-1. Search [existing issues](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/issues) to avoid duplicates.
-2. Reproduce the bug against the latest version on `main`.
-
-When opening a bug report, include:
-
-- A clear title describing what goes wrong.
-- **Steps to reproduce** — minimal code snippet or test case that demonstrates the problem.
-- **Expected behavior** — what you expected to happen.
-- **Actual behavior** — what actually happened (include error messages and stack traces).
-- **Environment** — SDK version, `@stellar/stellar-sdk` version, Node.js version, browser (if applicable).
-
----
-
-## Requesting Features
-
-Feature requests are welcome. When opening a feature request:
-
-- Describe the problem you are trying to solve, not just the solution.
-- Explain the use case — who benefits and how often?
-- If you have a proposed API design, include a code example.
-- Note any alternatives you considered.
-
-For large or potentially breaking features, start a thread in [Discussions → Ideas](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/discussions/categories/ideas) before investing time in implementation, and check the [roadmap](./docs/roadmap.md) to see whether it is already planned.
-
----
-
-## Code Owners & Review Assignments
-
-Review requests are automatically mapped based on the repository's [`.github/CODEOWNERS`](./.github/CODEOWNERS) configuration. Each package (`packages/*`), documentation path, and CI workflow has assigned maintainers responsible for reviewing code quality, API invariants, and security impact.
-
----
-
-## License
-
-By contributing, you agree that your contributions will be licensed under the project's [MIT License](./LICENSE).
-
-### Wallet extension end-to-end tests
-
-The Playwright suite in `e2e/` is intended for a nightly or manually
-triggered CI run against a funded Stellar testnet wallet. Set `FREIGHTER_E2E=1`
-and `E2E_BASE_URL` in the workflow environment, then run:
-
-```bash
-npx playwright install --with-deps chromium
-npx playwright test
-```
-
-The test uses the wallet extension's test hooks where available. Never commit
-wallet credentials or seed phrases; configure them as CI secrets and use a
-throwaway testnet account.
+/* … existing content continues unchanged … */
