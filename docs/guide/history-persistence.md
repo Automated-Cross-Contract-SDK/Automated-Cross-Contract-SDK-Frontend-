@@ -103,3 +103,83 @@ const serializer = {
 
 new SorobanResurrect({ rpcUrl, persistHistory: { storage, serializer } })
 ```
+
+## Example: token transfer with archived balance recovery
+
+This walkthrough shows the user-visible flow for a token balance that has been
+archived on-chain: the balance reads as unavailable, the SDK restores the
+archived entry, and the transfer then succeeds with the recovered balance.
+
+### Before restoration
+
+When the balance entry is archived, reads return no balance and a transfer
+would fail. Surface this state to the user instead of showing a stale amount:
+
+```ts
+const balance = await token.balanceOf(account)
+if (balance === null) {
+  // Archived: the ledger entry is no longer live.
+  showArchivedState(account) // e.g. "Balance unavailable — restore to continue"
+}
+```
+
+### Restore and transfer
+
+Call `restore` for the archived keys, wait for `sdk.ready`, then re-read the
+balance and submit the transfer. The same `persistHistory` configuration from
+above records the restore and transfer so the flow survives reloads.
+
+```ts
+const sdk = new SorobanResurrect({
+  rpcUrl,
+  persistHistory: { storage, mode: 'minimal' },
+})
+await sdk.ready
+
+// 1. Restore the archived balance entry.
+const restore = await sdk.restore({ contractId: tokenId, keys: [balanceKey(account)] })
+if (restore.status !== 'success') {
+  showRestoreFailure(restore) // e.g. insufficient fee, footprint mismatch
+  return
+}
+
+// 2. Re-read the now-live balance.
+const recovered = await token.balanceOf(account)
+if (recovered === null) {
+  showRestoreFailure(restore) // restore reported success but entry still missing
+  return
+}
+
+// 3. Transfer using the recovered balance.
+const transfer = await token.transfer({ from: account, to: recipient, amount })
+showTransferResult(transfer)
+```
+
+### After restoration
+
+The balance is live again and the transfer completes. The history entry written
+by the SDK lets you show the recovery in the UI:
+
+```ts
+const [entry] = sdk.getHistory()
+// entry.status === 'success', entry.transactionHash is the transfer hash
+```
+
+### Boundary and failure cases
+
+- **Restore fails** (`restore.status !== 'success'`): keep the archived state
+  visible and let the user retry; do not attempt the transfer.
+- **Balance still missing after restore**: treat as a failure even if the
+  restore call reported success, and surface it to the user.
+- **Transfer fails after a successful restore**: the balance is live, so the
+  user can retry the transfer without restoring again.
+- **Reload mid-flow**: with `persistHistory` configured, `sdk.getHistory()`
+  after `sdk.ready` shows the restore/transfer attempts so the UI can resume.
+
+### Compatibility and migration
+
+This example uses the same `HistoryStorage` interface and `persistHistory`
+options documented above; no new configuration is required. If you previously
+stored history with `mode: 'full'`, switching to `'minimal'` is safe for this
+example — read prior records with `parseMinimalHistory()` and keep the existing
+`storage` adapter unchanged.

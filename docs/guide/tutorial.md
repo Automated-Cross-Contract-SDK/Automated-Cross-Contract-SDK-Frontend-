@@ -202,23 +202,67 @@ const result = await sr.submitWithRestore({
   transaction: tx,
   wallet,
   restoreKeys: archivedKeys,
-  onRestoreFailed: (error) => {
-    // e.g. "signature collection failed: signer G... refused"
-    console.error('Restore aborted:', error)
-  },
 })
+
+if (!result.success) {
+  // e.g. 'signature_collection_failed' — no restore was submitted
+  console.error(result.error)
+}
 ```
 
-Because the threshold was never reached, no restore transaction is submitted and the original transaction is left untouched — the caller can retry with a different set of signers. If you collect signatures yourself, inspect the `SignatureCollectionResult` before submitting:
+## 10. Token transfer with archived balance recovery
+
+A common real-world case: a user holds a token balance in a contract whose balance entry has been archived (e.g. after a long period of inactivity). Before restoration the balance is unavailable; after restoration the transfer succeeds and the balance is visible again.
+
+### User-visible flow
+
+| Stage | What the user sees |
+| --- | --- |
+| Before | Balance shows as **unavailable (archived)** — the transfer cannot proceed |
+| Restore needed | Prompt: "Your balance is archived. Confirm the restore transaction to continue." |
+| Restoring | Restore transaction submitted and confirmed |
+| After | Balance is **recovered** and the transfer completes normally |
+
+### Example
 
 ```typescript
-const collection = await wallet.collectSignatures(restoreXdr)
+import { SorobanResurrect, type WalletAdapter } from '@soroban-resurrect/sdk'
 
-if (!collection.satisfied) {
-  // collection.signatures holds the ones you did get; collection.missing
-  // lists the signers that have not signed yet.
-  throw new Error(`Need ${collection.missing.length} more signature(s)`)
+const sr = new SorobanResurrect({ rpcUrl: 'https://soroban-testnet.stellar.org' })
+
+// 1. Build the token transfer transaction (contract call: transfer(from, to, amount)).
+const tx = await buildTokenTransfer({ from, to, amount })
+
+// 2. Check whether the sender's balance entry is archived before submitting.
+const needsRestore = await sr.needsRestore(tx)
+if (needsRestore) {
+  showBalanceUnavailable() // user-visible: balance is archived
 }
 
-await sr.submitRestore(collection.transaction)
+// 3. Submit; the SDK restores the archived balance entry, then submits the transfer.
+const result = await sr.submitWithRestore({
+  transaction: tx,
+  wallet,
+  onRestoreNeeded: () => showRestorePrompt(),
+  onRestoreConfirmed: () => showRestoring(),
+  onOriginalSubmitted: (txHash) => showTransferComplete(txHash),
+  onRestoreFailed: (error) => showError(error),
+})
+
+// 4. After restoration the balance is readable again.
+const balance = await readTokenBalance({ account: from })
+showBalance(balance) // user-visible: balance recovered
 ```
+
+### Boundary and failure cases
+
+- **No archived balance** — `needsRestore` returns `false`; only the transfer is submitted and the balance is unchanged in flow.
+- **Restore succeeds, transfer fails** — the balance entry is restored but the transfer (e.g. insufficient funds) still fails; surface the transfer error separately from the restore error.
+- **Restore fails** — the original transfer is never submitted; the balance remains archived and the user can retry.
+- **Insufficient balance after restore** — restoration succeeds but the transfer is rejected by the contract; report it as a transfer failure, not a restore failure.
+
+### Compatibility and migration notes
+
+- This example uses the same `submitWithRestore` interface as sections 2 and 9; no new API surface is required.
+- If you previously handled archived balances by manually building restore transactions, migrate to `submitWithRestore` (or `needsRestore` + `detectArchivedKeys`) so the restore and transfer are sequenced by the SDK.
+- `needsRestore` is read-only and safe to call on page load to decide whether to show the "balance unavailable" state.
