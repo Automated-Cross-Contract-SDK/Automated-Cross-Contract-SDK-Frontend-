@@ -36,6 +36,7 @@ export default defineConfig({
             { text: 'History Persistence', link: '/guide/history-persistence' },
             { text: 'Local Development', link: '/guide/local-development' },
             { text: 'Local Package Development', link: '/guide/local-package-development' },
+            { text: 'Production Deployment', link: '/guide/production-deployment' },
           ],
         },
       ],
