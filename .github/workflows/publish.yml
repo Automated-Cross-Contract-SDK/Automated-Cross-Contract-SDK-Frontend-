@@ -1,10 +1,18 @@
- 
+
 name: Publish
 
 on:
   push:
     tags:
       - "v*"
+
+# Serialize release runs per tag ref. Overlapping triggers for the same tag
+# queue behind the in-flight run instead of racing the publish/provenance
+# steps. `cancel-in-progress: false` ensures a run that is mid-publish is
+# never aborted, which would otherwise leave a partial publish behind.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -101,10 +109,37 @@ jobs:
       - run: npm run build:sdk
       - run: npm run build:hook
 
-      - name: Publish all packages atomically with provenance
+      - name: Skip already-published versions (duplicate-run protection)
+        id: dupcheck
         run: |
           set -euo pipefail
           packages=(packages/sdk packages/react-hook packages/vue-hook packages/svelte-hook)
+          pending=()
+          for pkg in "${packages[@]}"; do
+            name=$(node -p "require('./$pkg/package.json').name")
+            version=$(node -p "require('./$pkg/package.json').version")
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "$name@$version already published; skipping."
+            else
+              pending+=("$pkg")
+            fi
+          done
+          if [ ${#pending[@]} -eq 0 ]; then
+            echo "All package versions already published; nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Pending packages: ${pending[*]}"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            printf '%s\n' "${pending[@]}" > "$RUNNER_TEMP/pending-packages.txt"
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish all packages atomically with provenance
+        if: steps.dupcheck.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          mapfile -t packages < "$RUNNER_TEMP/pending-packages.txt"
           published=()
           failed=""
           for pkg in "${packages[@]}"; do
@@ -136,6 +171,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Verify provenance attestations
+        if: steps.dupcheck.outputs.skip != 'true'
         run: |
           set -euo pipefail
           packages=(packages/sdk packages/react-hook packages/vue-hook packages/svelte-hook)

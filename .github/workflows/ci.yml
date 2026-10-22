@@ -9,6 +9,13 @@ on:
     - cron: '0 3 * * *'
   workflow_dispatch:
 
+# Serialize overlapping CI runs for the same ref so release/provenance steps
+# never execute in conflicting parallel executions. Newer triggers cancel
+# in-flight runs on the same ref (duplicate-run protection).
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   npm-audit:
     name: npm-audit
