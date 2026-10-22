@@ -16,6 +16,13 @@
   "engines": {
     "node": ">=20"
   },
+  "supportedVersions": {
+    "node": ">=20",
+    "npm": ">=10",
+    "peerDependencies": {
+      "@stellar/stellar-sdk": ">=12 <14"
+    }
+  },
   "packageManager": "npm@10.9.8",
   "type": "module",
   "workspaces": [
@@ -49,8 +56,9 @@
     "prepare": "husky",
     "verify:pins": "node scripts/verify-workspace-pins.mjs",
     "verify:packaging": "node scripts/verify-packaging.mjs",
+    "verify:versions": "node scripts/verify-supported-versions.mjs",
     "publish:packages": "node scripts/publish-packages.mjs --provenance",
-    "release": "npm run verify:pins && npm run build && npm run verify:packaging && node scripts/publish-packages.mjs --provenance",
+    "release": "npm run verify:pins && npm run verify:versions && npm run build && npm run verify:packaging && node scripts/publish-packages.mjs --provenance",
     "release:recover": "node scripts/publish-packages.mjs --provenance --resume"
   },
   "devDependencies": {

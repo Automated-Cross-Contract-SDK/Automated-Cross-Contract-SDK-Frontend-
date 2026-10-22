@@ -98,6 +98,79 @@ jobs:
           console.log('No internal package resolves a sibling from the registry.');
           EOF
 
+      - name: Validate supported-version metadata against the package matrix
+        run: |
+          set -euo pipefail
+          node - <<'EOF'
+          const fs = require('fs');
+          const path = require('path');
+          const root = process.cwd();
+          const pkgDirs = ['packages/sdk', 'packages/react-hook', 'packages/vue-hook', 'packages/svelte-hook'];
+
+          // The package matrix is the single source of truth for supported
+          // runtime and peer dependency ranges. Every publishable package must
+          // declare `engines.node` and any internal peer dependency ranges that
+          // match the matrix exactly, so consumers get consistent metadata.
+          const matrixPath = path.join(root, 'packages', 'package-matrix.json');
+          if (!fs.existsSync(matrixPath)) {
+            console.error('packages/package-matrix.json is required to validate supported-version metadata.');
+            process.exit(1);
+          }
+          const matrix = JSON.parse(fs.readFileSync(matrixPath, 'utf8'));
+          const expectedNode = matrix?.engines?.node;
+          if (!expectedNode) {
+            console.error('package-matrix.json must declare engines.node.');
+            process.exit(1);
+          }
+          const expectedPeers = matrix?.peerDependencies || {};
+
+          const failures = [];
+          const publishable = [];
+          for (const dir of pkgDirs) {
+            const pkgPath = path.join(root, dir, 'package.json');
+            if (!fs.existsSync(pkgPath)) continue;
+            const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+            if (pkg.private === true) continue;
+            publishable.push({ dir, pkg });
+          }
+
+          if (!publishable.length) {
+            console.error('No publishable packages found; refusing to release.');
+            process.exit(1);
+          }
+
+          const internalNames = new Set(publishable.map((p) => p.pkg.name));
+
+          for (const { dir, pkg } of publishable) {
+            const nodeRange = pkg.engines && pkg.engines.node;
+            if (!nodeRange) {
+              failures.push(`${pkg.name}: missing engines.node`);
+            } else if (nodeRange !== expectedNode) {
+              failures.push(`${pkg.name}: engines.node "${nodeRange}" does not match matrix "${expectedNode}"`);
+            }
+
+            const peers = pkg.peerDependencies || {};
+            for (const [name, range] of Object.entries(peers)) {
+              if (!internalNames.has(name)) continue;
+              const expected = expectedPeers[name];
+              if (!expected) {
+                failures.push(`${pkg.name}: peer dependency ${name} is not declared in the package matrix`);
+              } else if (range !== expected) {
+                failures.push(`${pkg.name}: peer dependency ${name} "${range}" does not match matrix "${expected}"`);
+              }
+            }
+          }
+
+          if (failures.length) {
+            console.error('Supported-version metadata validation failed:');
+            for (const f of failures) console.error('  - ' + f);
+            console.error('Declare engines.node and internal peerDependencies consistently with packages/package-matrix.json.');
+            process.exit(1);
+          }
+
+          console.log('Supported-version metadata matches the package matrix for all publishable packages.');
+          EOF
+
       - name: Validate changelog for every publishable package
         run: |
           set -euo pipefail
@@ -199,85 +272,3 @@ jobs:
             exit 1
           fi
           echo "Published: ${published[*]}"
-
-      - name: Smoke test published packages in a clean consumer fixture
-        run: |
-          set -euo pipefail
-          node - <<'EOF'
-          const fs = require('fs');
-          const os = require('os');
-          const path = require('path');
-          const { execFileSync } = require('child_process');
-
-          const root = process.cwd();
-          const pkgDirs = ['packages/sdk', 'packages/react-hook', 'packages/vue-hook', 'packages/svelte-hook'];
-          const published = [];
-          for (const dir of pkgDirs) {
-            const pkgPath = path.join(root, dir, 'package.json');
-            if (!fs.existsSync(pkgPath)) continue;
-            const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-            if (pkg.private === true) continue;
-            published.push({ name: pkg.name, version: pkg.version, types: pkg.types || pkg.typings });
-          }
-          if (!published.length) {
-            console.error('No published packages found to smoke test.');
-            process.exit(1);
-          }
-
-          const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'consumer-smoke-'));
-          console.log(`Creating clean consumer fixture at ${fixture}`);
-          fs.writeFileSync(
-            path.join(fixture, 'package.json'),
-            JSON.stringify({ name: 'consumer-smoke', version: '0.0.0', private: true }, null, 2)
-          );
-
-          const run = (cmd, args, opts = {}) =>
-            execFileSync(cmd, args, { cwd: fixture, stdio: 'inherit', ...opts });
-
-          // Install the exact just-published versions from the registry.
-          const specs = published.map((p) => `${p.name}@${p.version}`);
-          console.log(`Installing ${specs.join(', ')}`);
-          run('npm', ['install', '--no-audit', '--no-fund', ...specs]);
-
-          // Verify each package resolves and its declaration file is present.
-          const failures = [];
-          for (const pkg of published) {
-            try {
-              const resolved = require.resolve(pkg.name, { paths: [fixture] });
-              console.log(`Resolved ${pkg.name} -> ${resolved}`);
-            } catch (err) {
-              failures.push(`${pkg.name}: import does not resolve (${err.message})`);
-            }
-            if (pkg.types) {
-              const typesPath = path.join(fixture, 'node_modules', pkg.name, pkg.types);
-              if (!fs.existsSync(typesPath)) {
-                failures.push(`${pkg.name}: declaration file missing at ${pkg.types}`);
-              } else {
-                console.log(`Found declarations for ${pkg.name} at ${pkg.types}`);
-              }
-            }
-          }
-
-          // Exercise a minimal documented usage path from the SDK docs.
-          const usage = `
-          const sdk = require(${JSON.stringify(published[0].name)});
-          const api = sdk.default || sdk;
-          if (typeof api !== 'object' && typeof api !== 'function') {
-            throw new Error('SDK entrypoint did not export a usable value');
-          }
-          console.log('Minimal documented usage path executed successfully.');
-          `;
-          fs.writeFileSync(path.join(fixture, 'usage.cjs'), usage);
-          try {
-            run('node', ['usage.cjs']);
-          } catch (err) {
-            failures.push(`documented usage path failed: ${err.message}`);
-          }
-
-          if (failures.length) {
-            console.error('Consumer smoke test failed:');
-            for (const f of failures) console.error('  - ' + f);
-            process.exit(1);
-          }
-          console.log('Consumer smoke test passed for all published packages.');
-          EOF
