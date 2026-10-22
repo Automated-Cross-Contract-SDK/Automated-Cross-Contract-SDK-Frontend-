@@ -74,6 +74,107 @@ if (result.success) {
 }
 ```
 
+## Quick Start (Plain JavaScript)
+
+No framework required — this example runs directly in the browser. It connects
+a wallet, builds a transaction, and demonstrates both the restore and
+no-restore paths. See [`examples/plain-js`](https://github.com/soroban-resurrect/soroban-resurrect/tree/main/examples/plain-js)
+for the full runnable project.
+
+```html
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Soroban-Resurrect — Plain JS</title>
+  </head>
+  <body>
+    <button id="connect">Connect wallet</button>
+    <button id="submit" disabled>Submit withdraw</button>
+    <pre id="log"></pre>
+
+    <script type="module">
+      import { SorobanResurrect } from '@soroban-resurrect/sdk'
+      import {
+        TransactionBuilder,
+        Account,
+        Operation,
+        Networks,
+        nativeToScVal,
+      } from '@stellar/stellar-sdk'
+
+      const log = (msg) => {
+        document.getElementById('log').textContent += msg + '\n'
+      }
+
+      const sr = new SorobanResurrect({
+        rpcUrl: 'https://soroban-testnet.stellar.org',
+        networkPassphrase: Networks.TESTNET,
+      })
+
+      let publicKey = null
+
+      // WalletAdapter shape — swap in xBull or a custom signer as needed.
+      const wallet = {
+        isConnected: async () => publicKey !== null,
+        getPublicKey: async () => publicKey,
+        signTransaction: async (txXdr, opts) =>
+          window.freighter.signTransaction(txXdr, opts),
+      }
+
+      document.getElementById('connect').addEventListener('click', async () => {
+        const { publicKey: pk } = await window.freighter.requestAccess()
+        publicKey = pk
+        log('Connected: ' + publicKey)
+        document.getElementById('submit').disabled = false
+      })
+
+      document.getElementById('submit').addEventListener('click', async () => {
+        const account = await sr.rpc.getAccount(publicKey)
+        const tx = new TransactionBuilder(account, {
+          fee: '100',
+          networkPassphrase: Networks.TESTNET,
+        })
+          .addOperation(
+            Operation.invokeContractFunction({
+              contract: 'CCJZ5...K2Q',
+              function: 'withdraw',
+              args: [nativeToScVal(1000, { type: 'i128' })],
+            }),
+          )
+          .setTimeout(30)
+          .build()
+
+        // No-restore path: nothing archived, submit directly.
+        const needsRestore = await sr.needsRestore(tx)
+        if (!needsRestore) {
+          log('No archived entries — submitting directly.')
+        } else {
+          log('Archived entries detected — restore will run first.')
+        }
+
+        // Restore path: submitWithRestore handles both cases automatically.
+        const result = await sr.submitWithRestore({ transaction: tx, wallet })
+        if (result.success) {
+          log('Original tx hash: ' + result.originalTxHash)
+          if (result.restoreTxHash) {
+            log('Restore tx hash: ' + result.restoreTxHash)
+            log('Archived keys restored: ' + result.archivedKeysDetected)
+          }
+        } else {
+          log('Failed: ' + result.error)
+        }
+      })
+    </script>
+  </body>
+</html>
+```
+
+`needsRestore` and `submitWithRestore` are the stable entry points used here;
+both accept the same `WalletAdapter` shape shown above. When `needsRestore`
+returns `false` the SDK submits the original transaction unchanged, so the
+no-restore path is a strict subset of the restore path.
+
 ## Quick Start (React)
 
 ```tsx

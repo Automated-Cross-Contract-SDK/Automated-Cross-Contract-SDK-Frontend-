@@ -13,6 +13,60 @@ npm run dev:example
 
 This starts a local dev server demonstrating connecting a wallet, building a transaction, and calling `submitWithRestore`.
 
+## Minimal Plain JavaScript Example
+
+If you are not using a framework, [`examples/plain-js`](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/tree/main/examples/plain-js) is a dependency-light browser example: a single `index.html` plus `main.js` that loads the SDK from a CDN, connects a wallet, builds a transaction, and demonstrates both the restore and no-restore paths.
+
+```html
+<!-- index.html -->
+<button id="connect">Connect wallet</button>
+<button id="submit">Submit transaction</button>
+<pre id="log"></pre>
+<script type="module" src="./main.js"></script>
+```
+
+```javascript
+// main.js — no framework, no build step
+import { SorobanResurrect } from 'https://esm.sh/@soroban-resurrect/sdk'
+
+const log = (msg) => (document.getElementById('log').textContent += msg + '\n')
+
+const sr = new SorobanResurrect({ rpcUrl: 'https://soroban-testnet.stellar.org' })
+
+sr.onStateChange((info) => log(`[${info.state}] ${info.message}`))
+
+let wallet = null
+
+document.getElementById('connect').addEventListener('click', async () => {
+  wallet = await connectWallet() // your wallet adapter, e.g. Freighter
+  log(`Connected: ${wallet.publicKey}`)
+})
+
+document.getElementById('submit').addEventListener('click', async () => {
+  if (!wallet) return log('Connect a wallet first')
+
+  const tx = await buildTransaction(wallet.publicKey) // your contract call
+
+  // No-restore path: submit directly when nothing is archived.
+  if (!(await sr.needsRestore(tx))) {
+    const result = await sr.submitWithRestore({ transaction: tx, wallet })
+    return log(result.success ? `Submitted ${result.originalTxHash}` : `Failed: ${result.error}`)
+  }
+
+  // Restore path: archived entries are restored, then the original is submitted.
+  const result = await sr.submitWithRestore({
+    transaction: tx,
+    wallet,
+    onRestoreNeeded: (keys) => log(`Restoring ${keys.length} archived entries…`),
+    onRestoreFailed: (error) => log(`Restore failed: ${error.message}`),
+  })
+
+  log(result.success ? `Submitted ${result.originalTxHash}` : `Failed: ${result.error}`)
+})
+```
+
+Serve the folder with any static file server (for example `npx serve examples/plain-js`) and open it in a browser. The example targets the same SDK version as the rest of the docs; if you upgrade the SDK, update the CDN URL in `main.js` to match.
+
 ## Interactive Playground
 
 Want to try the flow without installing anything? The
