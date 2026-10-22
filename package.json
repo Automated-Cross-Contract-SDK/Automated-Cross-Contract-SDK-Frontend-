@@ -49,6 +49,7 @@
     "prepare": "husky",
     "verify:pins": "node scripts/verify-workspace-pins.mjs",
     "verify:packaging": "node scripts/verify-packaging.mjs",
+    "health": "node scripts/health-report.mjs",
     "publish:packages": "node scripts/publish-packages.mjs --provenance",
     "release": "npm run verify:pins && npm run build && npm run verify:packaging && node scripts/publish-packages.mjs --provenance",
     "release:recover": "node scripts/publish-packages.mjs --provenance --resume"
