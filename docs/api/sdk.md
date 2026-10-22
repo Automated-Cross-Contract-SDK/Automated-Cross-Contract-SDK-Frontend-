@@ -4,8 +4,9 @@ The `@handsoff/sdk` package exposes the wallet adapter layer used by every integ
 This page documents the `WalletAdapter` contract, the `createAdapter` factory, the
 `KnownWallet` / `SUPPORTED_WALLETS` registry, the capability flags, the hardware
 wallet setup for Ledger and Trezor, the N-of-M multisig restore flow, the
-transaction-free contract and account scanning APIs, and the `estimateRestoreCost`
-helper for pricing a restore before the user signs.
+transaction-free contract and account scanning APIs, the `estimateRestoreCost`
+helper for pricing a restore before the user signs, and the read-only
+`createRestoreMonitor` helper for server-side monitoring without wallet secrets.
 
 ## `WalletAdapter`
 
@@ -123,6 +124,76 @@ const adapter = createAdapter({
 npm install @trezor/connect-web
 ```
 
+## Server-side monitoring without wallet secrets
+
+Backends often need to observe TTL or restore status without ever touching user
+signing keys or submitting transactions on the user's behalf. `createRestoreMonitor`
+provides a documented, stable, read-only interface for exactly that: it performs
+read-only RPC calls (account scan + simulation) and never signs or submits.
+
+```ts
+import { createRestoreMonitor } from '@handsoff/sdk'
+
+const monitor = createRestoreMonitor({
+  connection, // read-only RPC connection
+  contractId: 'C...',
+})
+
+// Observe TTL / restore status for an account.
+const status = await monitor.checkStatus(accountPublicKey)
+console.log(status.restoreRequired, status.archivedKeys, status.ttlSeconds)
+
+// Poll on an interval; returns an unsubscribe function.
+const stop = monitor.watch(accountPublicKey, (next) => {
+  if (next.restoreRequired) enqueueRestorePrompt(accountPublicKey)
+}, { intervalMs: 30_000 })
+
+// Later:
+stop()
+```
+
+### `RestoreMonitor`
+
+```ts
+export interface RestoreMonitorOptions {
+  /** Read-only RPC connection. No signer is accepted. */
+  connection: ReadOnlyConnection
+  /** Contract whose archived entries should be observed. */
+  contractId: string
+}
+
+export interface RestoreStatus {
+  /** True when archived entries must be restored before use. */
+  restoreRequired: boolean
+  /** Archived ledger keys detected for the account. */
+  archivedKeys: string[]
+  /** Remaining TTL in seconds, or `null` when not applicable. */
+  ttlSeconds: number | null
+}
+
+export interface RestoreMonitor {
+  /** One-shot read-only status check. */
+  checkStatus(account: string): Promise<RestoreStatus>
+  /** Poll `checkStatus` and invoke `onStatus` on each result. */
+  watch(
+    account: string,
+    onStatus: (status: RestoreStatus) => void,
+    options?: { intervalMs?: number },
+  ): () => void
+}
+
+export function createRestoreMonitor(options: RestoreMonitorOptions): RestoreMonitor
+```
+
+`createRestoreMonitor` never accepts a wallet, signer, or secret key, and it never
+calls `signTransaction` or submits transactions. Failures are surfaced, not
+swallowed: a missing contract throws `ContractNotFoundError`, and RPC failures
+reject with the underlying error so callers can retry or alert. An account that is
+already restored reports `restoreRequired: false` with an empty `archivedKeys`.
+
+See the [`server-monitoring` example](https://github.com/handsoff/examples/tree/main/server-monitoring)
+for a runnable backend that wires this into a health endpoint.
+
 Submits a transaction with automatic archive restoration. If the simulation detects archived entries, a restore transaction is built, signed, submitted, and confirmed before the original transaction is rebuilt and submitted. State transitions are published to all registered listeners throughout. See [`SubmitWithRestoreOptions`](/api/types#submitwithrestoreoptions) for the full set of lifecycle callbacks.
 
 Call `sr.cancel()` to abort every active `submitWithRestore` workflow, or pass
@@ -182,195 +253,4 @@ The SDK validates approved bounds and returns `INVALID_REBUILD_TIME_BOUNDS` if
 they are not valid. `rebuildTimeBounds` remains available to set bounds before
 they expire; it does not bypass the explicit approval callback for an already
 expired original. Existing transactions without time bounds retain the prior
-30-second rebuild timeout.
-
-**Compatibility:** callers that previously handled an expired bound as a
-generic error can branch on the new `ORIGINAL_TRANSACTION_EXPIRED` error code
-and inspect `result.expiredTransaction`. The SDK never automatically extends
-an expired maximum time.
-
-### Typed workflow failures
-
-Failed `submitWithRestore` results retain their readable `error` and existing
-`errorCode`, and now include `failure` metadata with a lifecycle `stage`,
-stable `code`, `retryable` flag, and safe `nextStep` guidance:
-
-```ts
-if (!result.success && result.failure) {
-  console.error(result.error) // readable diagnostic
-  showRecoveryAction(result.failure.nextStep)
-  if (result.failure.retryable) {
-    offerRetryFor(result.failure.code)
-  }
-}
-```
-
-Decoded on-chain diagnostics remain available separately as
-`result.onchainError`; do not display raw diagnostic data as recovery guidance.
-
-#### `onStateChange(listener)`
-
-```typescript
-onStateChange(listener: (info: RestoreStateInfo) => void): () => void
-```
-
-#### Framework-independent subscription store
-
-`createSubscriptionStore<T>(initialSnapshot)` provides a small typed external
-store that does not depend on React, Vue, Svelte, or another UI framework. It is
-intended for framework bindings and adapters that need a stable snapshot,
-synchronous change notifications, and an unsubscribe handle.
-
-```typescript
-import { createSubscriptionStore } from '@soroban-resurrect/sdk'
-
-const store = createSubscriptionStore({ state: 'idle' })
-const unsubscribe = store.subscribe((snapshot) => {
-  console.log(snapshot.state)
-})
-
-store.setSnapshot({ state: 'success' })
-console.log(store.getSnapshot())
-unsubscribe()
-```
-
-Subscribers are called only when the snapshot changes according to `Object.is`.
-The returned `unsubscribe` function is safe to call more than once.
-
-#### Cancelling workflows and disposing an instance
-
-Pass an `AbortSignal` to `submitWithRestore` to cancel the local workflow:
-
-```typescript
-const controller = new AbortController()
-const pending = resurrect.submitWithRestore({ transaction, wallet, signal: controller.signal })
-
-controller.abort()
-const result = await pending // { success: false, error: 'Operation cancelled', ... }
-```
-
-Cancellation prevents subsequent workflow stages and interrupts transaction
-polling. It cannot reverse an already-submitted on-chain transaction or
-dismiss a wallet prompt if the adapter does not support that. Call
-`resurrect.dispose()` when an owned SDK instance is no longer needed; it stops
-tracked TTL watches and removes state and event listeners. Disposal is
-idempotent.
-
-### Latency and UX
-
-Hardware signing is interactive: the user must confirm on the device. Expect
-several seconds per signature versus sub-second for browser wallets, and design
-flows so each signature is a deliberate step. When `blindSigning` is set the SDK
-warns the user that the device cannot display the full payload before they confirm.
-
-## Custom adapters
-
-Implement `WalletAdapter` and pass the class to `createAdapter`:
-
-```ts
-import { createAdapter, type WalletAdapter } from '@handsoff/sdk'
-
-class MyWalletAdapter implements WalletAdapter {
-  readonly id = 'my-wallet'
-  readonly name = 'My Wallet'
-  readonly capabilities = {
-    signTransaction: true,
-    signMessage: false,
-    hardware: false,
-    blindSigning: false,
-    multiAccount: false,
-  }
-
-  async connect() {
-    /* ... */
-  }
-  async disconnect() {
-    /* ... */
-  }
-  async signTransaction(tx) {
-    /* ... */
-  }
-  async signMessage() {
-    throw new Error('signMessage is not supported')
-  }
-}
-
-const adapter = createAdapter({ adapter: MyWalletAdapter })
-```
-
-## `estimateRestoreCost`
-
-`estimateRestoreCost(transaction)` prices the restore work a transaction would
-trigger before the user signs. It inspects the transaction's ledger keys, detects
-which of them are archived, and returns the extra fee the restore would add on top
-of the base fee. It is the natural companion to a "this will cost extra because it
-needs a restore" confirmation step.
-
-```ts
-export function estimateRestoreCost(transaction: Transaction): Promise<RestoreCostEstimate>
-```
-
-### `RestoreCostEstimate`
-
-| Field                  | Type          | Meaning                                                                          |
-| ---------------------- | ------------- | -------------------------------------------------------------------------------- |
-| `minResourceFee`       | `number`      | Minimum resource fee (in stroops) the network charges for the restore operation. |
-| `multiplier`           | `number`      | Fee multiplier applied to `minResourceFee` to derive `estimatedFee`.             |
-| `estimatedFee`         | `number`      | Total estimated restore fee (in stroops): `minResourceFee * multiplier`.         |
-| `archivedKeysDetected` | `PublicKey[]` | Ledger keys referenced by the transaction that are currently archived.           |
-| `wouldNeedRestore`     | `boolean`     | Whether the transaction would trigger a restore at all.                          |
-
-### Zero-fee behaviour
-
-When none of the transaction's ledger keys are archived, `wouldNeedRestore` is
-`false`, `archivedKeysDetected` is empty, and `estimatedFee` is `0`. In that case
-the transaction can be submitted as-is and no restore step is required — skip the
-confirmation prompt entirely.
-
-### Worked example: confirm the cost before signing
-
-```ts
-import { estimateRestoreCost } from '@handsoff/sdk'
-
-const estimate = await estimateRestoreCost(transaction)
-
-if (estimate.wouldNeedRestore) {
-  // Surface the extra cost to the user before they sign.
-  const feeInSol = estimate.estimatedFee / 1e9
-  const confirmed = await confirm({
-    title: 'This transaction needs a restore',
-    message:
-      `${estimate.archivedKeysDetected.length} archived key(s) will be restored. ` +
-      `Estimated extra fee: ${feeInSol} SOL.`,
-  })
-
-  if (!confirmed) {
-    return // User declined — do not sign or submit.
-  }
-} else {
-  // wouldNeedRestore === false: no restore, no extra fee.
-  console.log('No restore needed; estimatedFee is 0.')
-}
-
-const signed = await adapter.signTransaction(transaction)
-await submit(signed)
-```
-
-See the [fee model guide](../guide/fee-model.md) for how the restore fee fits into
-the overall fee calculation, and the [TTL guides](../guide/ttl.md) for how entries
-become archived in the first place.
-
-`createDebugger` is exported, so application code can log under the same
-namespaces and honour the same `DEBUG` filter:
-
-The scanning APIs answer "what in my contract or account is about to expire?"
-without submitting a transaction. They read ledger entries directly and report
-which ones are close to their TTL, so a dApp can prompt the user to extend or
-restore state before it is archived.
-
-const debug = createDebugger('soroban-resurrect:my-app')
-debug('restore started for %d keys', keys.length)
-
-```
-
-```
+30-second reb

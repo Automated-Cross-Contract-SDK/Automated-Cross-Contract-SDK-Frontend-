@@ -94,6 +94,77 @@ sr.onStateChange((info) => {
 })
 ```
 
+## Server-Side Monitoring Example
+
+A backend can observe TTL and restore status without ever touching user signing
+keys or submitting transactions on a user's behalf. The example at
+[`examples/monitoring`](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/tree/main/examples/monitoring)
+uses only read-only RPC calls (`getLedgerEntries` / simulation) to report
+whether a contract's ledger entries are live, archived, or already restored.
+
+```bash
+cd examples/monitoring
+npm install
+npm run start -- --rpc-url https://soroban-testnet.stellar.org --contract C...
+```
+
+It exposes a small, stable interface so the monitoring logic can be reused and
+tested independently of any wallet:
+
+```typescript
+// examples/monitoring/src/monitor.ts
+export interface MonitorOptions {
+  rpcUrl: string
+  contractId: string
+  /** Ledger keys to observe. Defaults to the contract instance entry. */
+  keys?: LedgerKey[]
+}
+
+export type MonitorStatus = 'live' | 'archived' | 'restored' | 'missing'
+
+export interface MonitorReport {
+  contractId: string
+  status: MonitorStatus
+  /** Remaining TTL in ledgers, when the entry is live. */
+  liveUntilLedger?: number
+  archivedKeys: ArchivedLedgerEntry[]
+  checkedAt: string
+}
+
+// checkStatus performs read-only RPC calls only. It never signs or submits.
+export async function checkStatus(options: MonitorOptions): Promise<MonitorReport>
+```
+
+### Read-only observation only
+
+The monitor never accepts a `WalletAdapter` and never calls `submitWithRestore`.
+It only reads ledger state, so it is safe to run on a server with no secrets:
+
+```typescript
+import { checkStatus } from './monitor'
+
+const report = await checkStatus({
+  rpcUrl: process.env.SOROBAN_RPC_URL!,
+  contractId: process.env.CONTRACT_ID!,
+})
+
+if (report.status === 'archived') {
+  // Alert operators; a user (not the server) must restore before submitting.
+  console.warn(`${report.archivedKeys.length} entries archived for ${report.contractId}`)
+}
+```
+
+### Failure and boundary cases
+
+The example's tests cover the expected path plus boundary/failure cases:
+
+- **Missing contract** — an unknown `contractId` reports `status: 'missing'`.
+- **RPC error** — a failing RPC call rejects with the underlying error rather
+  than reporting a false `live` status.
+- **Already restored** — entries that were archived and have since been restored
+  report `status: 'restored'` with an empty `archivedKeys` list.
+- **Live entry** — a live entry reports `status: 'live'` and its `liveUntilLedger`.
+
 ## Interactive Playground
 
 Want to try the flow without installing anything? The

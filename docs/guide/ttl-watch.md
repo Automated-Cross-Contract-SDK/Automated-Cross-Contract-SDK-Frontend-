@@ -189,3 +189,74 @@ const handle = sr.watchTTL({ keys })
 // ...
 handle.stop()
 ```
+
+## Server-side monitoring without wallet secrets
+
+A backend can observe TTL and restore status without ever holding a user's
+signing key or submitting transactions on their behalf. Use the read-only
+`queryLedgerTTL` snapshot (or observe-only `watchTTL`) and forward the results
+to your alerting system. No signer, `sourcePublicKey`, or `signTransaction` is
+required — those options are only used by auto-extend mode.
+
+```typescript
+// monitor.ts — runs on a server, holds no signing keys.
+import { SorobanResurrect } from '@soroban-resurrect/sdk'
+
+const sr = new SorobanResurrect({ rpcUrl: process.env.SOROBAN_RPC_URL! })
+
+/**
+ * Read-only TTL snapshot for a set of ledger keys.
+ *
+ * Stable interface: returns the raw `queryLedgerTTL` result. Never signs or
+ * submits a transaction, so it is safe to run with no wallet secrets.
+ */
+export async function snapshotTTL(keys) {
+  return sr.queryLedgerTTL(keys, { warningWindowLedgers: 17_280 })
+}
+
+/**
+ * Observe-only watcher. Emits `ttlLow` / `ttlExtended` / `error` events but
+ * never extends. Call `handle.stop()` on shutdown.
+ */
+export function watchReadOnly(keys, onEvent) {
+  return sr.watchTTL({ keys, thresholdLedgers: 5000, onEvent })
+}
+```
+
+Wire the snapshot into a periodic job and alert on the stable statuses:
+
+```typescript
+import { snapshotTTL } from './monitor'
+
+setInterval(async () => {
+  const result = await snapshotTTL(keys)
+
+  // A transient RPC failure surfaces as `unknown` entries + hasErrors; retry
+  // instead of paging, so a flaky node does not look like an archive.
+  if (result.hasErrors) {
+    console.warn('TTL query had RPC errors; will retry', result.failedChunks)
+    return
+  }
+
+  for (const entry of result.entries) {
+    if (entry.status === 'archived') {
+      alert(`Entry archived, restore needed: ${entry.keyBase64}`)
+    } else if (entry.status === 'near-expiry') {
+      alert(`Entry near expiry: ${entry.keyBase64} (${entry.ttlLedgers} ledgers)`)
+    }
+    // `healthy` and `unknown` need no action here.
+  }
+}, 60_000)
+```
+
+### Boundary and failure cases
+
+- **Missing contract / archived entry** — a key absent from a successful RPC
+  response is reported as `status: 'archived'`; alert and hand off to the
+  restore flow (which the user signs in their own wallet).
+- **RPC error** — failed chunks yield `status: 'unknown'` and set
+  `result.hasErrors`; retry rather than treating the key as archived.
+- **Already restored** — once an entry is restored its TTL is positive again and
+  it reports `healthy` (or `near-expiry`); the monitor simply stops alerting.
+- **No secrets** — the monitor never passes `sourcePublicKey` or
+  `signTransaction`, so it cannot sign or submit on a user's behalf.
