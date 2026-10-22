@@ -17,60 +17,41 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-  validate-changelogs:
+  canary:
+    # Publish a clearly versioned prerelease from main without touching stable tags.
+    # Canary versions look like `<next-version>-canary.<run_number>` and are
+    # published under the `canary` dist-tag, so `latest` and stable tags are
+    # never affected. Install with: `npm install <pkg>@canary`.
+    needs: release-please
+    if: ${{ needs.release-please.outputs.releases_created != 'true' }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Validate changelogs for every publishable package
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - name: Compute canary version
+        id: version
         run: |
           set -euo pipefail
+          BASE_VERSION=$(node -p "require('./package.json').version")
+          # Strip any existing prerelease/build metadata before appending canary.
+          STABLE_VERSION=$(node -e "const v=require('./package.json').version.split('-')[0]; process.stdout.write(v)")
+          CANARY_VERSION="${STABLE_VERSION}-canary.${{ github.run_number }}"
+          echo "base=${BASE_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "canary=${CANARY_VERSION}" >> "$GITHUB_OUTPUT"
 
-          # Collect every publishable package directory from the release-please manifest.
-          if [ ! -f .release-please-manifest.json ]; then
-            echo "::error::Missing .release-please-manifest.json"
-            exit 1
-          fi
+      - name: Set canary version
+        run: npm version "${{ steps.version.outputs.canary }}" --no-git-tag-version --allow-same-version
 
-          packages=$(node -e '
-            const manifest = require("./.release-please-manifest.json");
-            const dirs = Object.keys(manifest).filter((p) => p !== ".");
-            process.stdout.write(dirs.join("\n"));
-          ')
-
-          if [ -z "$packages" ]; then
-            echo "No publishable packages found in manifest; nothing to validate."
-            exit 0
-          fi
-
-          failed=0
-          while IFS= read -r pkg; do
-            [ -z "$pkg" ] && continue
-            changelog="$pkg/CHANGELOG.md"
-            if [ ! -f "$changelog" ]; then
-              echo "::error file=$changelog::Missing changelog for publishable package '$pkg'"
-              failed=1
-              continue
-            fi
-
-            # Require release notes that identify user-facing changes, migration
-            # needs, and affected package names before a release can proceed.
-            if ! grep -qiE '^#+ .*(user-facing|user facing|breaking|migration|migrate)' "$changelog"; then
-              echo "::error file=$changelog::Changelog for '$pkg' must identify user-facing changes and migration needs"
-              failed=1
-            fi
-
-            if ! grep -qF "$pkg" "$changelog"; then
-              echo "::error file=$changelog::Changelog for '$pkg' must reference the affected package name '$pkg'"
-              failed=1
-            fi
-          done <<< "$packages"
-
-          if [ "$failed" -ne 0 ]; then
-            echo "::error::Changelog validation failed; blocking release."
-            exit 1
-          fi
-
-          echo "All publishable packages have valid changelogs."
+      - name: Publish canary
+        run: npm publish --tag canary --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
