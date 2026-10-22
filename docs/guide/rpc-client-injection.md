@@ -68,6 +68,51 @@ Only override the methods you care about — spreading `...client` first means
 every method not explicitly overridden still delegates to the wrapped
 client, so `ISorobanRpcClient`'s six-method contract stays satisfied.
 
+## Instrumentation hooks
+
+For request duration and payload-size metrics, pass an optional
+`instrumentation` object in the SDK config. Hooks are invoked after each RPC
+call and receive only metadata — **payload contents are never captured by
+default**, only their byte size.
+
+```typescript
+import { SorobanResurrect, type RpcInstrumentation } from '@soroban-resurrect/sdk'
+
+const instrumentation: RpcInstrumentation = {
+  onRequest(event) {
+    // event.method: e.g. 'simulateTransaction'
+    // event.durationMs: wall-clock duration of the call
+    // event.requestBytes / event.responseBytes: serialized payload sizes
+    // event.ok: whether the call resolved without throwing
+    metrics.histogram('rpc.duration', event.durationMs, { method: event.method })
+    metrics.histogram('rpc.request_bytes', event.requestBytes, { method: event.method })
+    metrics.histogram('rpc.response_bytes', event.responseBytes, { method: event.method })
+  },
+}
+
+const sdk = new SorobanResurrect({
+  rpcUrl: 'https://soroban-testnet.stellar.org',
+  instrumentation,
+})
+```
+
+The `RpcInstrumentationEvent` shape is stable:
+
+```typescript
+type RpcInstrumentationEvent = {
+  method: keyof ISorobanRpcClient
+  durationMs: number
+  requestBytes: number
+  responseBytes: number
+  ok: boolean
+}
+```
+
+Hooks are best-effort: a throwing hook never fails the underlying RPC call.
+Omit `instrumentation` to disable all overhead. Payload contents are not
+included in the event; if you need them, wrap the client yourself as shown
+above.
+
 ## Check restore compatibility
 
 Use `checkNetworkCapabilities()` before enabling restore flows in an
