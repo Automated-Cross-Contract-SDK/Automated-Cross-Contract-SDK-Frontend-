@@ -176,103 +176,67 @@ Add it as a dev dependency of the workspace you are testing:
 { "devDependencies": { "@soroban-resurrect/testing": "0.0.0" } }
 ```
 
+## Mock wallet adapter
+
+Integration tests that exercise the signing steps need a wallet, not just an
+RPC client. `@soroban-resurrect/testing` also exports a reusable mock wallet
+adapter so you don't have to hand-roll one per suite.
+
+```typescript
+import { createMockWallet } from '@soroban-resurrect/testing'
+
+const wallet = createMockWallet()
+const result = await sdk.submitWithRestore({ transaction, wallet })
+```
+
+`createMockWallet(options?)` returns an object implementing the SDK's wallet
+interface (`getPublicKey`, `signTransaction`). Its behavior is configured via
+`options`:
+
+| Option            | Type                                   | Default        | Behavior |
+| ----------------- | -------------------------------------- | -------------- | -------- |
+| `publicKey`       | `string`                               | a fixed test key | Returned by `getPublicKey()`. |
+| `mode`            | `'success' \| 'reject' \| 'malformed'` | `'success'`    | `success` signs normally; `reject` throws a `WalletRejectedError`; `malformed` returns a signature that is not valid XDR. |
+| `delayMs`         | `number`                               | `0`            | Awaits this many milliseconds before resolving/rejecting, to exercise slow-wallet paths. |
+| `signatures`      | `string[]`                             | `[]`           | Optional per-call overrides for the returned signature XDR, consumed in order (the last one repeats). |
+| `rejectOn`        | `'restore' \| 'original' \| 'all'`     | `'all'`        | Which signing prompt a `reject`/`malformed` mode applies to, so restore and original rejections can be tested separately. |
+
+The returned wallet also exposes `calls` — an array recording each
+`signTransaction` invocation (`{ transaction, prompt }`) — so tests can assert
+which envelopes were signed and in what order.
+
+### Failure cases
+
+```typescript
+// Reject the restore signature: neither transaction should be sent.
+const rejectingRestore = createMockWallet({ mode: 'reject', rejectOn: 'restore' })
+
+// Reject the rebuilt original signature: the restore may be sent, but never
+// the unsigned original.
+const rejectingOriginal = createMockWallet({ mode: 'reject', rejectOn: 'original' })
+
+// Malformed signature: the SDK must surface a signing error, not submit.
+const malformed = createMockWallet({ mode: 'malformed' })
+
+// Slow wallet: exercises timeout / delayed-response handling.
+const slow = createMockWallet({ delayMs: 250 })
+```
+
+### Compatibility
+
+The mock wallet is test-only and lives in the `private`
+`@soroban-resurrect/testing` package, so it is never published and adds no
+runtime dependency to the SDK. It targets the same wallet interface the SDK
+already accepts, so existing hand-written wallet stubs keep working — no
+migration is required. New integration tests should prefer
+`createMockWallet` for consistency.
+
 ## Coverage gates
 
 The SDK's test command enforces explicit branch and line-coverage floors for three critical restore
 modules. The current floors reflect the measured baseline and prevent regressions while coverage
 grows:
 
-| Behavior                         | Module                                                   |
-| -------------------------------- | -------------------------------------------------------- |
-| Archived-key detection           | `packages/sdk/src/Archiver.ts` — 45% branches, 65% lines |
-| Restore transaction construction | `packages/sdk/src/Restorer.ts` — 35% branches, 35% lines |
-| Execution orchestration          | `packages/sdk/src/Executor.ts` — 40% branches, 50% lines |
+| Behavior                         | Module                            
 
-Run `npm run test -w packages/sdk -- --coverage` to generate the report and fail the command if a
-module-specific floor is missed. Add tests and raise the floors as the modules' coverage improves.
-
-### Walkthrough: archive detected → restore → resubmit
-
-```typescript
-import { describe, it, expect } from 'vitest'
-import { Keypair, Networks, Operation, TransactionBuilder } from '@stellar/stellar-sdk'
-import { SorobanResurrect } from '@soroban-resurrect/sdk'
-import { createMockRpcClient, fixtures, scenarios } from '@soroban-resurrect/testing'
-
-const signer = Keypair.random()
-const wallet = {
-  isConnected: async () => true,
-  getPublicKey: async () => signer.publicKey(),
-  signTransaction: async (xdr: string) => xdr,
-}
-
-function makeTx() {
-  return new TransactionBuilder(fixtures.account(signer.publicKey()), {
-    fee: '100',
-    networkPassphrase: Networks.TESTNET,
-  })
-    .addOperation(Operation.restoreFootprint({}))
-    .setTimeout(30)
-    .build()
-}
-
-describe('restore flow', () => {
-  it('detects, restores, confirms and resubmits', async () => {
-    // 1. Script the network: the first simulation reports an archived
-    //    footprint, the re-simulation after the restore succeeds.
-    const rpcClient = createMockRpcClient(scenarios.restore())
-
-    const sr = new SorobanResurrect({
-      rpcUrl: 'http://mock',
-      networkPassphrase: Networks.TESTNET,
-      rpcClient,
-      pollIntervalMs: 1,
-    })
-
-    // 2. Detect: the restore preamble surfaces the archived keys.
-    const archived = await sr.detectArchivedKeys(makeTx())
-    expect(archived.length).toBeGreaterThan(0)
-
-    // 3. Restore + resubmit in one call.
-    const result = await sr.submitWithRestore({ transaction: makeTx(), wallet })
-    expect(result).toBeDefined()
-
-    // 4. Assert the RPC choreography: restore tx sent and confirmed,
-    //    then the original re-simulated and resubmitted.
-    expect(rpcClient.calls.filter((c) => c === 'sendTransaction')).toHaveLength(2)
-    expect(rpcClient.calls).toContain('getTransaction')
-  })
-
-  it('surfaces a restore simulation error', async () => {
-    const rpcClient = createMockRpcClient(scenarios.restoreSimulationError())
-    const sr = new SorobanResurrect({
-      rpcUrl: 'http://mock',
-      networkPassphrase: Networks.TESTNET,
-      rpcClient,
-    })
-    await expect(sr.submitWithRestore({ transaction: makeTx(), wallet })).rejects.toThrow()
-  })
-
-  it('reports tx_bad_seq on resubmission', async () => {
-    const rpcClient = createMockRpcClient(scenarios.badSequence())
-    const sr = new SorobanResurrect({
-      rpcUrl: 'http://mock',
-      networkPassphrase: Networks.TESTNET,
-      rpcClient,
-      pollIntervalMs: 1,
-    })
-    await expect(sr.submitWithRestore({ transaction: makeTx(), wallet })).rejects.toThrow()
-  })
-})
-```
-
-Omitting `serverURL` from the script (the default) makes confirmation fall
-back to polling, so no SSE server is needed. Pass `serverURL` only when you
-also stub `EventSource`.
-
-### Migrating an existing ad-hoc stub
-
-Replace the hand-written object with `createMockRpcClient({ ... })`, moving
-each `mockResolvedValueOnce` chain into the matching `simulate` / `send` /
-`getTransaction` array. The response objects are the same shapes, so test
-behaviour does not change.
+/* … truncated 3664 chars — edit only what you need near the top … */
