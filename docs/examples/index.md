@@ -167,6 +167,128 @@ const sr = new SorobanResurrect({ rpcUrl: 'unused', rpcClient: mockRpc })
 - Errors thrown by a custom client propagate to the SDK's normal error handling
   (`onRestoreFailed`, `result.error`), so no extra handling is required.
 
+## Wallet-Free Test Example with the Mock RPC Harness
+
+This example shows how to exercise the SDK's success, failure, and restore
+scenarios in automated tests **without a live network or a wallet extension**.
+It uses the mock RPC harness that ships with the SDK's test utilities, so you
+do not need to hand-roll a fake `RpcClient` for every test.
+
+### Harness interface
+
+The harness is a small, stable helper exported from the SDK's testing entry
+point. It wraps a scripted `RpcClient` and records every call so tests can
+assert on the RPC traffic the SDK produced.
+
+```typescript
+import { createMockRpcHarness } from '@soroban-resurrect/sdk/testing'
+
+const harness = createMockRpcHarness({
+  // Optional: seed the ledger sequence returned by getLatestLedger.
+  latestLedger: 1,
+})
+
+// harness.client  — an RpcClient to pass via the `rpcClient` option
+// harness.calls   — ordered list of { method, args } recorded during the test
+// harness.reset() — clear recorded calls and queued responses between tests
+```
+
+Responses are scripted per method. Each queued response is consumed in order;
+when the queue is empty the harness falls back to a sensible default (e.g. a
+successful simulation with no archived keys).
+
+```typescript
+harness.on('simulateTransaction', { success: true, archivedKeys: [] })
+harness.on('sendTransaction', { hash: 'deadbeef', status: 'PENDING' })
+harness.on('getTransaction', { status: 'SUCCESS' })
+```
+
+### Success path
+
+```typescript
+import { describe, it, expect } from 'vitest'
+import { SorobanResurrect } from '@soroban-resurrect/sdk'
+import { createMockRpcHarness } from '@soroban-resurrect/sdk/testing'
+
+it('submits without restoring when nothing is archived', async () => {
+  const harness = createMockRpcHarness()
+  harness.on('simulateTransaction', { success: true, archivedKeys: [] })
+  harness.on('sendTransaction', { hash: 'deadbeef', status: 'PENDING' })
+  harness.on('getTransaction', { status: 'SUCCESS' })
+
+  const sr = new SorobanResurrect({ rpcUrl: 'unused', rpcClient: harness.client })
+  const result = await sr.submitWithRestore({ transaction: tx, wallet: fakeWallet })
+
+  expect(result.success).toBe(true)
+  expect(harness.calls.map((c) => c.method)).toEqual([
+    'simulateTransaction',
+    'sendTransaction',
+    'getTransaction',
+  ])
+})
+```
+
+### Failure path
+
+```typescript
+it('surfaces a failed submission through result.error', async () => {
+  const harness = createMockRpcHarness()
+  harness.on('simulateTransaction', { success: true, archivedKeys: [] })
+  harness.on('sendTransaction', { hash: 'deadbeef', status: 'PENDING' })
+  harness.on('getTransaction', { status: 'FAILED' })
+
+  const sr = new SorobanResurrect({ rpcUrl: 'unused', rpcClient: harness.client })
+  const result = await sr.submitWithRestore({ transaction: tx, wallet: fakeWallet })
+
+  expect(result.success).toBe(false)
+  expect(result.error).toBeDefined()
+})
+```
+
+### Restore path
+
+```typescript
+it('restores archived entries before submitting the original tx', async () => {
+  const harness = createMockRpcHarness()
+  harness.on('simulateTransaction', {
+    success: false,
+    archivedKeys: [{ key: 'position' }],
+  })
+  harness.on('sendTransaction', { hash: 'restorehash', status: 'PENDING' })
+  harness.on('getTransaction', { status: 'SUCCESS' })
+
+  const sr = new SorobanResurrect({ rpcUrl: 'unused', rpcClient: harness.client })
+  const onRestoreNeeded = vi.fn()
+  const result = await sr.submitWithRestore({
+    transaction: tx,
+    wallet: fakeWallet,
+    onRestoreNeeded,
+  })
+
+  expect(onRestoreNeeded).toHaveBeenCalledWith([{ key: 'position' }])
+  expect(result.success).toBe(true)
+})
+```
+
+### Boundary cases
+
+- **Empty archived keys** — a simulation that reports `archivedKeys: []` must
+  skip the restore step entirely (see the success path above).
+- **Restore failure** — script `sendTransaction` to reject or `getTransaction`
+  to return `FAILED` during the restore phase; the SDK should call
+  `onRestoreFailed` and leave the original transaction unsubmitted.
+- **Reset between tests** — call `harness.reset()` in `afterEach` so queued
+  responses and recorded calls do not leak across tests.
+
+### Compatibility notes
+
+- The harness is a test-only helper; it is not part of the runtime bundle and
+  does not affect production code paths.
+- It produces a plain `RpcClient`, so it works with any SDK version that
+  supports the `rpcClient` option — no migration is required for existing tests.
+- If you already hand-roll a mock `RpcClient`, you can keep it; the harness is
+  an optional convenience that adds call recording and response scripting.
+
 ## DeFi Position Recovery with Fee Review
 
 This example restores an archived DeFi contract position (e.g. a lending
@@ -260,17 +382,3 @@ async function confirmRecovery(preview: RestorePreview, wallet: WalletAdapter) {
   setSuccess(result.originalTxHash!)
 }
 ```
-
-### Failure and boundary cases
-
-- **No archived entries** — `needsRestore` returns `false`; skip the review UI
-  and submit the position transaction directly.
-- **User rejects signing** — `submitWithRestore` resolves with
-  `success: false` and an error; the position is left untouched.
-- **Restore fails on-chain** — `onRestoreFailed` fires and the original
-  position transaction is never submitted.
-- **Fee changes between preview and submit** — re-run `prepareRestore` and
-  re-present the review before signing so the user always approves the fee
-  they actually pay.
-
-More end-to-end walkthroughs live in the [Tutorial](/guide/tutorial).
