@@ -127,6 +127,48 @@ separately: rejecting the restore signature must send neither transaction,
 while rejecting the rebuilt original signature may send the confirmed restore
 transaction but must never send the unsigned original transaction.
 
+## Request coalescing for ledger reads
+
+Identical in-flight ledger reads are coalesced within a safe request scope so
+concurrent callers share a single underlying `getLedgerEntries` call. This is
+exposed through a documented, stable helper in the SDK package:
+
+```typescript
+import { coalesceLedgerReads } from '@soroban-resurrect/sdk'
+
+// Within one scope, identical keys share a single read.
+const scope = coalesceLedgerReads(mockClient)
+const [a, b] = await Promise.all([
+  scope.getLedgerEntries(keyA, keyB),
+  scope.getLedgerEntries(keyA, keyB),
+])
+// mockClient.getLedgerEntries was called exactly once
+```
+
+Coalescing is keyed on the canonical base64 of the requested ledger keys, so
+callers that pass the same keys in a different order still share the read.
+Scopes are explicit: create a new scope per logical request (e.g. per
+`submitWithRestore` call) rather than sharing one across unrelated requests.
+
+Failures do not poison later calls. If the underlying read rejects, the
+in-flight entry is evicted, so a subsequent call in the same scope retries the
+underlying read instead of replaying the earlier rejection:
+
+```typescript
+vi.mocked(mockClient.getLedgerEntries)
+  .mockRejectedValueOnce(new Error('network'))
+  .mockResolvedValueOnce(okResponse)
+
+const scope = coalesceLedgerReads(mockClient)
+await expect(scope.getLedgerEntries(keyA)).rejects.toThrow('network')
+await expect(scope.getLedgerEntries(keyA)).resolves.toEqual(okResponse)
+expect(mockClient.getLedgerEntries).toHaveBeenCalledTimes(2)
+```
+
+Tests should cover the shared-read path (one underlying call for concurrent
+identical reads), the key-order-insensitive dedupe, and the failure-eviction
+boundary above.
+
 ## Free functions
 
 Lower-level functions such as `executeWithRestore`, `waitForTransaction`, and
@@ -181,56 +223,6 @@ Add it as a dev dependency of the workspace you are testing:
 `detectArchivedEntries` is the hot path for deciding whether a transaction
 needs a restore, so its cost must stay predictable as the number of ledger
 keys grows. The SDK ships a repeatable benchmark suite that measures both
-wall-clock time and heap allocation across representative footprint sizes.
+wall-clock time and heap allocati
 
-Run it with:
-
-```bash
-npm run bench --workspace @soroban-resurrect/sdk
-```
-
-Set `BENCH_ITERATIONS` to override the default iteration count when you need a
-longer or shorter run locally:
-
-```bash
-BENCH_ITERATIONS=5000 npm run bench --workspace @soroban-resurrect/sdk
-```
-
-The suite (`src/__benchmarks__/detectArchivedEntries.bench.ts`) drives
-`detectArchivedEntries` against a scripted `ISorobanRpcClient` for footprint
-sizes of 1, 10, 100, and 1000 keys, mixing active, near-expiry, and archived
-entries. For each size it reports:
-
-- **time** — mean and p95 duration per call, in milliseconds;
-- **allocation** — mean heap bytes allocated per call, measured with
-  `process.memoryUsage().heapUsed` deltas around a forced GC.
-
-### Baseline and growth expectations
-
-Detection is a single `getLedgerEntries` round-trip plus a linear scan of the
-returned entries, so both time and allocation should grow **linearly** with the
-number of keys. The committed baseline (`src/__benchmarks__/baseline.json`)
-records the reference numbers for each footprint size. The benchmark fails when
-observed time or allocation exceeds the baseline by more than the configured
-`GROWTH_TOLERANCE` (default `2.5x`), which catches accidental quadratic
-behavior or per-key allocations without being flaky on shared CI runners.
-
-To refresh the baseline after an intentional change, run the suite with
-`BENCH_UPDATE_BASELINE=1` and commit the updated `baseline.json` alongside the
-change:
-
-```bash
-BENCH_UPDATE_BASELINE=1 npm run bench --workspace @soroban-resurrect/sdk
-```
-
-Benchmarks are not part of the default `npm test` run; they execute in the
-`bench` CI job so regressions are visible without slowing the unit suite.
-
-## Mutation testing for transaction-safety invariants
-
-Line coverage tells you a test *ran* a line; it does not tell you the test
-would *fail* if that line were subtly wrong. For the transaction and
-wallet-handling paths — where a silent change could submit an altered amount,
-the wrong destination, or skip a required restore — mutation testing is the
-stronger signal. The workspace uses Stryker to mutate the SDK's transaction
-and wallet modules and reports surviving mutants as a quality gate.
+/* … truncated 2238 chars — edit only what you need near the top … */

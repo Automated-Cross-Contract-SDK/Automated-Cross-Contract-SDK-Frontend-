@@ -62,6 +62,60 @@ const defaulted = await getLedgerEntries(keys, {
 receive the default limit; no migration is required. Callers that previously issued
 unbounded parallel requests can set `concurrency` to match their RPC endpoint's capacity.
 
+## Ledger read coalescing
+
+Concurrent identical ledger reads issued within the same request scope are coalesced into a
+single underlying read. This avoids redundant RPC round-trips when several parts of a request
+ask for the same ledger key at the same time.
+
+### `coalesceLedgerReads`
+
+```ts
+function coalesceLedgerReads<T>(
+  scope: LedgerReadScope,
+  key: string,
+  read: () => Promise<T>,
+): Promise<T>;
+```
+
+`coalesceLedgerReads` deduplicates in-flight reads by a stable `key` within a
+`LedgerReadScope`. The first call for a key starts the underlying `read`; concurrent calls for
+the same key in the same scope share its result instead of issuing another read.
+
+### `LedgerReadScope`
+
+A `LedgerReadScope` bounds the lifetime of coalesced reads. Create one per request (or per
+logical unit of work) so that sharing never leaks across unrelated requests:
+
+```ts
+import { createLedgerReadScope, coalesceLedgerReads } from "@sdk/ledger";
+
+const scope = createLedgerReadScope();
+
+// Both calls share a single underlying read.
+const [a, b] = await Promise.all([
+  coalesceLedgerReads(scope, ledgerKey, () => rpc.getLedgerEntries([ledgerKey])),
+  coalesceLedgerReads(scope, ledgerKey, () => rpc.getLedgerEntries([ledgerKey])),
+]);
+```
+
+### Behaviour
+
+- Identical in-flight reads (same `key`, same `scope`) share one underlying read.
+- Once a read settles, its entry is evicted from the scope, so later calls perform a fresh
+  read rather than returning a stale cached value.
+- **Failures do not poison later calls:** if the underlying read rejects, the in-flight entry
+  is evicted and the rejection is propagated to every caller sharing it. A subsequent call for
+  the same key starts a new read and can succeed.
+- Coalescing is scoped: reads in different scopes are never shared.
+
+### Compatibility and migration
+
+Coalescing is opt-in and additive. Existing direct ledger reads are unaffected; callers opt in
+by wrapping reads with `coalesceLedgerReads` inside a per-request `LedgerReadScope`. Because
+entries are evicted on settle, coalescing never changes read freshness semantics — it only
+collapses concurrent duplicates.
+
 ## MultiSig restore
 
 N-of-M restore support is provided by `MultiSigWalletAdapter`, `MultiSigSigner`,
@@ -216,75 +270,6 @@ submitting a transaction**. They are read-only and safe to call from any client.
 
 ### `getExpiringEntriesForContract`
 
-Scans a contract's entries and returns the ones whose TTL is at or below the configured
-threshold.
+Scans a contract's entries and returns the ones who
 
-```ts
-type ContractScanOptions = {
-  /** Ledger offset below which an entry is considered "expiring soon". */
-  expiringSoonLedgers?: number;
-  /** Instance entry to scan, if any. */
-  instance?: LedgerKey;
-  /** Wasm code entry to scan, if any. */
-  wasmCode?: LedgerKey;
-  /** Storage keys to scan. */
-  storageKeys?: LedgerKey[];
-};
-
-type ContractScanResult = {
-  instance?: ClassicEntryStatus;
-  wasmCode?: ClassicEntryStatus;
-  storage: ClassicEntryStatus[];
-};
-
-type ClassicEntryStatus = {
-  key: LedgerKey;
-  liveUntilLedger: number;
-  expiringSoon: boolean;
-};
-
-function getExpiringEntriesForContract(
-  contractId: string,
-  options?: ContractScanOptions,
-): Promise<ContractScanResult>;
-```
-
-> **Important limitation:** a contract's storage keys **cannot be enumerated** from the
-> ledger. You must supply the storage keys you care about via `options.storageKeys`.
-> Only the instance and wasm code entries can be discovered automatically. If you omit
-> `storageKeys`, the result's `storage` array will be empty.
-
-`DEFAULT_EXPIRING_SOON_LEDGERS` is the default threshold used when `expiringSoonLedgers`
-is not provided.
-
-### `getExpiringEntriesForAccount`
-
-Scans an account's presence and trustline entries. This is a **presence scan**, not a TTL
-scan: it reports whether the account and its trustlines exist, separately from any TTL
-information.
-
-```ts
-type AccountScanOptions = {
-  /** Trustline asset keys to check for presence. */
-  trustlines?: LedgerKey[];
-};
-
-function getExpiringEntriesForAccount(
-  accountId: string,
-  options?: AccountScanOptions,
-): Promise<ContractScanResult>;
-```
-
-### Worked example: instance, wasm code, and storage keys
-
-```ts
-import {
-  getExpiringEntriesForContract,
-  getExpiringEntriesForAccount,
-  DEFAULT_EXPIRING_SOON_LEDGERS,
-} from "@sdk/scanning";
-
-// Contract scan: instance + wasm code are discovered automatically, but storage
-// keys
-
-/* … truncated 1239 chars — edit only what you need near the top … */
+/* … truncated 2012 chars — edit only what you need near the top … */
