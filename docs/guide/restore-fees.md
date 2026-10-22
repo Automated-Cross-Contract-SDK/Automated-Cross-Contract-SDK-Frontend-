@@ -123,3 +123,75 @@ is at or below the cap and therefore not clamped.
 - The footprint-size guard is evaluated first and warns when close to the limit
   and throws when over it.
 - Use `estimateRestoreCost` to preview the exact fee before signing.
+
+## Architecture decision record: rebuilding the original transaction
+
+This section is the architecture decision record (ADR) for how the SDK handles
+the original transaction after a restore. It records the decision, the
+rationale, and the mechanism so future changes can be evaluated against it.
+
+### Status
+
+Accepted.
+
+### Context
+
+A restore is a two-step flow. The SDK first simulates the restore to learn the
+archived keys, the resource fee, and the ledger state. It then builds and signs
+the actual restore transaction. Between simulation and submission the caller
+may need to obtain a signature (for example, through a wallet prompt), which can
+take an arbitrary amount of time.
+
+During that gap the network moves on: the current ledger advances, the
+simulation's `latestLedger` becomes stale, and the signed transaction's ledger
+bounds and time bound can expire. A restored transaction that was valid at
+simulation time may no longer be valid at submission time.
+
+### Decision
+
+After restoration, the SDK rebuilds the original transaction from the latest
+simulation data rather than reusing the previously built or restored
+transaction. The rebuilt transaction is what gets signed and submitted.
+
+### Rationale
+
+- **Freshness.** Rebuilding re-derives ledger bounds from the current
+  simulation's `latestLedger`, so the transaction is valid against the ledger
+  the network is actually on, not the one it was on when the flow started.
+- **Correct sequence numbers.** The account's sequence number advances as
+  transactions are submitted. Reusing a stale transaction would carry an
+  outdated sequence number and be rejected. Rebuilding reads the current
+  sequence number so the transaction is accepted.
+- **Consistent simulation data.** The footprint, resource fee, and other
+  simulation-derived fields are taken from the same simulation that produced
+  the ledger bounds, so the transaction is internally consistent.
+- **Clear failure mode.** If the window has elapsed, rebuilding fails fast with
+  an error asking the caller to rebuild and request a new signature, instead of
+  submitting a transaction that is doomed to fail.
+
+### Mechanism
+
+1. **Sequence numbers.** The rebuild reads the source account's current
+   sequence number and sets it on the rebuilt transaction. It does not carry
+   over the sequence number from the restored transaction, which may have been
+   consumed or superseded.
+2. **Simulation data.** The rebuild uses the restore simulation's
+   `latestLedger` to derive ledger bounds within
+   `RESTORE_TX_LEDGER_BOUNDS_WINDOW` (30 ledgers) and applies the 30-second time
+   bound. The footprint and `minResourceFee` come from the same simulation, so
+   the fee formula above is evaluated against current data.
+3. **Caller responsibilities.** The caller must:
+   - request a new signature for the rebuilt transaction, since the previous
+     signature no longer applies;
+   - surface the new ledger range and time bound to users when the wallet
+     displays preconditions;
+   - handle the rebuild-and-resign error by retrying the flow, not by
+     resubmitting the stale transaction.
+
+### Consequences
+
+- Callers must be prepared to sign more than once if the window elapses.
+- The SDK never submits a transaction whose bounds or sequence number are
+  stale; it fails fast and asks for a rebuild instead.
+- Any change to the restore flow must preserve the invariant that the signed
+  transaction is rebuilt from current simulation data.
