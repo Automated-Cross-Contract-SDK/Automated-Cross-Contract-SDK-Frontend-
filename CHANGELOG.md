@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `CODE_OF_CONDUCT.md`, `CHANGELOG.md`, `ARCHITECTURE.md`, and expanded JSDoc /
   API reference documentation.
+- Changelog validation for every publishable package. Releases now require
+  release notes that identify user-facing changes, migration needs, and the
+  affected package names before a release can proceed.
 
 ## [0.1.0] - 2026-07-28
 

@@ -98,6 +98,81 @@ jobs:
           console.log('No internal package resolves a sibling from the registry.');
           EOF
 
+      - name: Validate changelog for every publishable package
+        run: |
+          set -euo pipefail
+          node - <<'EOF'
+          const fs = require('fs');
+          const path = require('path');
+          const root = process.cwd();
+          const pkgDirs = ['packages/sdk', 'packages/react-hook', 'packages/vue-hook', 'packages/svelte-hook'];
+
+          // A changelog entry must identify user-facing changes, migration needs,
+          // and the affected package names before a release can proceed.
+          const REQUIRED_SECTIONS = [
+            { key: 'user-facing changes', pattern: /^#{1,6}\s*user-facing changes\s*$/im },
+            { key: 'migration', pattern: /^#{1,6}\s*migration(?: notes?)?\s*$/im },
+            { key: 'affected packages', pattern: /^#{1,6}\s*affected packages?\s*$/im },
+          ];
+
+          const failures = [];
+          const publishable = [];
+
+          for (const dir of pkgDirs) {
+            const pkgPath = path.join(root, dir, 'package.json');
+            if (!fs.existsSync(pkgPath)) continue;
+            const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+            if (pkg.private === true) continue;
+            publishable.push({ dir, name: pkg.name });
+          }
+
+          if (!publishable.length) {
+            console.error('No publishable packages found; refusing to release.');
+            process.exit(1);
+          }
+
+          const publishableNames = new Set(publishable.map((p) => p.name));
+
+          for (const { dir, name } of publishable) {
+            const candidates = ['CHANGELOG.md', 'changelog.md'].map((f) => path.join(root, dir, f));
+            const changelogPath = candidates.find((p) => fs.existsSync(p));
+            if (!changelogPath) {
+              failures.push(`${name}: missing CHANGELOG.md in ${dir}`);
+              continue;
+            }
+            const content = fs.readFileSync(changelogPath, 'utf8');
+            if (!content.trim()) {
+              failures.push(`${name}: CHANGELOG.md is empty`);
+              continue;
+            }
+
+            for (const section of REQUIRED_SECTIONS) {
+              if (!section.pattern.test(content)) {
+                failures.push(`${name}: CHANGELOG.md is missing a "${section.key}" section`);
+              }
+            }
+
+            // The affected packages section must name at least one publishable package.
+            const affectedMatch = content.match(/^#{1,6}\s*affected packages?\s*$([\s\S]*?)(?=^#{1,6}\s|\s*$)/im);
+            if (affectedMatch) {
+              const body = affectedMatch[1] || '';
+              const named = [...publishableNames].some((pkgName) => body.includes(pkgName));
+              if (!named) {
+                failures.push(`${name}: "affected packages" must name at least one publishable package`);
+              }
+            }
+          }
+
+          if (failures.length) {
+            console.error('Changelog validation failed for publishable packages:');
+            for (const f of failures) console.error('  - ' + f);
+            console.error('Each publishable package needs a CHANGELOG.md with "User-facing changes", "Migration", and "Affected packages" sections.');
+            process.exit(1);
+          }
+
+          console.log('Changelog validation passed for all publishable packages.');
+          EOF
+
       - run: npm run build:sdk
       - run: npm run build:hook
 
