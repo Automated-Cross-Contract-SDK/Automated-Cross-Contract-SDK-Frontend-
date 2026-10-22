@@ -103,6 +103,88 @@ function WithdrawButton() {
 }
 ```
 
+## Generating typed contract invocation examples
+
+If you want typed, inspectable examples of how to call a contract, the SDK
+ships an **opt-in** code generator. It reads a contract's interface (from a
+local WASM file or a deployed contract ID) and emits a small TypeScript module
+with explicit argument types and a ready-to-use `invokeContractFunction`
+operation builder. Nothing is generated unless you run the command, and the
+output is plain source you can read, diff, and commit.
+
+```bash
+npx @soroban-resurrect/sdk generate \
+  --contract CCJZ5...K2Q \
+  --rpc-url https://soroban-testnet.stellar.org \
+  --out src/contracts/withdraw.ts
+```
+
+Or from a local WASM file:
+
+```bash
+npx @soroban-resurrect/sdk generate \
+  --wasm ./target/wasm32-unknown-unknown/release/my_contract.wasm \
+  --out src/contracts/my_contract.ts
+```
+
+The generated module keeps every type and transaction argument explicit:
+
+```typescript
+// src/contracts/withdraw.ts — generated, do not edit by hand
+export const CONTRACT_ID = 'CCJZ5...K2Q'
+
+export interface WithdrawArgs {
+  amount: bigint
+}
+
+export function withdrawArgs(args: WithdrawArgs): xdr.ScVal[] {
+  return [nativeToScVal(args.amount, { type: 'i128' })]
+}
+
+export function withdrawOperation(args: WithdrawArgs): xdr.Operation {
+  return Operation.invokeContractFunction({
+    contract: CONTRACT_ID,
+    function: 'withdraw',
+    args: withdrawArgs(args),
+  })
+}
+```
+
+You can then use the generated operation with the normal restore flow:
+
+```typescript
+import { withdrawOperation } from './contracts/withdraw'
+
+const tx = new TransactionBuilder(account, { fee: '100', networkPassphrase: Networks.TESTNET })
+  .addOperation(withdrawOperation({ amount: 1000n }))
+  .setTimeout(30)
+  .build()
+
+const result = await sr.submitWithRestore({ transaction: tx, wallet })
+```
+
+### Options
+
+| Flag | Description |
+| --- | --- |
+| `--contract <id>` | Deployed contract ID to introspect via RPC. |
+| `--wasm <path>` | Local WASM file to introspect instead of RPC. |
+| `--rpc-url <url>` | RPC endpoint used with `--contract`. |
+| `--out <path>` | Output file path. Defaults to stdout. |
+| `--functions <a,b>` | Only generate the listed functions. |
+
+Exactly one of `--contract` or `--wasm` must be provided; the command exits
+non-zero with a clear message otherwise. Generated files are deterministic so
+they can be committed and reviewed like any other source.
+
+### Compatibility
+
+Code generation is additive and opt-in. Existing SDK usage is unchanged, and
+the generated modules only depend on `@stellar/stellar-sdk` primitives you
+already use. If you previously hand-wrote invocation helpers, you can migrate
+incrementally by generating alongside them and switching call sites over one
+function at a time.
+
 ## Choosing an approach
 
 If you already use Soroban RPC and only need a single, application-specific

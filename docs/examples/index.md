@@ -91,4 +91,91 @@ async function withdraw(tx: Transaction, wallet: WalletAdapter) {
 }
 ```
 
+## Typed Contract Invocation Scaffolding (opt-in)
+
+The scaffolder can emit a typed contract invocation example for a given
+contract. It is **opt-in**: nothing is generated unless you explicitly run the
+command, and every generated artifact is plain, inspectable source — no runtime
+magic, no hidden codegen step at build time.
+
+### Stable interface
+
+```bash
+npx soroban-resurrect scaffold contract \
+  --contract-id C...ABC \
+  --out ./src/contracts/abc \
+  --methods transfer,balance
+```
+
+| Flag | Required | Description |
+| --- | --- | --- |
+| `--contract-id` | yes | The contract ID to generate an invocation example for. |
+| `--out` | yes | Directory the generated files are written to. Must be empty or absent. |
+| `--methods` | no | Comma-separated method names to include. Defaults to all methods discovered from the contract spec. |
+| `--force` | no | Overwrite an existing output directory. Off by default. |
+
+### What gets generated
+
+Two files are written to `--out`:
+
+- `types.ts` — explicit TypeScript types derived from the contract spec
+  (argument and return types for each selected method).
+- `invoke.ts` — a typed invocation example that builds the transaction
+  arguments explicitly and hands them to `submitWithRestore`.
+
+```typescript
+// types.ts (generated — inspect and edit freely)
+export interface TransferArgs {
+  from: string
+  to: string
+  amount: bigint
+}
+
+export interface TransferResult {
+  ok: boolean
+}
+```
+
+```typescript
+// invoke.ts (generated — inspect and edit freely)
+import type { TransferArgs, TransferResult } from './types'
+import { SorobanResurrect } from '@soroban-resurrect/sdk'
+
+export async function invokeTransfer(
+  sr: SorobanResurrect,
+  args: TransferArgs,
+): Promise<TransferResult> {
+  // Transaction arguments are explicit and inspectable:
+  const tx = await sr.buildInvocation({
+    contractId: 'C...ABC',
+    method: 'transfer',
+    args: [args.from, args.to, args.amount],
+  })
+
+  const result = await sr.submitWithRestore({ transaction: tx, wallet })
+  if (!result.success) throw result.error ?? new Error('Invocation failed')
+  return result.returnValue as TransferResult
+}
+```
+
+### Boundary and failure behavior
+
+- If `--out` already exists and is non-empty, the command fails unless `--force`
+  is passed. This prevents silently clobbering hand-edited generated files.
+- If `--contract-id` cannot be resolved against the configured RPC, the command
+  exits non-zero with the RPC error and writes nothing.
+- If `--methods` names a method that is not present in the contract spec, the
+  command exits non-zero and lists the unknown methods; no files are written.
+- Generated files are never overwritten by later SDK upgrades — regeneration is
+  always an explicit `scaffold contract` run.
+
+### Compatibility / migration notes
+
+- This workflow is additive and opt-in; existing projects are unaffected and no
+  migration is required.
+- Generated files are ordinary source files. Commit them, review them, and edit
+  them like any other code — they are not regenerated automatically.
+- If you previously hand-wrote invocation wrappers, you can keep them; the
+  scaffolder is a starting point, not a replacement.
+
 More end-to-end walkthroughs live in the [Tutorial](/guide/tutorial).
