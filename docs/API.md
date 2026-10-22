@@ -3,6 +3,65 @@
 This document describes the public API surface of the SDK. For integration guides see
 [`docs/integrations/adapters-and-wallets.md`](./integrations/adapters-and-wallets.md).
 
+## Ledger lookup concurrency
+
+Ledger lookups that fan out into many parallel RPC requests are bounded by a configurable
+concurrency limit. This keeps large inputs from overwhelming the RPC endpoint while
+preserving the order of results.
+
+### `LedgerLookupOptions`
+
+```ts
+type LedgerLookupOptions = {
+  /**
+   * Maximum number of parallel RPC requests issued for a ledger lookup.
+   * Defaults to `DEFAULT_LEDGER_LOOKUP_CONCURRENCY` when omitted.
+   * Must be a positive integer; values below 1 are rejected.
+   */
+  concurrency?: number;
+};
+```
+
+### `DEFAULT_LEDGER_LOOKUP_CONCURRENCY`
+
+The default concurrency limit applied when `concurrency` is not provided. It is a stable,
+exported constant so callers can reference the same value the SDK uses.
+
+### Behaviour
+
+- At most `concurrency` RPC requests are in flight at any time; the rest are queued.
+- Results are returned in the **same order** as the input keys, regardless of the order in
+  which individual requests complete.
+- No results are dropped: every input key produces exactly one result (or a recorded
+  failure), even for inputs far larger than the concurrency limit.
+- If a request fails, the failure is surfaced for that key without discarding the results
+  already collected for other keys.
+
+### Worked example
+
+```ts
+import {
+  getLedgerEntries,
+  DEFAULT_LEDGER_LOOKUP_CONCURRENCY,
+} from "@sdk/ledger";
+
+// Bound parallel RPC requests for a large set of keys.
+const entries = await getLedgerEntries(keys, {
+  concurrency: 8,
+});
+
+// Or rely on the documented default.
+const defaulted = await getLedgerEntries(keys, {
+  concurrency: DEFAULT_LEDGER_LOOKUP_CONCURRENCY,
+});
+```
+
+### Compatibility and migration
+
+`concurrency` is optional and additive. Existing callers that omit it keep working and
+receive the default limit; no migration is required. Callers that previously issued
+unbounded parallel requests can set `concurrency` to match their RPC endpoint's capacity.
+
 ## MultiSig restore
 
 N-of-M restore support is provided by `MultiSigWalletAdapter`, `MultiSigSigner`,
@@ -226,35 +285,6 @@ import {
 } from "@sdk/scanning";
 
 // Contract scan: instance + wasm code are discovered automatically, but storage
-// keys MUST be supplied by the caller.
-const contractResult = await getExpiringEntriesForContract(contractId, {
-  expiringSoonLedgers: DEFAULT_EXPIRING_SOON_LEDGERS,
-  instance: instanceKey,
-  wasmCode: wasmCodeKey,
-  storageKeys: [balanceKey, allowanceKey],
-});
+// keys
 
-if (contractResult.instance?.expiringSoon) {
-  console.warn("contract instance is expiring soon");
-}
-for (const entry of contractResult.storage) {
-  if (entry.expiringSoon) {
-    console.warn("storage entry expiring soon", entry.key);
-  }
-}
-
-// Account scan: presence of the account and its trustlines.
-const accountResult = await getExpiringEntriesForAccount(accountId, {
-  trustlines: [usdcTrustlineKey],
-});
-```
-
-### When to use scanning vs. `detectArchivedKeys`
-
-| API | Basis | Use when |
-| --- | --- | --- |
-| `getExpiringEntriesForContract` / `getExpiringEntriesForAccount` | Explicit keys you supply | You know which keys matter and want a transaction-free, read-only check. |
-| `detectArchivedKeys` | Transaction footprint | You have a transaction and want to know which of its footprint keys are archived. |
-
-Use the scanning APIs for proactive, transaction-free monitoring; use `detectArchivedKeys`
-when you already have a transaction and need to inspect its footprint.
+/* … truncated 1239 chars — edit only what you need near the top … */

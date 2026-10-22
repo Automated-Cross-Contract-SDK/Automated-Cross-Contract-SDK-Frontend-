@@ -68,6 +68,33 @@ Only override the methods you care about — spreading `...client` first means
 every method not explicitly overridden still delegates to the wrapped
 client, so `ISorobanRpcClient`'s six-method contract stays satisfied.
 
+## Concurrency limits for ledger lookups
+
+When the SDK needs to look up many ledger entries at once (for example when
+checking TTLs across a large set of keys), it issues `getLedgerEntries`
+calls in parallel. To avoid overwhelming the RPC endpoint, the number of
+in-flight requests is bounded by `config.maxConcurrentLedgerLookups`.
+
+```typescript
+const sdk = new SorobanResurrect({
+  rpcUrl: 'https://soroban-testnet.stellar.org',
+  // At most 5 ledger lookups in flight at any time. Defaults to 10.
+  maxConcurrentLedgerLookups: 5,
+})
+```
+
+- **Setting:** `maxConcurrentLedgerLookups` (optional, positive integer).
+- **Default:** `10` when omitted.
+- **Behavior:** large inputs are split into batches that respect the limit;
+  results are returned in the same order as the input keys, so no entries
+  are lost or reordered regardless of the limit.
+- **Validation:** a non-positive or non-integer value throws a
+  `ConfigurationError` at construction time.
+
+This setting is purely a client-side bound and does not change the RPC
+protocol or the shape of any response, so it is backward compatible: existing
+configurations that omit it keep the previous default behavior.
+
 ## Check restore compatibility
 
 Use `checkNetworkCapabilities()` before enabling restore flows in an
