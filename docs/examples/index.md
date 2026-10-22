@@ -165,6 +165,90 @@ The example's tests cover the expected path plus boundary/failure cases:
   report `status: 'restored'` with an empty `archivedKeys` list.
 - **Live entry** — a live entry reports `status: 'live'` and its `liveUntilLedger`.
 
+## Multi-Network Example App
+
+A multi-network example lives at [`examples/multi-network`](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/tree/main/examples/multi-network).
+It demonstrates switching between testnet and public-network configuration and
+refuses to sign when the connected wallet's network does not match the
+configured network.
+
+```bash
+cd examples/multi-network
+npm install
+npm run dev
+```
+
+The example exposes a small, stable interface so the network selection and
+mismatch guard can be reused and tested independently of the UI:
+
+```typescript
+// examples/multi-network/src/network.ts
+export type NetworkName = 'testnet' | 'public'
+
+export interface NetworkConfig {
+  name: NetworkName
+  rpcUrl: string
+  networkPassphrase: string
+}
+
+export const NETWORKS: Record<NetworkName, NetworkConfig>
+
+/**
+ * Resolve the configured network. Throws for an unknown name so a typo can
+ * never silently fall back to a different network.
+ */
+export function resolveNetwork(name: NetworkName): NetworkConfig
+
+/**
+ * Guard that must pass before any signing happens. Throws
+ * `NetworkMismatchError` when the wallet's network does not match the
+ * configured network, so a transaction is never signed against the wrong
+ * network.
+ */
+export function assertNetworkMatch(
+  configured: NetworkConfig,
+  walletNetwork: NetworkName,
+): void
+```
+
+### Explicit network switching
+
+```typescript
+import { NETWORKS, resolveNetwork, assertNetworkMatch } from './network'
+
+// The user explicitly picks a network; there is no implicit default.
+const configured = resolveNetwork('testnet')
+
+// Before signing, verify the wallet is on the same network.
+assertNetworkMatch(configured, wallet.network)
+
+const sr = new SorobanResurrect({ rpcUrl: configured.rpcUrl })
+```
+
+### Mismatch guard
+
+```typescript
+try {
+  assertNetworkMatch(NETWORKS.public, wallet.network)
+} catch (error) {
+  if (error instanceof NetworkMismatchError) {
+    // Prompt the user to switch the wallet network before retrying.
+    showSwitchNetworkPrompt(error.expected, error.actual)
+  }
+}
+```
+
+### Failure and boundary cases
+
+The example's tests cover the expected path plus boundary/failure cases:
+
+- **Matching network** — `assertNetworkMatch` resolves when the wallet network
+  equals the configured network.
+- **Mismatched network** — signing is blocked with `NetworkMismatchError` when
+  the wallet is on a different network than the configured one.
+- **Unknown network name** — `resolveNetwork` throws instead of falling back to
+  a default network.
+
 ## Interactive Playground
 
 Want to try the flow without installing anything? The

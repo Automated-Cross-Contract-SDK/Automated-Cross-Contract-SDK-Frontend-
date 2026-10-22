@@ -66,6 +66,80 @@ Use the selector above to change what the fake RPC client returns:
 - Subscribe with `sr.onStateChange(...)` and render your own progress bar inside
   the snippet.
 
+## Multi-network demo
+
+The playground runs entirely offline, but the same `SorobanResurrect` facade is
+what you'd point at a real network. The multi-network example shows how to
+configure **testnet** and **public** networks side by side and switch between
+them explicitly, while refusing to sign when the connected wallet's network does
+not match the configured one.
+
+```ts
+import { SorobanResurrect, createRpcClient } from '@soroban-resurrect/sdk'
+
+// A stable, documented map of the networks the demo supports.
+const NETWORKS = {
+  testnet: {
+    rpcUrl: 'https://soroban-testnet.stellar.org',
+    networkPassphrase: 'Test SDF Network ; September 2015',
+  },
+  public: {
+    rpcUrl: 'https://soroban.stellar.org',
+    networkPassphrase: 'Public Global Stellar Network ; September 2015',
+  },
+} as const
+
+type NetworkName = keyof typeof NETWORKS
+
+// Explicit switching: build a fresh facade for the selected network.
+function createForNetwork(name: NetworkName) {
+  const net = NETWORKS[name]
+  return new SorobanResurrect({
+    rpcClient: createRpcClient(net.rpcUrl),
+    networkPassphrase: net.networkPassphrase,
+  })
+}
+
+// Mismatch guard: never sign against a wallet on a different network.
+async function submitSafely(
+  name: NetworkName,
+  wallet: { getNetwork(): Promise<string>; publicKey: string },
+  tx: unknown,
+) {
+  const expected = NETWORKS[name].networkPassphrase
+  const actual = await wallet.getNetwork()
+  if (actual !== expected) {
+    throw new Error(
+      `Wallet network mismatch: expected ${name} (${expected}), got ${actual}`,
+    )
+  }
+  return createForNetwork(name).submitWithRestore(wallet.publicKey, tx)
+}
+```
+
+Key points:
+
+- **Explicit switching** — the selected `NetworkName` fully determines the RPC
+  URL and network passphrase; there is no implicit default that could silently
+  target the wrong network.
+- **Mismatch guard** — `submitSafely` compares the wallet's reported network
+  against the configured passphrase and throws *before* any signing or
+  submission, so a testnet wallet can never sign a public-network transaction
+  (or vice versa).
+- **Boundary cases** — a wallet that reports an unknown or empty network, or a
+  disconnected wallet, fails the guard rather than falling through to signing.
+
+### Compatibility / migration notes
+
+- The `networkPassphrase` option is required when constructing a facade for a
+  real network; omitting it keeps the previous testnet-only behavior for
+  backwards compatibility.
+- If you previously hard-coded a single RPC URL, move it into a `NETWORKS` map
+  like the one above and route all construction through `createForNetwork` so
+  switching stays explicit.
+- The mismatch guard is additive: existing callers that already verify the
+  wallet network are unaffected, but new code should prefer `submitSafely`.
+
 ## Using this in real code
 
 The snippet is a simulation, but the API is real. To run the same flow against a

@@ -144,6 +144,60 @@ Ask for explicit user consent before triggering a restore (which requires an
 additional wallet signature), and always abort the controller in `onDestroy` so
 navigating away does not leave polling timers or wallet prompts running.
 
+## Quick Start (Multi-Network)
+
+The multi-network example demonstrates switching between Testnet and the public
+network at runtime while guarding against signing with a mismatched wallet
+network. See [`examples/multi-network`](/examples/multi-network) for the full
+runnable app. The core pattern is a small network registry plus an explicit
+mismatch guard before any signing happens:
+
+```typescript
+import { SorobanResurrect } from '@soroban-resurrect/sdk'
+import { Networks } from '@stellar/stellar-sdk'
+
+// Stable, documented network presets. Add entries here to support more networks.
+const NETWORKS = {
+  testnet: { rpcUrl: 'https://soroban-testnet.stellar.org', networkPassphrase: Networks.TESTNET },
+  public: { rpcUrl: 'https://soroban-mainnet.stellar.org', networkPassphrase: Networks.PUBLIC },
+} as const
+
+type NetworkId = keyof typeof NETWORKS
+
+function createClient(id: NetworkId) {
+  const { rpcUrl, networkPassphrase } = NETWORKS[id]
+  return new SorobanResurrect({ rpcUrl, networkPassphrase })
+}
+
+// Guard: refuse to sign when the wallet's active network does not match the
+// configured network. This prevents accidentally signing a Testnet tx with a
+// Mainnet wallet (or vice versa).
+function assertNetworkMatch(configured: NetworkId, walletNetwork: string) {
+  const expected = NETWORKS[configured].networkPassphrase
+  if (walletNetwork !== expected) {
+    throw new Error(
+      `Wallet network mismatch: configured ${configured} (${expected}) but wallet is on ${walletNetwork}. ` +
+        'Switch the wallet network before signing.',
+    )
+  }
+}
+
+// Explicit switching: rebuild the client and re-check the wallet before signing.
+let current: NetworkId = 'testnet'
+let sr = createClient(current)
+
+async function switchNetwork(next: NetworkId, wallet) {
+  current = next
+  sr = createClient(next)
+  assertNetworkMatch(current, await wallet.getNetwork())
+}
+```
+
+Always call `assertNetworkMatch` (or the equivalent check) immediately before
+`submitWithRestore`, and re-run it after every network switch. The guard throws
+before any signing prompt is shown, so a mismatched wallet can never sign a
+transaction for the wrong network.
+
 ## Choosing an approach
 
 If you already use Soroban RPC and only need a single, application-specific
