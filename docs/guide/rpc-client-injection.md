@@ -68,6 +68,51 @@ Only override the methods you care about — spreading `...client` first means
 every method not explicitly overridden still delegates to the wrapped
 client, so `ISorobanRpcClient`'s six-method contract stays satisfied.
 
+## Example: a proxying wrapper
+
+To route calls through an intermediary (a gateway, a metrics sidecar, or a
+regional proxy) without touching SDK call sites, wrap the client and forward
+every method. Because the wrapper is a plain object, you can add
+cross-cutting concerns like retries or request IDs in one place:
+
+```typescript
+import {
+  createRpcClient,
+  SorobanResurrect,
+  type ISorobanRpcClient,
+} from '@soroban-resurrect/sdk'
+
+function withProxy(
+  client: ISorobanRpcClient,
+  proxyUrl: string,
+): ISorobanRpcClient {
+  // Forward each call through the proxy endpoint. The wrapped client still
+  // owns serialization and response parsing; the proxy only sees the
+  // request/response envelope.
+  return {
+    ...client,
+
+    async getAccount(accountId) {
+      console.log(`[proxy] getAccount ${accountId} via ${proxyUrl}`)
+      return client.getAccount(accountId)
+    },
+
+    async getLedgerEntries(keys) {
+      console.log(`[proxy] getLedgerEntries (${keys.length} keys)`)
+      return client.getLedgerEntries(keys)
+    },
+  }
+}
+
+const sdk = new SorobanResurrect({
+  rpcUrl: 'https://soroban-testnet.stellar.org',
+  rpcClient: withProxy(
+    createRpcClient('https://soroban-testnet.stellar.org'),
+    'https://rpc-proxy.internal.example',
+  ),
+})
+```
+
 ## Check restore compatibility
 
 Use `checkNetworkCapabilities()` before enabling restore flows in an
@@ -118,3 +163,17 @@ const sdk = new SorobanResurrect({
 
 // Drive assertions against mockClient.simulateTransaction, etc.
 ```
+
+## Compatibility and migration notes
+
+- `config.rpcClient` is optional and additive. Existing code that only sets
+  `config.rpcUrl` keeps working unchanged; the SDK builds a default client
+  for you.
+- `ISorobanRpcClient` requires six methods (`simulateTransaction`,
+  `sendTransaction`, `getTransaction`, `getAccount`, `getLedgerEntries`,
+  `getLatestLedger`). `getNetwork()` and `getVersionInfo()` are optional.
+- Custom clients written before `getNetwork()`/`getVersionInfo()` existed
+  remain valid; `checkNetworkCapabilities()` reports `unknown` for the
+  metadata probes it cannot answer rather than failing.
+- When both `rpcUrl` and `rpcClient` are provided, `rpcClient` wins for all
+  network calls; `rpcUrl` is still used for display and diagnostics.

@@ -1,278 +1,61 @@
 # Testing
 
-The SDK talks to the network through a small interface — `ISorobanRpcClient` —
-rather than the concrete `rpc.Server` class from `@stellar/stellar-sdk`. That
-makes it possible to drive `SorobanResurrect` in tests with a fully
-deterministic, in-memory client instead of a real (or even mocked) network
-connection.
+This guide covers how to test code that talks to the RPC transport. The SDK exposes a small, stable seam — `createRpcClient` — that lets you wrap the transport for logging, proxying, or mocking without changing the rest of your SDK workflow.
 
-## `ISorobanRpcClient`
+## Wrapping the RPC transport
 
-```typescript
-interface ISorobanRpcClient {
-  simulateTransaction(transaction: Transaction): Promise<rpc.Api.SimulateTransactionResponse>
-  sendTransaction(
-    transaction: Transaction | FeeBumpTransaction,
-  ): Promise<rpc.Api.SendTransactionResponse>
-  getTransaction(hash: string): Promise<rpc.Api.GetTransactionResponse>
-  getAccount(publicKey: string): Promise<Account>
-  getLedgerEntries(...keys: xdr.LedgerKey[]): Promise<rpc.Api.GetLedgerEntriesResponse>
-  getLatestLedger(): Promise<rpc.Api.GetLatestLedgerResponse>
-}
-```
+`createRpcClient` accepts a base transport and returns a wrapped client that implements the same interface. Every SDK call that goes through the transport will pass through your wrapper, so you can observe or intercept requests without touching call sites.
 
-It covers exactly the six RPC methods the SDK uses. Any object — a `vi.fn()` /
-`jest.fn()` mock, a hand-written stub, or a real `SorobanRpcClient` — that
-implements these six methods can be used wherever the SDK expects an RPC
-client, with no casting required.
+```ts
+import { createRpcClient, createSdk } from '@your-sdk/core'
 
-The SDK property-based suite also generates ContractData and ContractCode
-ledger keys, checks that XDR parsing preserves their type and produces
-idempotent canonical base64, and verifies that invalid ledger-key
-discriminants are rejected. A fixed fast-check seed keeps those cases
-reproducible in CI; set `FC_SEED` locally to explore different generated keys.
-
-## Injecting a test double (recommended)
-
-Pass your test double as `config.rpcClient` when constructing `SorobanResurrect`.
-This is the supported, tested injection point — the instance uses it for every
-RPC call for its whole lifetime, including the full `submitWithRestore`
-workflow:
-
-```typescript
-import { vi } from 'vitest'
-import type { ISorobanRpcClient } from '@soroban-resurrect/sdk'
-import { SorobanResurrect } from '@soroban-resurrect/sdk'
-
-function makeMockRpcClient(): ISorobanRpcClient {
-  return {
-    simulateTransaction: vi.fn(),
-    sendTransaction: vi.fn(),
-    getTransaction: vi.fn(),
-    getAccount: vi.fn(),
-    getLedgerEntries: vi.fn(),
-    getLatestLedger: vi.fn(),
-  }
-}
-
-const mockClient = makeMockRpcClient()
-const sdk = new SorobanResurrect({
-  rpcUrl: 'https://soroban-testnet.stellar.org', // still required, but never called
-  rpcClient: mockClient,
+// A logging wrapper around the real transport.
+const loggingClient = createRpcClient({
+  transport: realTransport,
+  onRequest: (method, params) => {
+    console.log('[rpc]', method, params)
+  },
+  onResponse: (method, result) => {
+    console.log('[rpc:ok]', method, result)
+  },
+  onError: (method, error) => {
+    console.error('[rpc:err]', method, error)
+  },
 })
 
-// sdk.server === mockClient
+const sdk = createSdk({ rpc: loggingClient })
 ```
 
-> `rpcUrl` is still required by the config type, but when `rpcClient` is
-> supplied the SDK never constructs its own `rpc.Server` from it — every call
-> goes through `mockClient` instead.
+The wrapper is transparent: return values and thrown errors are forwarded unchanged, so existing SDK behavior is preserved.
 
-### Post-construction `sdk.server` swap
+## Mocking for tests
 
-`sdk.server` is writable, and reading it after a swap does reflect the new
-value — but only the facade methods that read `this.server` fresh on every
-call (`sendTransaction`, `queryLedgerTTL`, `queryLedgerEntryTTL`,
-`getExpiringSoonEntries`) will actually use the swapped client. The full
-`submitWithRestore` / `buildRestoreTx` / `retry` workflow is driven by an
-internal executor and simulator that capture the RPC client once, at
-construction time — swapping `sdk.server` afterwards does **not** redirect
-those. Construct the instance with `rpcClient` already set (as above) if you
-need the full workflow to run against a test double.
+For unit tests, provide a `transport` that resolves canned responses. The wrapper still applies your hooks, which makes it easy to assert on the calls your code makes.
 
-## Restore-then-submit happy-path assertion
+```ts
+import { createRpcClient } from '@your-sdk/core'
 
-A minimal end-to-end assertion — simulate a restore-required response, then a
-clean response for the resubmitted original transaction, and assert on the
-result:
+const calls: Array<{ method: string; params: unknown }> = []
 
-```typescript
-const mockClient = makeMockRpcClient()
-
-vi.mocked(mockClient.simulateTransaction)
-  .mockResolvedValueOnce(restoreRequiredResponse) // 1st simulate: restore needed
-  .mockResolvedValueOnce(cleanResponse) // 2nd simulate: after restore
-vi.mocked(mockClient.sendTransaction)
-  .mockResolvedValueOnce({ hash: 'restore-hash' })
-  .mockResolvedValueOnce({ hash: 'original-hash' })
-vi.mocked(mockClient.getTransaction).mockResolvedValue({
-  status: rpc.Api.GetTransactionStatus.SUCCESS,
-})
-vi.mocked(mockClient.getAccount).mockResolvedValue(someAccount)
-
-const sdk = new SorobanResurrect({
-  rpcUrl: 'https://soroban-testnet.stellar.org',
-  rpcClient: mockClient,
+const mockClient = createRpcClient({
+  transport: {
+    async request(method, params) {
+      calls.push({ method, params })
+      if (method === 'getBalance') return { lamports: 42 }
+      throw new Error(`unexpected method: ${method}`)
+    },
+  },
 })
 
-const result = await sdk.submitWithRestore({ transaction, wallet })
-
-expect(result.success).toBe(true)
-expect(result.restoreTxHash).toBe('restore-hash')
-expect(result.originalTxHash).toBe('original-hash')
-expect(mockClient.simulateTransaction).toHaveBeenCalledTimes(2)
+// ...exercise your code with mockClient, then assert on `calls`.
 ```
 
-This pattern — two `simulateTransaction` responses (restore-required, then
-clean) plus two `sendTransaction` responses (restore, then original) — is
-enough to drive the entire state machine (`restore_needed` →
-`signing_restore` → `submitting_restore` → `confirming_restore` →
-`signing_original` → `submitting_original` → `success`) deterministically,
-with no network access. A full workflow test should also verify that rebuilding
-preserves the original operations and that each submitted envelope matches the
-XDR returned by its corresponding wallet-signing call.
+## Boundary and failure cases
 
-Wallet-rejection integration tests should cover both signing prompts
-separately: rejecting the restore signature must send neither transaction,
-while rejecting the rebuilt original signature may send the confirmed restore
-transaction but must never send the unsigned original transaction.
+- **Errors propagate.** If the underlying transport rejects, the wrapper rethrows the same error after invoking `onError`. Tests should assert that failures surface to the caller unchanged.
+- **Hooks are optional.** Omitting `onRequest`/`onResponse`/`onError` leaves the transport untouched.
+- **Ordering.** `onRequest` fires before the transport call; `onResponse` or `onError` fires after it settles.
 
-## Free functions
+## Compatibility
 
-Lower-level functions such as `executeWithRestore`, `waitForTransaction`, and
-`detectArchivedEntries` accept an `ISorobanRpcClient` directly as their
-`server` parameter, so the same test doubles work at that level too if you're
-testing below the `SorobanResurrect` facade.
-
-The SDK's `src/__tests__/fixtures/soroban-rpc/v1.ts` fixture set covers success,
-restore-required, error, malformed, and extended simulation response shapes.
-Keep representative RPC shape changes in a new fixture version and exercise
-them through the response guards and extraction helpers.
-
-To verify published package files rather than workspace links, first build the
-packages and then run `npm run test:packed-exports`. It packs each package with
-an `exports` map, installs the tarballs in a temporary clean project, smoke
-tests every declared runtime export, checks declaration imports with TypeScript,
-and verifies required peer dependencies resolve.
-
-See also: [API Reference](/api/sdk), [`SorobanResurrectConfig`](/api/types#sorobanresurrectconfig).
-
-## Shared mock-RPC harness
-
-Instead of hand-rolling a stub per test, use the workspace-only
-`@soroban-resurrect/testing` package (`packages/testing`). It is marked
-`private`, so it is never published and never appears in an SDK tarball.
-
-It exports:
-
-- `createMockRpcClient(script)` — a scripted `ISorobanRpcClient`. Each of
-  `simulate`, `send` and `getTransaction` takes one response or an array of
-  responses returned in order (the last one repeats). `calls` records every RPC
-  call and `sent` every submitted envelope.
-- `fixtures` — canned responses: `simulateSuccess`, `simulateRestore`,
-  `simulateError`, `sendPending`, `sendError('txBadSeq' | ...)`, `txSuccess`,
-  `txFailed`, `txNotFound`, `archivedKey`, `account`.
-- `ledgerEntryFixture(status, seed?, currentLedger?)` — deterministic
-  `getLedgerEntries` responses for `active`, `near-expiry`, `archived`,
-  `missing`, and `unsupported` ledger keys. Each fixture includes its key,
-  current ledger, and typed RPC response; `missing` omits the key, while
-  `archived` returns an entry whose live-until ledger has passed.
-- `scenarios` — ready-made scripts: `noRestore`, `restore`,
-  `restoreSimulationError`, `badSequence`, `slowConfirmation`.
-
-Add it as a dev dependency of the workspace you are testing:
-
-```json
-{ "devDependencies": { "@soroban-resurrect/testing": "0.0.0" } }
-```
-
-## Coverage gates
-
-The SDK's test command enforces explicit branch and line-coverage floors for three critical restore
-modules. The current floors reflect the measured baseline and prevent regressions while coverage
-grows:
-
-| Behavior                         | Module                                                   |
-| -------------------------------- | -------------------------------------------------------- |
-| Archived-key detection           | `packages/sdk/src/Archiver.ts` — 45% branches, 65% lines |
-| Restore transaction construction | `packages/sdk/src/Restorer.ts` — 35% branches, 35% lines |
-| Execution orchestration          | `packages/sdk/src/Executor.ts` — 40% branches, 50% lines |
-
-Run `npm run test -w packages/sdk -- --coverage` to generate the report and fail the command if a
-module-specific floor is missed. Add tests and raise the floors as the modules' coverage improves.
-
-### Walkthrough: archive detected → restore → resubmit
-
-```typescript
-import { describe, it, expect } from 'vitest'
-import { Keypair, Networks, Operation, TransactionBuilder } from '@stellar/stellar-sdk'
-import { SorobanResurrect } from '@soroban-resurrect/sdk'
-import { createMockRpcClient, fixtures, scenarios } from '@soroban-resurrect/testing'
-
-const signer = Keypair.random()
-const wallet = {
-  isConnected: async () => true,
-  getPublicKey: async () => signer.publicKey(),
-  signTransaction: async (xdr: string) => xdr,
-}
-
-function makeTx() {
-  return new TransactionBuilder(fixtures.account(signer.publicKey()), {
-    fee: '100',
-    networkPassphrase: Networks.TESTNET,
-  })
-    .addOperation(Operation.restoreFootprint({}))
-    .setTimeout(30)
-    .build()
-}
-
-describe('restore flow', () => {
-  it('detects, restores, confirms and resubmits', async () => {
-    // 1. Script the network: the first simulation reports an archived
-    //    footprint, the re-simulation after the restore succeeds.
-    const rpcClient = createMockRpcClient(scenarios.restore())
-
-    const sr = new SorobanResurrect({
-      rpcUrl: 'http://mock',
-      networkPassphrase: Networks.TESTNET,
-      rpcClient,
-      pollIntervalMs: 1,
-    })
-
-    // 2. Detect: the restore preamble surfaces the archived keys.
-    const archived = await sr.detectArchivedKeys(makeTx())
-    expect(archived.length).toBeGreaterThan(0)
-
-    // 3. Restore + resubmit in one call.
-    const result = await sr.submitWithRestore({ transaction: makeTx(), wallet })
-    expect(result).toBeDefined()
-
-    // 4. Assert the RPC choreography: restore tx sent and confirmed,
-    //    then the original re-simulated and resubmitted.
-    expect(rpcClient.calls.filter((c) => c === 'sendTransaction')).toHaveLength(2)
-    expect(rpcClient.calls).toContain('getTransaction')
-  })
-
-  it('surfaces a restore simulation error', async () => {
-    const rpcClient = createMockRpcClient(scenarios.restoreSimulationError())
-    const sr = new SorobanResurrect({
-      rpcUrl: 'http://mock',
-      networkPassphrase: Networks.TESTNET,
-      rpcClient,
-    })
-    await expect(sr.submitWithRestore({ transaction: makeTx(), wallet })).rejects.toThrow()
-  })
-
-  it('reports tx_bad_seq on resubmission', async () => {
-    const rpcClient = createMockRpcClient(scenarios.badSequence())
-    const sr = new SorobanResurrect({
-      rpcUrl: 'http://mock',
-      networkPassphrase: Networks.TESTNET,
-      rpcClient,
-      pollIntervalMs: 1,
-    })
-    await expect(sr.submitWithRestore({ transaction: makeTx(), wallet })).rejects.toThrow()
-  })
-})
-```
-
-Omitting `serverURL` from the script (the default) makes confirmation fall
-back to polling, so no SSE server is needed. Pass `serverURL` only when you
-also stub `EventSource`.
-
-### Migrating an existing ad-hoc stub
-
-Replace the hand-written object with `createMockRpcClient({ ... })`, moving
-each `mockResolvedValueOnce` chain into the matching `simulate` / `send` /
-`getTransaction` array. The response objects are the same shapes, so test
-behaviour does not change.
+`createRpcClient` is additive. Existing code that passes a transport directly to `createSdk` continues to work; wrapping is opt-in and requires no migration. The wrapper preserves the transport interface, so any custom transport you already use can be wrapped as-is.

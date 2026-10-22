@@ -91,6 +91,82 @@ async function withdraw(tx: Transaction, wallet: WalletAdapter) {
 }
 ```
 
+## Custom RPC Client Injection
+
+The SDK accepts a custom RPC client through the `rpcClient` option. This is the
+supported way to wrap the RPC transport for logging, proxying, or testing
+without changing the standard SDK workflow — every SDK call still goes through
+the same `SorobanResurrect` API.
+
+### Interface
+
+A custom client implements the `RpcClient` interface: it exposes the same
+methods the SDK uses internally (`getAccount`, `simulateTransaction`,
+`sendTransaction`, `getTransaction`, `getLatestLedger`). Wrap an existing client
+to add behavior, then pass it in via `rpcClient`.
+
+### Logging wrapper
+
+```typescript
+import { SorobanResurrect, type RpcClient } from '@soroban-resurrect/sdk'
+
+function withLogging(inner: RpcClient): RpcClient {
+  return {
+    getAccount: (id) => {
+      console.debug('[rpc] getAccount', id)
+      return inner.getAccount(id)
+    },
+    simulateTransaction: (tx) => {
+      console.debug('[rpc] simulateTransaction')
+      return inner.simulateTransaction(tx)
+    },
+    sendTransaction: (tx) => {
+      console.debug('[rpc] sendTransaction')
+      return inner.sendTransaction(tx)
+    },
+    getTransaction: (hash) => {
+      console.debug('[rpc] getTransaction', hash)
+      return inner.getTransaction(hash)
+    },
+    getLatestLedger: () => {
+      console.debug('[rpc] getLatestLedger')
+      return inner.getLatestLedger()
+    },
+  }
+}
+
+const sr = new SorobanResurrect({
+  rpcUrl: 'https://soroban-testnet.stellar.org',
+  rpcClient: withLogging(defaultRpcClient),
+})
+```
+
+### Testing with a mock client
+
+```typescript
+import { SorobanResurrect, type RpcClient } from '@soroban-resurrect/sdk'
+
+const mockRpc: RpcClient = {
+  getAccount: async () => ({ accountId: 'G...', sequence: '1' }),
+  simulateTransaction: async () => ({ success: true, archivedKeys: [] }),
+  sendTransaction: async () => ({ hash: 'deadbeef', status: 'PENDING' }),
+  getTransaction: async () => ({ status: 'SUCCESS' }),
+  getLatestLedger: async () => ({ sequence: 1 }),
+}
+
+const sr = new SorobanResurrect({ rpcUrl: 'unused', rpcClient: mockRpc })
+```
+
+### Compatibility notes
+
+- `rpcClient` is optional; when omitted the SDK builds its default client from
+  `rpcUrl`, so existing code keeps working unchanged.
+- A custom client must implement every method of `RpcClient`; partial wrappers
+  should delegate the remaining methods to the inner client (as in the logging
+  example above).
+- Errors thrown by a custom client propagate to the SDK's normal error handling
+  (`onRestoreFailed`, `result.error`), so no extra handling is required.
+
 ## DeFi Position Recovery with Fee Review
 
 This example restores an archived DeFi contract position (e.g. a lending
