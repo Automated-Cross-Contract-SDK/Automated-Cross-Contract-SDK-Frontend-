@@ -44,3 +44,36 @@ address to Freighter. The adapter also supports `signAuthEntry` with explicit
 If the user declines account access or a signature, the adapter throws
 `WalletError` with code `USER_REJECTED`. Missing permissions or connectivity
 are reported as `NOT_CONNECTED`; unclassified wallet errors use `UNKNOWN`.
+
+## Scaffolder setup
+
+When generating a project with the scaffolder, select Freighter as the wallet
+integration to get matching setup guidance and environment examples:
+
+```bash
+npx @soroban-resurrect/scaffolder my-app --wallet freighter
+```
+
+Supported wallet integrations are `freighter` and `rabet`. Omitting `--wallet`
+keeps the default (no wallet integration) and generates no wallet-specific
+files. Passing an unsupported value fails with a clear error listing the
+supported integrations.
+
+Selecting `freighter` generates a `.env.example` entry and a short setup note
+in the generated project's README:
+
+```bash
+# .env.example
+VITE_WALLET_INTEGRATION=freighter
+```
+
+Install the Freighter browser extension, then follow the adapter usage above to
+connect and sign. The generated project reads `VITE_WALLET_INTEGRATION` to pick
+the wallet adapter at runtime.
+
+### Migration notes
+
+Projects generated before wallet selection was added have no
+`VITE_WALLET_INTEGRATION` entry. Add it manually (or re-run the scaffolder into
+a fresh directory) and install the matching adapter package. Existing projects
+that do not set the variable continue to run without a wallet integration.
