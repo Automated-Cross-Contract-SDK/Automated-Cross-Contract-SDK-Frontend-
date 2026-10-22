@@ -150,6 +150,58 @@ await submit(signed);
 See the [fee-model guide](./guide/fees.md) and the [TTL guides](./guide/ttl.md) for how restore
 fees fit into the overall fee model and TTL management.
 
+## Large footprint processing
+
+Footprint processing (e.g. scanning a transaction's footprint for archived keys) can be
+expensive for large footprints. To avoid blocking the UI thread, the SDK exposes a chunked,
+yielding processor alongside the existing synchronous behaviour. Output ordering and results
+are **deterministic** and identical to the synchronous path — chunking only affects *when*
+work runs, not *what* it produces.
+
+```ts
+type FootprintChunkOptions = {
+  /** Number of footprint keys processed per chunk. Defaults to `DEFAULT_FOOTPRINT_CHUNK_SIZE`. */
+  chunkSize?: number;
+  /**
+   * Yields control back to the event loop between chunks. Defaults to a macrotask
+   * (`setTimeout(…, 0)`) so the UI thread can paint. Pass a custom scheduler to
+   * integrate with your own runtime (e.g. `requestIdleCallback`).
+   */
+  yieldTo?: () => Promise<void>;
+};
+
+function processFootprintChunked<T, R>(
+  items: readonly T[],
+  process: (item: T, index: number) => R,
+  options?: FootprintChunkOptions,
+): Promise<R[]>;
+```
+
+- Results are returned in the same order as the input `items`, regardless of `chunkSize`.
+- An empty `items` array resolves immediately with `[]` without yielding.
+- A `chunkSize` of `0` or a negative value is rejected with a `RangeError`.
+- Errors thrown by `process` reject the returned promise; already-processed chunks are
+  discarded (no partial result is returned).
+- `DEFAULT_FOOTPRINT_CHUNK_SIZE` is the default chunk size used when `chunkSize` is omitted.
+
+### Worked example: chunked footprint scan
+
+```ts
+import { processFootprintChunked } from "@sdk/restore";
+
+// `footprintKeys` may be very large; process it in chunks so the UI stays responsive.
+const archived = await processFootprintChunked(
+  footprintKeys,
+  (key) => isArchived(key),
+  { chunkSize: 256 },
+);
+```
+
+> **Compatibility note:** the synchronous processing path is unchanged and remains the
+default for small footprints. Adopt `processFootprintChunked` when footprints may be large
+or when running on a UI thread. Because output is deterministic, switching between the sync
+and chunked paths does not change results.
+
 ## Contract and account scanning
 
 The scanning APIs answer "what in my contract or account is about to expire?" **without
@@ -226,35 +278,14 @@ import {
 } from "@sdk/scanning";
 
 // Contract scan: instance + wasm code are discovered automatically, but storage
-// keys MUST be supplied by the caller.
+// keys must be supplied explicitly.
 const contractResult = await getExpiringEntriesForContract(contractId, {
   expiringSoonLedgers: DEFAULT_EXPIRING_SOON_LEDGERS,
-  instance: instanceKey,
-  wasmCode: wasmCodeKey,
-  storageKeys: [balanceKey, allowanceKey],
+  storageKeys: [storageKeyA, storageKeyB],
 });
 
-if (contractResult.instance?.expiringSoon) {
-  console.warn("contract instance is expiring soon");
-}
-for (const entry of contractResult.storage) {
-  if (entry.expiringSoon) {
-    console.warn("storage entry expiring soon", entry.key);
-  }
-}
-
-// Account scan: presence of the account and its trustlines.
+// Account scan: presence check for the account and its trustlines.
 const accountResult = await getExpiringEntriesForAccount(accountId, {
-  trustlines: [usdcTrustlineKey],
+  trustlines: [trustlineKeyA],
 });
 ```
-
-### When to use scanning vs. `detectArchivedKeys`
-
-| API | Basis | Use when |
-| --- | --- | --- |
-| `getExpiringEntriesForContract` / `getExpiringEntriesForAccount` | Explicit keys you supply | You know which keys matter and want a transaction-free, read-only check. |
-| `detectArchivedKeys` | Transaction footprint | You have a transaction and want to know which of its footprint keys are archived. |
-
-Use the scanning APIs for proactive, transaction-free monitoring; use `detectArchivedKeys`
-when you already have a transaction and need to inspect its footprint.
