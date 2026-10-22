@@ -189,3 +189,144 @@ const handle = sr.watchTTL({ keys })
 // ...
 handle.stop()
 ```
+
+## Timeout and partial-failure scenarios
+
+Watching and extending TTLs involves several network round-trips: polling the
+ledger, simulating the extend transaction, submitting it, and waiting for the
+result. Any of these can time out or fail partway through. The diagrams below
+show **which actions may already have occurred** when a timeout or failure is
+returned, so your application knows what state to reconcile against.
+
+### Timeout during a poll
+
+A poll timeout happens before any transaction is built, so no on-chain state
+changes. The watcher simply retries on the next interval.
+
+```mermaid
+sequenceDiagram
+    participant App
+    participant Watcher as watchTTL
+    participant RPC as Soroban RPC
+
+    App->>Watcher: start (intervalMs)
+    loop each interval
+        Watcher->>RPC: getLedgerEntries(keys)
+        RPC--xWatcher: timeout / no response
+        Watcher-->>App: onEvent({ type: 'error', error })
+        Note over Watcher: no transaction built or submitted
+    end
+    Watcher->>RPC: getLedgerEntries(keys) (next interval)
+    RPC-->>Watcher: entries + TTLs
+    Watcher-->>App: onEvent({ type: 'ttlLow' | 'ttlExtended' })
+```
+
+**Actions that may have occurred:** none on-chain. The only side effect is the
+emitted `error` event. Reconcile by treating the key's status as `unknown`
+until the next successful poll — do **not** assume the entry is archived.
+
+### Timeout during an auto-extend submission
+
+This is the ambiguous case. The extend transaction may have been submitted and
+included in a ledger even though the watcher never received a confirmation.
+
+```mermaid
+sequenceDiagram
+    participant App
+    participant Watcher as watchTTL (autoExtend)
+    participant RPC as Soroban RPC
+    participant Net as Stellar network
+
+    Watcher->>RPC: simulate extendFootprintTtl
+    RPC-->>Watcher: footprint + fee
+    Watcher->>App: signTransaction(tx)
+    App-->>Watcher: signed tx
+    Watcher->>Net: submitTransaction(signed)
+    Net--xWatcher: timeout waiting for result
+    Watcher-->>App: onEvent({ type: 'error', key, error })
+    Note over Net: tx MAY already be included
+```
+
+**Actions that may have occurred:** the transaction may have been signed and
+submitted, and may already be included in a ledger. The watcher does not retry
+the submission itself; it re-polls on the next interval.
+
+**How to reconcile:**
+
+1. Re-query the key with `queryLedgerTTL`. If the TTL increased, the extension
+   succeeded — no further action is needed.
+2. If the TTL is unchanged, the transaction was not included. It is safe to
+   extend again on the next `ttlLow` event.
+3. If the status is `unknown` (the re-query itself failed), wait for the next
+   poll rather than resubmitting blindly. Extending an already-extended entry is
+   idempotent in effect (it sets a minimum total TTL), but avoid duplicate
+   submissions within the same interval.
+
+### Partial failure in `extendLedgerTTL`
+
+`extendLedgerTTL` is a single explicit call. Its `result.status` tells you how
+far it got, and each terminal status maps to a distinct set of actions that may
+have occurred.
+
+```mermaid
+sequenceDiagram
+    participant App
+    participant SDK as extendLedgerTTL
+    participant RPC as Soroban RPC
+    participant Wallet
+    participant Net as Stellar network
+
+    App->>SDK: extendLedgerTTL(keys, opts)
+    SDK->>RPC: simulate extendFootprintTtl
+    alt simulation fails
+        RPC--xSDK: error
+        SDK-->>App: status: 'failed' (nothing submitted)
+    else simulation ok
+        RPC-->>SDK: footprint + fee
+        SDK->>App: confirmFee({ estimatedFee })
+        alt confirmFee returns false
+            App-->>SDK: false
+            SDK-->>App: status: 'aborted' (nothing signed)
+        else confirmed
+            App-->>SDK: true
+            SDK->>Wallet: request signature
+            alt wallet rejects
+                Wallet--xSDK: rejected
+                SDK-->>App: status: 'failed' (nothing submitted)
+            else signed
+                Wallet-->>SDK: signed tx
+                SDK->>Net: submitTransaction(signed)
+                alt submit or confirm times out
+                    Net--xSDK: timeout
+                    SDK-->>App: status: 'failed' (tx MAY be included)
+                else confirmed
+                    Net-->>SDK: result
+                    SDK-->>App: status: 'submitted', transactionHash
+                end
+            end
+        end
+    end
+```
+
+**Reconciling by status:**
+
+| `result.status` | Actions that may have occurred              | Reconciliation                                              |
+| --------------- | ------------------------------------------- | ----------------------------------------------------------- |
+| `aborted`       | Nothing signed or submitted.                | Safe to retry with a new estimate.                          |
+| `failed`        | Depends on the stage — see below.           | Re-query TTL before retrying.                               |
+| `submitted`     | Transaction included; `transactionHash` set. | None; the extension is applied.                             |
+
+For a `failed` result, distinguish the stage from the error:
+
+- **Simulation or wallet failure:** nothing was submitted. Retry is safe.
+- **Submission/confirmation timeout:** the transaction may already be included.
+  Re-query the key with `queryLedgerTTL` and only retry if the TTL did not
+  increase. Because `extendTo` is a minimum total TTL (not an increment),
+  re-extending an already-extended entry is harmless.
+
+### General reconciliation rule
+
+After any timeout or failure, treat the outcome as **unknown** until you have
+re-queried the affected keys. Never assume a timeout means the action did not
+happen, and never assume it did. `queryLedgerTTL` is the source of truth: a
+higher TTL means the extension landed; an unchanged TTL means it did not.

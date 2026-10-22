@@ -34,6 +34,7 @@ export default defineConfig({
             { text: 'Tutorial: Common Use Cases', link: '/guide/tutorial' },
             { text: 'Restore Fees and Limits', link: '/guide/restore-fees' },
             { text: 'History Persistence', link: '/guide/history-persistence' },
+            { text: 'Timeout & Partial-Failure Sequences', link: '/guide/sequence-diagrams' },
             { text: 'Protocol Glossary', link: '/guide/glossary' },
             { text: 'Local Development', link: '/guide/local-development' },
             { text: 'Local Package Development', link: '/guide/local-package-development' },
