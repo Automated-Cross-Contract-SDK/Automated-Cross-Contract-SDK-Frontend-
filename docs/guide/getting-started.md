@@ -103,6 +103,47 @@ function WithdrawButton() {
 }
 ```
 
+## Quick Start (Svelte)
+
+The Svelte example wires the SDK into a store so the restore lifecycle, wallet
+signing prompts, user consent, and cleanup after navigation are all explicit.
+See [`examples/svelte`](/examples/svelte) for the full runnable app. The core
+pattern is a store that owns the `AbortController` and disposes it on unmount:
+
+```svelte
+<script lang="ts">
+  import { onDestroy } from 'svelte'
+  import { writable } from 'svelte/store'
+  import { SorobanResurrect } from '@soroban-resurrect/sdk'
+
+  const sr = new SorobanResurrect({
+    rpcUrl: 'https://soroban-testnet.stellar.org',
+    networkPassphrase: Networks.TESTNET,
+  })
+
+  const status = writable<'idle' | 'consent' | 'signing' | 'restoring' | 'done' | 'error'>('idle')
+  let controller: AbortController | null = null
+
+  async function run(tx, wallet) {
+    controller = new AbortController()
+    status.set('signing')
+    const result = await sr.submitWithRestore({ transaction: tx, wallet, signal: controller.signal })
+    status.set(result.success ? 'done' : 'error')
+  }
+
+  // Safe cleanup after navigation: abort in-flight work and clear the store.
+  onDestroy(() => {
+    controller?.abort()
+    controller = null
+    status.set('idle')
+  })
+</script>
+```
+
+Ask for explicit user consent before triggering a restore (which requires an
+additional wallet signature), and always abort the controller in `onDestroy` so
+navigating away does not leave polling timers or wallet prompts running.
+
 ## Choosing an approach
 
 If you already use Soroban RPC and only need a single, application-specific

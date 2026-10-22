@@ -13,6 +13,87 @@ npm run dev:example
 
 This starts a local dev server demonstrating connecting a wallet, building a transaction, and calling `submitWithRestore`.
 
+## Svelte Example App
+
+A Svelte example lives at [`examples/svelte`](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/tree/main/examples/svelte). It demonstrates the Svelte store lifecycle, wallet signing prompts, explicit user consent before a restore, and safe cleanup after navigation.
+
+```bash
+cd examples/svelte
+npm install
+npm run dev
+```
+
+The example exposes a small, stable interface so the flow can be reused and tested:
+
+```typescript
+// examples/svelte/src/lib/restoreStore.ts
+export interface RestoreStoreOptions {
+  rpcUrl: string
+  wallet: WalletAdapter
+}
+
+export interface RestoreStoreState {
+  state: RestoreState
+  message: string
+  archivedKeys: ArchivedLedgerEntry[]
+  consentRequired: boolean
+  result?: SubmitWithRestoreResult
+  error?: Error
+}
+
+// createRestoreStore returns a Svelte readable store plus actions.
+export function createRestoreStore(options: RestoreStoreOptions): {
+  subscribe: Readable<RestoreStoreState>['subscribe']
+  submit: (tx: Transaction) => Promise<void>
+  grantConsent: () => void
+  denyConsent: () => void
+  destroy: () => void
+}
+```
+
+### Store lifecycle and cleanup
+
+```svelte
+<script lang="ts">
+  import { onDestroy } from 'svelte'
+  import { createRestoreStore } from './lib/restoreStore'
+
+  export let rpcUrl: string
+  export let wallet: WalletAdapter
+
+  const store = createRestoreStore({ rpcUrl, wallet })
+
+  // Safe cleanup after navigation: unsubscribe and abort in-flight work.
+  onDestroy(() => store.destroy())
+</script>
+```
+
+### Consent before restore
+
+```svelte
+{#if $store.consentRequired}
+  <div class="consent">
+    <p>{$store.archivedKeys.length} archived entries must be restored before submitting.</p>
+    <button on:click={store.grantConsent}>Restore and continue</button>
+    <button on:click={store.denyConsent}>Cancel</button>
+  </div>
+{:else}
+  <p>{$store.message}</p>
+{/if}
+```
+
+### Wallet signing prompts
+
+```typescript
+// The store surfaces each signing prompt through onStateChange so the UI can
+// show the wallet prompt before the adapter is invoked.
+sr.onStateChange((info) => {
+  if (info.state === 'signing_restore' || info.state === 'signing_original') {
+    promptWallet(info.message)
+  }
+})
+```
+
 ## Interactive Playground
 
 Want to try the flow without installing anything? The
