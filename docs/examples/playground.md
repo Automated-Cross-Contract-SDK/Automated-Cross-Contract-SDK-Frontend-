@@ -66,6 +66,68 @@ Use the selector above to change what the fake RPC client returns:
 - Subscribe with `sr.onStateChange(...)` and render your own progress bar inside
   the snippet.
 
+## DeFi position recovery with fee review
+
+A common real-world case: a lending or AMM position whose contract data has
+been archived. Before the user signs anything, a dApp should show **what will be
+restored** and **what it will cost**. The SDK exposes both pieces so you can
+build that review screen.
+
+```ts
+import { SorobanResurrect, createRpcClient } from '@soroban-resurrect/sdk'
+
+const sr = new SorobanResurrect({
+  rpcClient: createRpcClient('https://soroban-testnet.stellar.org'),
+  networkPassphrase: 'Test SDF Network ; September 2015',
+})
+
+// 1. The user's action (e.g. withdraw from a lending pool) is simulated.
+//    If any of its footprint entries are archived, this returns true.
+const needsRestore = await sr.needsRestore(positionTx)
+if (!needsRestore) {
+  // Nothing archived — sign and submit the original transaction directly.
+  return submitOriginal(positionTx)
+}
+
+// 2. Inspect exactly which ledger keys will be restored so the UI can list
+//    the affected contracts/positions.
+const archivedKeys = await sr.detectArchivedKeys(positionTx)
+
+// 3. Build the restore transaction and read its fee before signing. The
+//    restore tx is a separate `restoreFootprint` operation, so its fee is
+//    independent of the original transaction's fee.
+const restoreTx = await sr.buildRestoreTx(walletPublicKey, positionTx)
+const restoreFee = restoreTx.fee          // stroops, as a string
+const originalFee = positionTx.fee        // stroops, as a string
+
+// 4. Present the review to the user: what is restored, and the total cost
+//    (restore fee + original fee) they are about to authorize.
+await showFeeReview({
+  archivedKeys,
+  restoreFee,
+  originalFee,
+  totalFee: (BigInt(restoreFee) + BigInt(originalFee)).toString(),
+})
+
+// 5. Only after the user confirms, run the full flow. `submitWithRestore`
+//    signs and submits the restore tx, waits for confirmation, rebuilds the
+//    original tx, then signs and submits it.
+const result = await sr.submitWithRestore(walletPublicKey, positionTx)
+```
+
+Key points for the review screen:
+
+- **`detectArchivedKeys`** returns the archived ledger keys, so you can map them
+  back to human-readable positions (e.g. "Your XLM/USDC LP position").
+- **`buildRestoreTx`** returns a fully-formed transaction whose `fee` field is
+  the restore cost. Show it alongside the original transaction's fee so the user
+  sees the total they are authorizing.
+- **`submitWithRestore`** is the single call that performs the whole flow; the
+  review step above is purely informational and does not change the outcome.
+- If the restore transaction fails to confirm, `submitWithRestore` rejects and
+  the original transaction is never submitted — surface that as an error rather
+  than a silent retry.
+
 ## Using this in real code
 
 The snippet is a simulation, but the API is real. To run the same flow against a
