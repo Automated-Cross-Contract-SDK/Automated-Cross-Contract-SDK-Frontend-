@@ -80,6 +80,30 @@ Stable interface:
 
 Exit codes: `0` healthy, `1` timed out / unreachable, `2` malformed response.
 
+## Inspecting package release readiness
+
+Before cutting a release, run the release-readiness inspector. It summarizes
+workspace version alignment, build results, package contents, and required
+release metadata, then exits non-zero if anything is not ready. It is
+inspection-only: it never publishes or mutates artifacts.
+
+```bash
+# Inspect the whole workspace
+npm run release:check
+
+# Or scope it to a single package
+npm run release:check -- --package @soroban-resurrect/sdk
+```
+
+Stable interface:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--package <name>` | all workspace packages | Limit the report to a single package by name. |
+| `--json` | off | Emit the report as machine-readable JSON instead of a table. |
+
+Exit codes: `0` ready, `1` one or more checks failed, `2` invalid arguments.
+
 ## Endpoints
 
 | Service | URL |
@@ -143,6 +167,7 @@ Omitting `-v` keeps the ledger between restarts.
 | Requests hang from a browser app | The RPC server allows cross-origin requests, but a mixed-content page served over HTTPS cannot call `http://localhost`. Serve the dev app over HTTP. |
 | `rpc:check` exits `1` | The node is not up yet or the URL is wrong. Confirm with `docker compose ps` and the `curl` probe above. |
 | `rpc:check` exits `2` | The endpoint answered but not with a valid `getHealth` result. Check the URL points at `/soroban/rpc`, not Horizon. |
+| `release:check` exits `1` | One or more readiness checks failed. Re-run with `--json` to see which package and check failed. |
 
 ## Stopping the network
 

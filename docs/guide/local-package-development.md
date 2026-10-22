@@ -43,6 +43,29 @@ Or keep a rebuild running while you work:
 npm run build -w packages/sdk -- --watch
 ```
 
+## Inspecting release readiness
+
+Before you link, publish to yalc, or open a release PR, run the release-readiness
+check. It inspects the workspace without publishing anything:
+
+```bash
+npm run release:check
+```
+
+It reports, for every workspace package:
+
+- **Version alignment** — sibling dependencies pinned to exact workspace
+  versions, and no package resolving a sibling from the registry.
+- **Build results** — whether `dist/` exists and is newer than `src/`.
+- **Package contents** — the files that would land in the tarball, so a missing
+  `files` entry shows up here instead of after publish.
+- **Release metadata** — required `package.json` fields (`name`, `version`,
+  `license`, `repository`, `exports`) and the presence of a `README`.
+
+The command exits non-zero when any check fails, so it is safe to wire into CI.
+Pass `--json` for machine-readable output and `--package <name>` to inspect a
+single package. It never runs `npm publish` and never mutates the workspace.
+
 ## Using yalc
 
 ### 1. Publish the package to the local store
@@ -152,6 +175,7 @@ mismatched or unattributable artifacts.
 | Vite does not reload the linked package | Linked packages sit outside the project root. Add `optimizeDeps: { exclude: ['@soroban-resurrect/sdk'] }` to the consumer's Vite config. |
 | A file is missing only under yalc | It is not covered by `files` in the package's `package.json`. It would be missing from the npm release too, so fix it there. |
 | A missing sibling resolves from the registry | The internal dependency is not pinned to an exact workspace version. Pin it and re-run the pre-publish check. |
+| `release:check` reports a stale `dist/` | Rebuild the package (`npm run build -w packages/<name>`) before re-running the check. |
 
 ## Do not commit link artifacts
 
