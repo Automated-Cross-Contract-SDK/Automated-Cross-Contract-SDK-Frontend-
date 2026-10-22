@@ -171,6 +171,39 @@ publish workflow for the remaining packages at the same version. Never bump
 versions to work around a partial publish — that leaves consumers with
 mismatched or unattributable artifacts.
 
+## Validating dependency updates
+
+Automated dependency bumps (Dependabot, Renovate, or a manual `npm update`) can
+break the workspace even when the lockfile resolves cleanly. The
+`dependency-validation` workflow (`.github/workflows/dependency-validation.yml`)
+re-runs the full workspace build and test suite plus the package fixtures so a
+bad bump is caught before it merges.
+
+### When it runs
+
+- **Scheduled**: nightly via cron, so drift in transitive dependencies surfaces
+  even without an open PR.
+- **On dependency PRs**: pull requests that touch `package.json`,
+  `package-lock.json`, or any workspace `package.json` trigger the same checks.
+- **Manually**: `workflow_dispatch` lets you run it on demand from the Actions
+  tab or with `gh workflow run dependency-validation.yml`.
+
+### What it validates
+
+1. Installs from the lockfile with `npm ci` across the workspace.
+2. Builds every package (`npm run build`).
+3. Runs the workspace test suite (`npm test`).
+4. Exercises the package fixtures to confirm the packed output still works for
+   real consumers.
+
+### Interpreting failures
+
+A red run means the dependency set no longer builds or passes tests. Reproduce
+locally with `npm ci && npm run build && npm test`, then either pin the offending
+package back to a working version or fix the incompatibility. Do not merge a
+dependency PR while this workflow is failing — the scheduled run will keep
+flagging the same breakage on `main`.
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |
@@ -183,6 +216,7 @@ mismatched or unattributable artifacts.
 | A file is missing only under yalc | It is not covered by `files` in the package's `package.json`. It would be missing from the npm release too, so fix it there. |
 | A missing sibling resolves from the registry | The internal dependency is not pinned to an exact workspace version. Pin it and re-run the pre-publish check. |
 | Publish fails on tarball inspection | A packed file matched a credential pattern or is an unexpected file. Remove the secret from source, rotate it if committed, and exclude the file via `files` / `.npmignore`. |
+| `dependency-validation` fails after a bump | The new dependency set does not build or pass tests. Reproduce with `npm ci && npm run build && npm test`, then pin back or fix the incompatibility. |
 
 ## Do not commit link artifacts
 
