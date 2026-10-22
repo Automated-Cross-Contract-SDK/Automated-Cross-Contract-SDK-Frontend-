@@ -96,6 +96,27 @@ leaving your machine:
 curl "http://localhost:8000/friendbot?addr=GABC...XYZ"
 ```
 
+## Smoke-testing a generated app
+
+After scaffolding an app with the `scaffolder` package, verify that it installs,
+builds, and exposes the public SDK imports before wiring up a wallet. The
+`smoke-test` command runs these checks without requiring any wallet credentials:
+
+```bash
+npx @soroban-resurrect/scaffolder smoke-test ./my-app
+```
+
+It performs three checks and exits non-zero if any fail:
+
+1. **Dependencies** — the app's `package.json` resolves and required SDK
+   dependencies are declared.
+2. **Build** — the app compiles via its configured build script.
+3. **Public SDK imports** — the generated entry point imports the public SDK
+   surface (`@soroban-resurrect/sdk`) without needing a funded account or wallet.
+
+Run it in CI right after generation to catch broken templates early. No secrets,
+keys, or network access to a live RPC are required.
+
 ## Resetting the ledger
 
 Restoration tests depend on entries actually reaching an archived state, so it

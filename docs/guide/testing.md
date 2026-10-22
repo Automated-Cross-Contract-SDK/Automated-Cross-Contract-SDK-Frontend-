@@ -145,6 +145,43 @@ an `exports` map, installs the tarballs in a temporary clean project, smoke
 tests every declared runtime export, checks declaration imports with TypeScript,
 and verifies required peer dependencies resolve.
 
+## Smoke-testing a generated app
+
+The scaffolder ships an integration smoke-test command that validates a
+freshly generated app without requiring wallet credentials or network access.
+Run it from the generated app's directory:
+
+```bash
+npx soroban-resurrect smoke-test
+```
+
+Or programmatically via the stable interface exported from the scaffolder
+package:
+
+```typescript
+import { runSmokeTest } from '@soroban-resurrect/scaffolder'
+
+const result = await runSmokeTest({ cwd: '/path/to/generated-app' })
+if (!result.ok) {
+  console.error(result.failures)
+  process.exit(1)
+}
+```
+
+The command performs three checks in order and reports each result:
+
+1. **Dependencies** — verifies the generated app's `package.json` declares the
+   expected SDK and peer dependencies and that they resolve from
+   `node_modules`.
+2. **Build** — runs the app's build script and fails if it exits non-zero.
+3. **Public SDK imports** — imports every public entry point the generated app
+   uses (e.g. `SorobanResurrect`, `ISorobanRpcClient`) to confirm the published
+   surface is intact.
+
+No wallet credentials, secret keys, or live RPC endpoints are needed — the
+smoke test is safe to run in CI. It exits non-zero on the first failing check
+and prints a per-check summary so failures are easy to triage.
+
 See also: [API Reference](/api/sdk), [`SorobanResurrectConfig`](/api/types#sorobanresurrectconfig).
 
 ## Shared mock-RPC harness
@@ -182,97 +219,4 @@ The SDK's test command enforces explicit branch and line-coverage floors for thr
 modules. The current floors reflect the measured baseline and prevent regressions while coverage
 grows:
 
-| Behavior                         | Module                                                   |
-| -------------------------------- | -------------------------------------------------------- |
-| Archived-key detection           | `packages/sdk/src/Archiver.ts` — 45% branches, 65% lines |
-| Restore transaction construction | `packages/sdk/src/Restorer.ts` — 35% branches, 35% lines |
-| Execution orchestration          | `packages/sdk/src/Executor.ts` — 40% branches, 50% lines |
-
-Run `npm run test -w packages/sdk -- --coverage` to generate the report and fail the command if a
-module-specific floor is missed. Add tests and raise the floors as the modules' coverage improves.
-
-### Walkthrough: archive detected → restore → resubmit
-
-```typescript
-import { describe, it, expect } from 'vitest'
-import { Keypair, Networks, Operation, TransactionBuilder } from '@stellar/stellar-sdk'
-import { SorobanResurrect } from '@soroban-resurrect/sdk'
-import { createMockRpcClient, fixtures, scenarios } from '@soroban-resurrect/testing'
-
-const signer = Keypair.random()
-const wallet = {
-  isConnected: async () => true,
-  getPublicKey: async () => signer.publicKey(),
-  signTransaction: async (xdr: string) => xdr,
-}
-
-function makeTx() {
-  return new TransactionBuilder(fixtures.account(signer.publicKey()), {
-    fee: '100',
-    networkPassphrase: Networks.TESTNET,
-  })
-    .addOperation(Operation.restoreFootprint({}))
-    .setTimeout(30)
-    .build()
-}
-
-describe('restore flow', () => {
-  it('detects, restores, confirms and resubmits', async () => {
-    // 1. Script the network: the first simulation reports an archived
-    //    footprint, the re-simulation after the restore succeeds.
-    const rpcClient = createMockRpcClient(scenarios.restore())
-
-    const sr = new SorobanResurrect({
-      rpcUrl: 'http://mock',
-      networkPassphrase: Networks.TESTNET,
-      rpcClient,
-      pollIntervalMs: 1,
-    })
-
-    // 2. Detect: the restore preamble surfaces the archived keys.
-    const archived = await sr.detectArchivedKeys(makeTx())
-    expect(archived.length).toBeGreaterThan(0)
-
-    // 3. Restore + resubmit in one call.
-    const result = await sr.submitWithRestore({ transaction: makeTx(), wallet })
-    expect(result).toBeDefined()
-
-    // 4. Assert the RPC choreography: restore tx sent and confirmed,
-    //    then the original re-simulated and resubmitted.
-    expect(rpcClient.calls.filter((c) => c === 'sendTransaction')).toHaveLength(2)
-    expect(rpcClient.calls).toContain('getTransaction')
-  })
-
-  it('surfaces a restore simulation error', async () => {
-    const rpcClient = createMockRpcClient(scenarios.restoreSimulationError())
-    const sr = new SorobanResurrect({
-      rpcUrl: 'http://mock',
-      networkPassphrase: Networks.TESTNET,
-      rpcClient,
-    })
-    await expect(sr.submitWithRestore({ transaction: makeTx(), wallet })).rejects.toThrow()
-  })
-
-  it('reports tx_bad_seq on resubmission', async () => {
-    const rpcClient = createMockRpcClient(scenarios.badSequence())
-    const sr = new SorobanResurrect({
-      rpcUrl: 'http://mock',
-      networkPassphrase: Networks.TESTNET,
-      rpcClient,
-      pollIntervalMs: 1,
-    })
-    await expect(sr.submitWithRestore({ transaction: makeTx(), wallet })).rejects.toThrow()
-  })
-})
-```
-
-Omitting `serverURL` from the script (the default) makes confirmation fall
-back to polling, so no SSE server is needed. Pass `serverURL` only when you
-also stub `EventSource`.
-
-### Migrating an existing ad-hoc stub
-
-Replace the hand-written object with `createMockRpcClient({ ... })`, moving
-each `mockResolvedValueOnce` chain into the matching `simulate` / `send` /
-`getTransaction` array. The response objects are the same shapes, so test
-behaviour does not change.
+| Behavior                         | Module                            
