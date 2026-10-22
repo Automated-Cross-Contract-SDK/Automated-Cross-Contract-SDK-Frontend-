@@ -1,10 +1,23 @@
- 
+
 name: Publish
 
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Release channel to publish"
+        required: true
+        default: canary
+        type: choice
+        options:
+          - canary
+      base:
+        description: "Base version to derive the canary prerelease from (e.g. 1.2.3)"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -98,18 +111,59 @@ jobs:
           console.log('No internal package resolves a sibling from the registry.');
           EOF
 
+      - name: Resolve release channel
+        id: channel
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            channel="${{ inputs.channel }}"
+            base="${{ inputs.base }}"
+          else
+            channel="stable"
+            base=""
+          fi
+          if [ "$channel" = "canary" ]; then
+            if ! printf '%s' "$base" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "::error::Canary base must be a stable semver like 1.2.3 (got '$base')."
+              exit 1
+            fi
+            # Canary versions are <base>-canary.<run>.<attempt> so they sort below
+            # the stable release and never collide across runs.
+            version="${base}-canary.${{ github.run_number }}.${{ github.run_attempt }}"
+            tag="canary"
+          else
+            version=""
+            tag="latest"
+          fi
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Resolved channel=$channel version=${version:-<from package.json>} tag=$tag"
+
+      - name: Apply canary version
+        if: steps.channel.outputs.channel == 'canary'
+        run: |
+          set -euo pipefail
+          version="${{ steps.channel.outputs.version }}"
+          packages=(packages/sdk packages/react-hook packages/vue-hook packages/svelte-hook)
+          for pkg in "${packages[@]}"; do
+            npm version "$version" -w "$pkg" --no-git-tag-version --allow-same-version
+          done
+          echo "Applied canary version $version to all packages."
+
       - run: npm run build:sdk
       - run: npm run build:hook
 
       - name: Publish all packages atomically with provenance
         run: |
           set -euo pipefail
+          tag="${{ steps.channel.outputs.tag }}"
           packages=(packages/sdk packages/react-hook packages/vue-hook packages/svelte-hook)
           published=()
           failed=""
           for pkg in "${packages[@]}"; do
-            echo "::group::Publishing $pkg"
-            if npm publish -w "$pkg" --provenance --access public; then
+            echo "::group::Publishing $pkg (dist-tag: $tag)"
+            if npm publish -w "$pkg" --provenance --access public --tag "$tag"; then
               published+=("$pkg")
               echo "::endgroup::"
             else
