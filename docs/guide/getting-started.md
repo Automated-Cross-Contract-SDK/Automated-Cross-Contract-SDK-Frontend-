@@ -99,6 +99,102 @@ With persistence disabled:
 If you need history across restarts, keep persistence enabled and apply the
 encryption requirements above.
 
+## Integrating the SDK into an existing dApp
+
+This tutorial adds the SDK to an application that already works, without
+rewriting it. It covers the wallet signing flow, failure UX, and a repeatable
+verification flow so you can confirm the integration works.
+
+### Step 1 — Install and configure the client
+
+Add the package to your existing project and create a single client instance at
+startup. Keep the configuration in one module so every call site shares it:
+
+```ts
+// src/sdk.ts
+import { createClient } from '@your-scope/your-package';
+
+export const client = createClient({
+  network: 'testnet',
+  // Persist history only if your storage layer meets the encryption
+  // requirements above; otherwise keep it in memory.
+  persistHistory: false,
+});
+```
+
+### Step 2 — Wire up wallet signing
+
+Your dApp already has a connected wallet. Pass the wallet's signing function to
+the SDK instead of handling keys yourself — the SDK builds the transaction and
+the wallet prompts the user to sign:
+
+```ts
+import { client } from './sdk';
+
+async function submitPayment(destination: string, amount: string) {
+  const result = await client.submit({
+    operation: { type: 'payment', destination, amount },
+    // The wallet owns the secret key and shows its own approval prompt.
+    sign: (envelope) => wallet.signTransaction(envelope),
+  });
+  return result;
+}
+```
+
+Never read or store the user's secret key in your application; the wallet is the
+only component that signs.
+
+### Step 3 — Handle failures with clear UX
+
+Submissions can fail at several points: the user rejects the signature request,
+the network rejects the transaction, or the request times out. Surface each case
+distinctly instead of a generic error:
+
+```ts
+import { client } from './sdk';
+
+try {
+  const result = await submitPayment(destination, amount);
+  showSuccess(result.hash);
+} catch (err) {
+  if (err.code === 'USER_REJECTED') {
+    // The user declined the wallet prompt — not an error to alarm them about.
+    showNotice('Signature cancelled. Nothing was submitted.');
+  } else if (err.code === 'NETWORK_ERROR' || err.code === 'TIMEOUT') {
+    // Safe to retry; the transaction may not have been submitted.
+    showRetry('Could not reach the network. Please try again.');
+  } else {
+    // The network rejected the transaction (e.g. insufficient balance).
+    showError(err.message);
+  }
+}
+```
+
+Guidelines for failure UX:
+
+- Treat a user-rejected signature as a normal outcome, not an error.
+- Offer a retry for transient network failures and timeouts.
+- Show the network's rejection reason for validation failures.
+- Never display raw error objects or secret material to the user.
+
+### Step 4 — Verify the integration
+
+Run this repeatable check after wiring the SDK in. It exercises the happy path
+and the failure path so you can confirm both work:
+
+1. **Happy path** — submit a small payment on testnet. Confirm the wallet prompt
+   appears, approve it, and verify the returned hash appears in your history and
+   on a block explorer.
+2. **User rejection** — submit again and decline the wallet prompt. Confirm your
+   UI shows the cancellation notice and no transaction is submitted.
+3. **Network failure** — disable the network (or point at an unreachable
+   endpoint) and submit. Confirm the retry UI appears.
+4. **History** — confirm the successful transaction is recorded and that
+   clearing history removes it from both memory and any persisted store.
+
+Repeat these steps on every change to the integration; they cover the expected
+path and the relevant failure cases.
+
 ## Next steps
 
 See the API reference for the full set of client options.
