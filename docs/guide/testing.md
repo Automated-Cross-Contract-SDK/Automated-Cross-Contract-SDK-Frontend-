@@ -176,76 +176,61 @@ Add it as a dev dependency of the workspace you are testing:
 { "devDependencies": { "@soroban-resurrect/testing": "0.0.0" } }
 ```
 
+## Archived-key detection benchmarks
+
+`detectArchivedEntries` is the hot path for deciding whether a transaction
+needs a restore, so its cost must stay predictable as the number of ledger
+keys grows. The SDK ships a repeatable benchmark suite that measures both
+wall-clock time and heap allocation across representative footprint sizes.
+
+Run it with:
+
+```bash
+npm run bench --workspace @soroban-resurrect/sdk
+```
+
+Set `BENCH_ITERATIONS` to override the default iteration count when you need a
+longer or shorter run locally:
+
+```bash
+BENCH_ITERATIONS=5000 npm run bench --workspace @soroban-resurrect/sdk
+```
+
+The suite (`src/__benchmarks__/detectArchivedEntries.bench.ts`) drives
+`detectArchivedEntries` against a scripted `ISorobanRpcClient` for footprint
+sizes of 1, 10, 100, and 1000 keys, mixing active, near-expiry, and archived
+entries. For each size it reports:
+
+- **time** — mean and p95 duration per call, in milliseconds;
+- **allocation** — mean heap bytes allocated per call, measured with
+  `process.memoryUsage().heapUsed` deltas around a forced GC.
+
+### Baseline and growth expectations
+
+Detection is a single `getLedgerEntries` round-trip plus a linear scan of the
+returned entries, so both time and allocation should grow **linearly** with the
+number of keys. The committed baseline (`src/__benchmarks__/baseline.json`)
+records the reference numbers for each footprint size. The benchmark fails when
+observed time or allocation exceeds the baseline by more than the configured
+`GROWTH_TOLERANCE` (default `2.5x`), which catches accidental quadratic
+behavior or per-key allocations without being flaky on shared CI runners.
+
+To refresh the baseline after an intentional change, run the suite with
+`BENCH_UPDATE_BASELINE=1` and commit the updated `baseline.json` alongside the
+change:
+
+```bash
+BENCH_UPDATE_BASELINE=1 npm run bench --workspace @soroban-resurrect/sdk
+```
+
+Benchmarks are not part of the default `npm test` run; they execute in the
+`bench` CI job so regressions are visible without slowing the unit suite.
+
 ## Mutation testing for transaction-safety invariants
 
 Line coverage tells you a test *ran* a line; it does not tell you the test
 would *fail* if that line were subtly wrong. For the transaction and
 wallet-handling paths — where a silent change could submit an altered amount,
-the wrong destination, or an unsigned envelope — we run mutation testing with
-[Stryker](https://stryker-mutator.io/) scoped to those modules only.
-
-### Configuration
-
-Mutation testing is configured in `stryker.config.json` at the repo root. The
-interface is stable and documented here so maintainers can run it
-reproducibly:
-
-| Setting        | Value                                                                 |
-| -------------- | --------------------------------------------------------------------- |
-| `mutate`       | `src/transaction/**/*.ts`, `src/wallet/**/*.ts` (excluding `*.test.ts`) |
-| `testRunner`   | `vitest`                                                              |
-| `mutators`     | `ArithmeticOperator`, `ConditionalExpression`, `EqualityOperator`, `LogicalOperator`, `BlockStatement`, `StringLiteral` |
-| `thresholds`   | `high: 90`, `low: 80`, `break: 80`                                    |
-| `timeoutMS`    | `30000`                                                               |
-| `concurrency`  | `4`                                                                   |
-| `reporters`    | `clear-text`, `progress`, `html`, `json`                              |
-
-Only the transaction and wallet modules are mutated — the rest of the
-codebase is out of scope, keeping runs fast and focused on the invariants
-that matter for safety.
-
-### Running
-
-```bash
-npm run test:mutation
-```
-
-This runs Stryker against the configured targets using the existing Vitest
-suite. The run fails (non-zero exit) when the mutation score drops below the
-`break` threshold, so it can gate CI.
-
-### Interpreting surviving mutants
-
-A **surviving mutant** is a change to the source that no test caught. For the
-transaction-safety targets, treat every survivor as a potential gap:
-
-- **Altered amount / destination** — a survivor in amount or address handling
-  means a test does not assert the exact value submitted. Add an assertion on
-  the built envelope (amount, destination, memo) rather than only on success.
-- **Unsafe submission** — a survivor around signing or send guards means a
-  test does not prove an unsigned or unconfirmed transaction is rejected. Add
-  a negative test that asserts `sendTransaction` was *not* called.
-- **Boundary conditions** — survivors on comparisons (e.g. fee/ledger bounds)
-  usually mean an off-by-one boundary is untested. Add cases at the exact
-  boundary and one past it.
-
-Kill survivors by tightening assertions, not by adding `// Stryker disable`
-comments. Only disable a mutator for genuinely equivalent mutants, and add a
-comment explaining why.
-
-### Compatibility notes
-
-- Mutation testing is a dev-only tool; it adds no runtime dependency and does
-  not affect published packages.
-- The `break` threshold starts at the measured baseline. Raise it as survivors
-  are killed; do not lower it to make a run pass.
-- Stryker requires the Vitest suite to pass first — fix failing tests before
-  interpreting mutation results.
-
-## Coverage gates
-
-The SDK's test command enforces explicit branch and line-coverage floors for three critical restore
-modules. The current floors reflect the measured baseline and prevent regressions while coverage
-grows:
-
-| Behavior                         | Module                            
+the wrong destination, or skip a required restore — mutation testing is the
+stronger signal. The workspace uses Stryker to mutate the SDK's transaction
+and wallet modules and reports surviving mutants as a quality gate.
