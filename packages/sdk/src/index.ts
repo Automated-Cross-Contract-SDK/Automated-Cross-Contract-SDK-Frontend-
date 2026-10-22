@@ -277,3 +277,35 @@ export {
   extractArchivedKeysSafe,
   extractFootprintFromSuccessSafe,
 } from './result.js'
+
+// ---------------------------------------------------------------------------
+// Observability — Metrics hooks, RPC health checks, and privacy-safe logging
+// (#607, #608, #609)
+// ---------------------------------------------------------------------------
+export type {
+  MetricsHook,
+  MetricsOutcomeMetadata,
+  MetricsRecoveryMetadata,
+  MetricsStage,
+  MetricsOutcomeCode,
+} from './MetricsHooks.js'
+export { MetricsRedaction } from './MetricsHooks.js'
+
+export {
+  checkRpcHealth,
+  checkRpcEndpointReachability,
+  checkRpcMethod,
+} from './RpcHealthCheck.js'
+export type {
+  RpcHealthCheckResult,
+  RpcEndpointCheckResult,
+  RpcMethodCheckResult,
+} from './RpcHealthCheck.js'
+
+export {
+  RedactionUtils,
+  SafeLogger,
+  LoggingClassifications,
+  LoggingFieldType,
+} from './LoggingRedaction.js'
+export type { LoggingFieldClassification } from './LoggingRedaction.js'
