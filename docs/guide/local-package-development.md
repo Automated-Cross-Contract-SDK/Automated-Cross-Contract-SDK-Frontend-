@@ -129,6 +129,36 @@ yalc add @soroban-resurrect/sdk @soroban-resurrect/react-hook
 npm install
 ```
 
+## Inspecting the packed tarball before publishing
+
+`yalc publish` and `npm publish` both pack the package first, so the tarball is
+the source of truth for what consumers actually receive. Before you publish,
+inspect it for accidental secrets and unexpected files:
+
+```bash
+cd packages/sdk
+npm pack --dry-run
+```
+
+`npm pack --dry-run` lists every file that would be included without writing a
+tarball. Check the list against the `files` field and confirm nothing sensitive
+slipped in. The release workflow runs the same inspection automatically and
+fails the publish if it finds credential patterns or files that should not ship.
+
+### What the check looks for
+
+- **Credential patterns** in packed file contents: private keys
+  (`-----BEGIN ... PRIVATE KEY-----`), AWS access key IDs (`AKIA...`), GitHub
+  tokens (`ghp_`, `gho_`, `ghs_`, `ghu_`, `github_pat_`), Slack tokens
+  (`xox[baprs]-...`), and generic `api_key` / `secret` / `token` assignments
+  with a long literal value.
+- **Unexpected files**: `.env` files, `.npmrc`, `.pem` / `.key` / `.p12`
+  certificates, and anything under `.yalc/` or `node_modules/`.
+
+If the check flags a file, remove the secret from the source (rotate it if it
+was ever committed) and add the file to `.npmignore` or drop it from `files`.
+Do not add an allowlist entry to silence a real secret.
+
 ## Publishing with provenance
 
 Releases publish with `npm publish --provenance`, which attaches a signed
@@ -152,6 +182,7 @@ mismatched or unattributable artifacts.
 | Vite does not reload the linked package | Linked packages sit outside the project root. Add `optimizeDeps: { exclude: ['@soroban-resurrect/sdk'] }` to the consumer's Vite config. |
 | A file is missing only under yalc | It is not covered by `files` in the package's `package.json`. It would be missing from the npm release too, so fix it there. |
 | A missing sibling resolves from the registry | The internal dependency is not pinned to an exact workspace version. Pin it and re-run the pre-publish check. |
+| Publish fails on tarball inspection | A packed file matched a credential pattern or is an unexpected file. Remove the secret from source, rotate it if committed, and exclude the file via `files` / `.npmignore`. |
 
 ## Do not commit link artifacts
 
