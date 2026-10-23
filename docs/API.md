@@ -134,8 +134,9 @@ const receipt = await adapter.submitWithRestore(result);
 If a signer refuses (throws or returns an error), `collectSignatures` records the failure in
 the returned `SignatureCollectionResult` rather than aborting the whole flow. As long as the
 number of successful signatures still meets `config.threshold`, the result can be passed to
-`submitWithRestore`. If the threshold is not met, `submitWithRestore` rejects and the partial
-result can be retained to collect the remaining signatures later.
+`submitWithRestore`. If the threshold is not met, `submitWithRestore` rejects with a
+`THRESHOLD` category error and the partial result can be retained to collect the remaining
+signatures later.
 
 ### Types
 

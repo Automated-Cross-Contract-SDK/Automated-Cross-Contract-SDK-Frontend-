@@ -49,6 +49,8 @@ export default defineConfig({
             { text: 'Tutorial: Common Use Cases', link: '/guide/tutorial' },
             { text: 'Restore Fees and Limits', link: '/guide/restore-fees' },
             { text: 'History Persistence', link: '/guide/history-persistence' },
+            { text: 'Troubleshooting', link: '/guide/troubleshooting' },
+            { text: 'Upgrading Between Major Versions', link: '/guide/migration' },
             { text: 'Local Development', link: '/guide/local-development' },
             { text: 'Local Package Development', link: '/guide/local-package-development' },
             { text: 'Production Deployment', link: '/guide/production-deployment' },

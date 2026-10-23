@@ -1,0 +1,21 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "drips/565-566-567-568",
+    "main",
+    "origin",
+    "release-please--branches--main"
+  ],
+  "parent": {
+    "drips/565-566-567-568": "main",
+    "main": null,
+    "origin": "main",
+    "release-please--branches--main": "main"
+  },
+  "order": [
+    "main",
+    "drips/565-566-567-568",
+    "origin",
+    "release-please--branches--main"
+  ]
+}

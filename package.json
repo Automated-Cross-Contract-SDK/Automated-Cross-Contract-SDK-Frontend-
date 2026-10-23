@@ -24,7 +24,7 @@
     "docs"
   ],
   "scripts": {
-    "build": "turbo run build --filter=\"./packages/*\"",
+    "build": "node api.js && turbo run build --filter=\"./packages/*\"",
     "build:sdk": "turbo run build --filter=@soroban-resurrect/sdk",
     "build:hook": "turbo run build --filter=@soroban-resurrect/react-hook --filter=@soroban-resurrect/vue-hook --filter=@soroban-resurrect/svelte-hook",
     "dev:example": "npm run dev -w examples/basic",

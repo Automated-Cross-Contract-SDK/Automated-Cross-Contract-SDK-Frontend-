@@ -1,4 +1,4 @@
-# SDK API
+# SDK API Reference
 
 The `@handsoff/sdk` package exposes the wallet adapter layer used by every integration.
 This page documents the `WalletAdapter` contract, the `createAdapter` factory, the
@@ -8,85 +8,68 @@ transaction-free contract and account scanning APIs, the `estimateRestoreCost`
 helper for pricing a restore before the user signs, and the optional cache
 memory-bound policies.
 
-## `WalletAdapter`
+## Stability and versioning
 
-Every wallet integration implements the same contract:
+The SDK follows [Semantic Versioning](https://semver.org/):
 
-```ts
-export interface WalletAdapter {
-  /** Stable identifier, usually a `KnownWallet` value. */
-  readonly id: string
-  /** Human readable name shown in wallet pickers. */
-  readonly name: string
-  /** Capabilities this adapter supports. */
-  readonly capabilities: WalletCapabilities
-  /** Connect and resolve the active account. */
-  connect(): Promise<WalletAccount>
-  /** Disconnect and release any transport resources. */
-  disconnect(): Promise<void>
-  /** Sign a transaction payload. */
-  signTransaction(tx: Transaction): Promise<SignedTransaction>
-  /** Sign an arbitrary message. */
-  signMessage(message: Uint8Array): Promise<Uint8Array>
-}
-```
+- **Patch** (`x.y.Z`) — bug fixes only; no API changes.
+- **Minor** (`x.Y.z`) — backwards-compatible additions (new methods, optional
+  parameters, new exports). Existing code keeps working.
+- **Major** (`X.y.z`) — may include breaking changes. Read the
+  [Migration Guide](#migration-guide) before upgrading.
 
-## `createAdapter`
+Anything not documented on this page (internal modules, `_`-prefixed helpers,
+undocumented fields on returned objects) is **not** part of the public API and
+may change in any release.
 
-`createAdapter` is the factory used to instantiate an adapter from a `KnownWallet`
-value or a custom adapter class. It normalises configuration, applies defaults, and
-returns a ready-to-use `WalletAdapter`.
+## Migration policy
 
-```ts
-import { createAdapter, KnownWallet } from '@handsoff/sdk'
+When a major version is released:
 
-const adapter = createAdapter(KnownWallet.Phantom)
-await adapter.connect()
-```
+1. **Deprecation first.** A public API is deprecated for at least one minor
+   release before it is removed in a major release. Deprecated APIs emit a
+   runtime warning and are annotated `@deprecated` in the type definitions.
+2. **Documented replacements.** Every deprecation names its replacement in the
+   warning message and in the migration notes for the release.
+3. **Support window.** The previous major version receives critical bug and
+   security fixes for **6 months** after the next major is published.
+4. **No silent breakage.** Breaking changes are listed in the release notes and
+   in the migration guide for that major version.
 
-It accepts either a known wallet or a custom adapter:
+## Migration guide
 
-```ts
-const adapter = createAdapter({
-  wallet: KnownWallet.Ledger,
-  config: { transport, manifest },
-})
-```
+### Upgrading to the next major version
 
-## `KnownWallet` and `SUPPORTED_WALLETS`
+1. **Read the release notes** for the target major version and note every item
+   marked *breaking*.
+2. **Update the dependency** in your manifest:
 
-`KnownWallet` enumerates every wallet the SDK ships an adapter for. `SUPPORTED_WALLETS`
-is the runtime list (id, name, capabilities) used to build wallet pickers.
+   ```bash
+   npm install @your-scope/sdk@latest
+   ```
 
-| `KnownWallet` value    | Adapter                 | Notes                                   |
-| ---------------------- | ----------------------- | --------------------------------------- |
-| `KnownWallet.Phantom`  | `PhantomWalletAdapter`  | Browser extension                       |
-| `KnownWallet.Solflare` | `SolflareWalletAdapter` | Browser extension                       |
-| `KnownWallet.Backpack` | `BackpackWalletAdapter` | Browser extension                       |
-| `KnownWallet.Glow`     | `GlowWalletAdapter`     | Browser extension                       |
-| `KnownWallet.Ledger`   | `LedgerWalletAdapter`   | Hardware, requires transport + manifest |
-| `KnownWallet.Trezor`   | `TrezorWalletAdapter`   | Hardware, requires transport + manifest |
+3. **Resolve deprecation warnings.** Run your test suite and fix any warnings
+   emitted by deprecated APIs using the documented replacements.
+4. **Update type errors.** Breaking type changes surface as compile errors;
+   follow the inline `@deprecated` notes and the migration notes below.
+5. **Verify behavior.** Run your integration tests against the new version,
+   paying attention to the boundary cases called out in the release notes.
 
-```ts
-import { SUPPORTED_WALLETS } from '@handsoff/sdk'
+### API changes between major versions
 
-for (const wallet of SUPPORTED_WALLETS) {
-  console.log(wallet.id, wallet.name, wallet.capabilities)
-}
-```
+| Area | Change | Replacement |
+| --- | --- | --- |
+| Client construction | Options object is now required | Pass a config object to the client factory |
+| Error handling | Errors are typed subclasses | Match on the error `code` field |
+| Async APIs | Callback parameters removed | Use the returned `Promise` |
 
-## Capability flags
+> The table above is updated with each major release. If your version is not
+> listed, consult the release notes for that version.
 
-Each adapter advertises what it can do. The SDK branches on these flags, so an
-unsupported operation fails fast instead of silently degrading.
+### Deprecations and replacements
 
-| Flag              | Meaning                              | SDK behaviour that depends on it                                                       |
-| ----------------- | ------------------------------------ | -------------------------------------------------------------------------------------- |
-| `signTransaction` | Can sign transactions                | `signTransaction()` is exposed; otherwise the call throws `UnsupportedCapabilityError` |
-| `signMessage`     | Can sign arbitrary messages          | `signMessage()` is exposed; used by auth / SIWS flows                                  |
-| `hardware`        | Backed by a hardware device          | Enables transport lifecycle management and blind-signing warnings                      |
-| `blindSigning`    | Device can sign without full display | SDK emits a blind-signing warning before signing                                       |
-| `multiAccount`    | Can expose multiple accounts         | Account picker is shown after `connect()`                                              |
+Deprecated APIs remain available for at least one minor release. Each entry
+below lists the deprecated API and the replacement to migrate to:
 
 ## Cache memory-bound policies
 
@@ -141,8 +124,7 @@ rather than silently degrading.
 
 ## Hardware wallets
 
-Hardware adapters need a transport to talk to the device and a manifest so the
-device can display the requesting app. Both are passed through `createAdapter`.
+## Compatibility notes
 
 ### Ledger
 
