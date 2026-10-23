@@ -168,6 +168,18 @@ export interface SorobanResurrectConfig {
    * a retry — all other submission errors are surfaced immediately.
    */
   maxSequenceRetries?: number
+  /**
+   * Framework-neutral metrics hooks for observing SDK lifecycle events.
+   * Implement {@link MetricsHook} and pass it here to track success, failure,
+   * and recovery outcomes with a compatible metrics system (Datadog, Prometheus,
+   * New Relic, etc.) without vendor coupling.
+   *
+   * All hook callbacks receive only safe metadata: no wallet addresses,
+   * private keys, transaction XDR, or other sensitive data.
+   *
+   * @see {@link MetricsHook} for available callbacks and metadata fields.
+   */
+  metricsHook?: import('./MetricsHooks.js').MetricsHook
 }
 
 /**
