@@ -311,6 +311,76 @@ const adapter = createAdapter({
 npm install @trezor/connect-web
 ```
 
+## Server-side monitoring without wallet secrets
+
+Backends often need to observe TTL or restore status without ever touching user
+signing keys or submitting transactions on the user's behalf. `createRestoreMonitor`
+provides a documented, stable, read-only interface for exactly that: it performs
+read-only RPC calls (account scan + simulation) and never signs or submits.
+
+```ts
+import { createRestoreMonitor } from '@handsoff/sdk'
+
+const monitor = createRestoreMonitor({
+  connection, // read-only RPC connection
+  contractId: 'C...',
+})
+
+// Observe TTL / restore status for an account.
+const status = await monitor.checkStatus(accountPublicKey)
+console.log(status.restoreRequired, status.archivedKeys, status.ttlSeconds)
+
+// Poll on an interval; returns an unsubscribe function.
+const stop = monitor.watch(accountPublicKey, (next) => {
+  if (next.restoreRequired) enqueueRestorePrompt(accountPublicKey)
+}, { intervalMs: 30_000 })
+
+// Later:
+stop()
+```
+
+### `RestoreMonitor`
+
+```ts
+export interface RestoreMonitorOptions {
+  /** Read-only RPC connection. No signer is accepted. */
+  connection: ReadOnlyConnection
+  /** Contract whose archived entries should be observed. */
+  contractId: string
+}
+
+export interface RestoreStatus {
+  /** True when archived entries must be restored before use. */
+  restoreRequired: boolean
+  /** Archived ledger keys detected for the account. */
+  archivedKeys: string[]
+  /** Remaining TTL in seconds, or `null` when not applicable. */
+  ttlSeconds: number | null
+}
+
+export interface RestoreMonitor {
+  /** One-shot read-only status check. */
+  checkStatus(account: string): Promise<RestoreStatus>
+  /** Poll `checkStatus` and invoke `onStatus` on each result. */
+  watch(
+    account: string,
+    onStatus: (status: RestoreStatus) => void,
+    options?: { intervalMs?: number },
+  ): () => void
+}
+
+export function createRestoreMonitor(options: RestoreMonitorOptions): RestoreMonitor
+```
+
+`createRestoreMonitor` never accepts a wallet, signer, or secret key, and it never
+calls `signTransaction` or submits transactions. Failures are surfaced, not
+swallowed: a missing contract throws `ContractNotFoundError`, and RPC failures
+reject with the underlying error so callers can retry or alert. An account that is
+already restored reports `restoreRequired: false` with an empty `archivedKeys`.
+
+See the [`server-monitoring` example](https://github.com/handsoff/examples/tree/main/server-monitoring)
+for a runnable backend that wires this into a health endpoint.
+
 Submits a transaction with automatic archive restoration. If the simulation detects archived entries, a restore transaction is built, signed, submitted, and confirmed before the original transaction is rebuilt and submitted. State transitions are published to all registered listeners throughout. See [`SubmitWithRestoreOptions`](/api/types#submitwithrestoreoptions) for the full set of lifecycle callbacks.
 
 Call `sr.cancel()` to abort every active `submitWithRestore` workflow, or pass

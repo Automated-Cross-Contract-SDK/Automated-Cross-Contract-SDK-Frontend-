@@ -321,6 +321,11 @@ const result = await sr.submitWithRestore({
     showError({ title: 'Restore not authorized', detail: error.message })
   },
 })
+
+if (!result.success) {
+  // e.g. 'signature_collection_failed' — no restore was submitted
+  console.error(result.error)
+}
 ```
 
 Because the original transaction is only submitted after the restore confirms, a refused signature leaves on-chain state untouched and the user can retry safely.
