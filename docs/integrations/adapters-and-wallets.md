@@ -18,6 +18,61 @@ const wallet = await createAdapter('freighter')
 const publicKey = await wallet.getPublicKey()
 ```
 
+## Scaffolder wallet selection
+
+The scaffolder (`create-soroban-resurrect-app`) can generate a project wired to
+a supported wallet integration. Pass `--wallet <name>` to select one
+non-interactively, or omit it to be prompted. Supported values are `freighter`
+and `rabet`; any other value fails fast with a non-zero exit code and a message
+listing the supported wallets.
+
+```sh
+npx create-soroban-resurrect-app my-app --wallet freighter
+```
+
+When a wallet is selected, the generated project includes:
+
+- a wallet module that instantiates the matching adapter via `createAdapter`,
+- a `.env.example` with the environment variables the integration expects,
+- a `WALLET_SETUP.md` with install and configuration steps for that wallet.
+
+### Freighter
+
+```sh
+npm install @soroban-resurrect/adapter-freighter
+```
+
+```sh
+# .env.example
+VITE_WALLET=freighter
+VITE_STELLAR_NETWORK=testnet
+```
+
+Install the [Freighter](https://www.freighter.app/) browser extension, switch it
+to the network matching `VITE_STELLAR_NETWORK`, and fund the account before
+connecting.
+
+### Rabet
+
+```sh
+npm install @soroban-resurrect/adapter-rabet
+```
+
+```sh
+# .env.example
+VITE_WALLET=rabet
+VITE_STELLAR_NETWORK=testnet
+```
+
+Install the [Rabet](https://rabet.io/) browser extension, switch it to the
+network matching `VITE_STELLAR_NETWORK`, and fund the account before connecting.
+
+### Migration notes
+
+Projects scaffolded before wallet selection was added have no `VITE_WALLET`
+entry. Add it (and the matching adapter dependency) to opt into the generated
+wallet module; existing custom adapters continue to work unchanged.
+
 ## Hardware wallets
 
 Both hardware adapters declare `hardware: true`, `feeBump: true`, and
@@ -116,3 +171,44 @@ const wallet: WalletAdapter = {
 Set `hardware: true` for physical signing devices so the SDK can issue the
 hardware-signing warning. Only set `feeBump` or `signAuthEntry` when the
 adapter actually supports those envelope/signing modes.
+
+## Vue application example
+
+The `examples/vue` sample application wires the Vue composable to a wallet and
+demonstrates the connection lifecycle. It is a reference for the stable
+`useWallet` interface exposed by `@soroban-resurrect/vue`.
+
+```ts
+import { useWallet } from '@soroban-resurrect/vue'
+
+const {
+  status, // 'idle' | 'connecting' | 'connected' | 'rejected' | 'error'
+  publicKey,
+  error,
+  connect,
+  disconnect,
+} = useWallet({ adapter: 'freighter' })
+```
+
+The composable exposes a documented, stable interface:
+
+- `status` — reactive connection state (`idle`, `connecting`, `connected`,
+  `rejected`, `error`).
+- `publicKey` — the connected account, or `null` when not connected.
+- `error` — the last failure, or `null`.
+- `connect()` — starts the connection flow; resolves once the wallet responds.
+- `disconnect()` — clears the connection and resets `status` to `idle`.
+
+The example renders each state explicitly:
+
+- **Loading** — shown while `status === 'connecting'`.
+- **Rejection** — shown when the user declines in the wallet
+  (`status === 'rejected'`), with a retry action.
+- **Restore success** — shown when a previously connected session is restored
+  on mount (`status === 'connected'` with a restored `publicKey`).
+- **Failure** — shown when the adapter throws (`status === 'error'`), including
+  the `error` message and a retry action.
+
+Run the example with `npm install && npm run dev` inside `examples/vue`. The
+composable requires the same `@soroban-resurrect/adapter-*` package as the
+underlying adapter; see [Browser wallets](#browser-wallets).

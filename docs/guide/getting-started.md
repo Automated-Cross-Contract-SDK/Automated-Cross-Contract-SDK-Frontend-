@@ -1,17 +1,19 @@
 # Getting Started
 
-Soroban-Resurrect solves the "archived ledger entry" problem for Soroban dApps. When a user's persistent data (token balance, loan position, etc.) expires due to TTL rent, their transaction fails with a cryptic error. This SDK automatically detects archived entries via [CAP-0066](https://github.com/stellar/stellar-protocol/blob/master/core/cap-0066.md) and seamlessly restores them before submitting the user's intended transaction.
+This guide walks you through installing and using the package.
 
 ## Installation
 
 ```bash
-npm install @soroban-resurrect/sdk @stellar/stellar-sdk
+npm install @your-scope/your-package
 ```
 
-If you're building a React dApp, also install the hook package:
+## Basic usage
 
-```bash
-npm install @soroban-resurrect/react-hook
+```ts
+import { createClient } from '@your-scope/your-package';
+
+const client = createClient({ /* options */ });
 ```
 
 `@stellar/stellar-sdk` (`^12.0.0`) and `react` (`^18.0.0`, for the hook package) are peer dependencies — install them alongside the SDK.
@@ -26,6 +28,97 @@ npm install @soroban-resurrect/react-hook
   falls back to RPC polling.
 - A Soroban RPC endpoint (Testnet, Futurenet, or Mainnet)
 - A wallet that can sign Soroban transaction XDR (Freighter, xBull, or a custom signer)
+
+## Local Soroban RPC environment
+
+For offline development and reproducible tests, run a local Soroban RPC node
+instead of pointing at a public endpoint. The steps below produce a
+reproducible environment that the SDK and examples can target.
+
+### Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) 24+ (or a native `stellar` CLI install)
+- The [Stellar CLI](https://developers.stellar.org/docs/tools/developer-tools/cli/stellar-cli) (`stellar`)
+- Node.js 20+ (matches the SDK requirement above)
+
+### Start the local network
+
+```bash
+# Start a local Stellar network (core + Soroban RPC) in the background.
+stellar network start local
+
+# The RPC endpoint is now available at:
+#   http://localhost:8000/soroban/rpc
+# The network passphrase for the local network is:
+#   Standalone Network ; February 2017
+```
+
+To stop the network when you're done:
+
+```bash
+stellar network stop local
+```
+
+### Configure the SDK
+
+Point the SDK at the local endpoint. The local network uses its own
+passphrase, so pass it explicitly rather than relying on a preset:
+
+```typescript
+import { SorobanResurrect } from '@soroban-resurrect/sdk'
+
+const sr = new SorobanResurrect({
+  rpcUrl: 'http://localhost:8000/soroban/rpc',
+  networkPassphrase: 'Standalone Network ; February 2017',
+})
+```
+
+You can also set these via environment variables for the examples:
+
+```bash
+export SOROBAN_RPC_URL=http://localhost:8000/soroban/rpc
+export SOROBAN_NETWORK_PASSPHRASE="Standalone Network ; February 2017"
+```
+
+### Verify endpoint readiness
+
+Before running examples, confirm the endpoint is reachable and healthy. The
+`@soroban-resurrect/sdk` package ships a helper with a stable interface:
+
+```typescript
+import { checkSorobanRpcReadiness } from '@soroban-resurrect/sdk'
+
+const status = await checkSorobanRpcReadiness({
+  rpcUrl: 'http://localhost:8000/soroban/rpc',
+  timeoutMs: 5000,
+})
+
+if (!status.ready) {
+  console.error('Soroban RPC not ready:', status.reason)
+  process.exit(1)
+}
+
+console.log('Soroban RPC ready:', status.latestLedger)
+```
+
+`checkSorobanRpcReadiness` resolves to a `SorobanRpcReadiness` object:
+
+| Field          | Type      | Description                                              |
+| -------------- | --------- | -------------------------------------------------------- |
+| `ready`        | `boolean` | `true` when the endpoint responded with a valid ledger.  |
+| `latestLedger` | `number?` | Latest ledger sequence reported by the endpoint.         |
+| `reason`       | `string?` | Human-readable failure reason when `ready` is `false`.    |
+
+It returns `ready: false` (rather than throwing) for unreachable endpoints,
+timeouts, and malformed responses, so it is safe to call in CI and scripts.
+
+### Compatibility notes
+
+- The helper targets the same Soroban RPC version as `@stellar/stellar-sdk`
+  `^12.0.0`; older RPC nodes that do not implement `getLatestLedger` will
+  report `ready: false` with a `reason` describing the unsupported method.
+- Public endpoints (Testnet/Futurenet/Mainnet) work with the same helper —
+  swap `rpcUrl` and `networkPassphrase` accordingly.
 
 ## Quick Start (Direct SDK)
 
@@ -60,176 +153,266 @@ const wallet = {
   signTransaction: async (txXdr, opts) => freighter.signTransaction(txXdr, opts),
 }
 
-// Submit — restoration (if needed) happens automatically
-const result = await sr.submitWithRestore({ transaction: tx, wallet })
+With persistence disabled:
 
-if (result.success) {
-  console.log('Original tx hash:', result.originalTxHash)
-  if (result.restoreTxHash) {
-    console.log('Restore tx hash:', result.restoreTxHash)
-    console.log('Archived keys restored:', result.archivedKeysDetected)
-  }
-} else {
-  console.error('Failed:', result.error)
-}
+- No history is written to disk, `localStorage`, or any database.
+- In-memory history (if enabled) is discarded when the client is disposed or the
+  process exits.
+- Clearing history is a no-op beyond dropping the in-memory cache.
+
+If you need history across restarts, keep persistence enabled and apply the
+encryption requirements above.
+
+## Integrating the SDK into an existing dApp
+
+This tutorial adds the SDK to an application that already works, without
+rewriting it. It covers the wallet signing flow, failure UX, and a repeatable
+verification flow so you can confirm the integration works.
+
+### Step 1 — Install and configure the client
+
+Add the package to your existing project and create a single client instance at
+startup. Keep the configuration in one module so every call site shares it:
+
+```ts
+// src/sdk.ts
+import { createClient } from '@your-scope/your-package';
+
+export const client = createClient({
+  network: 'testnet',
+  // Persist history only if your storage layer meets the encryption
+  // requirements above; otherwise keep it in memory.
+  persistHistory: false,
+});
 ```
+
+## Quick Start (Plain JavaScript)
+
+No framework required — this example runs directly in the browser. It connects
+a wallet, builds a transaction, and demonstrates both the restore and
+no-restore paths. See [`examples/plain-js`](https://github.com/soroban-resurrect/soroban-resurrect/tree/main/examples/plain-js)
+for the full runnable project.
+
+```html
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Soroban-Resurrect — Plain JS</title>
+  </head>
+  <body>
+    <button id="connect">Connect wallet</button>
+    <button id="submit" disabled>Submit withdraw</button>
+    <pre id="log"></pre>
+
+    <script type="module">
+      import { SorobanResurrect } from '@soroban-resurrect/sdk'
+      import {
+        TransactionBuilder,
+        Account,
+        Operation,
+        Networks,
+        nativeToScVal,
+      } from '@stellar/stellar-sdk'
+
+      const log = (msg) => {
+        document.getElementById('log').textContent += msg + '\n'
+      }
+
+      const sr = new SorobanResurrect({
+        rpcUrl: 'https://soroban-testnet.stellar.org',
+        networkPassphrase: Networks.TESTNET,
+      })
+
+      let publicKey = null
+
+      // WalletAdapter shape — swap in xBull or a custom signer as needed.
+      const wallet = {
+        isConnected: async () => publicKey !== null,
+        getPublicKey: async () => publicKey,
+        signTransaction: async (txXdr, opts) =>
+          window.freighter.signTransaction(txXdr, opts),
+      }
+
+      document.getElementById('connect').addEventListener('click', async () => {
+        const { publicKey: pk } = await window.freighter.requestAccess()
+        publicKey = pk
+        log('Connected: ' + publicKey)
+        document.getElementById('submit').disabled = false
+      })
+
+      document.getElementById('submit').addEventListener('click', async () => {
+        const account = await sr.rpc.getAccount(publicKey)
+        const tx = new TransactionBuilder(account, {
+          fee: '100',
+          networkPassphrase: Networks.TESTNET,
+        })
+          .addOperation(
+            Operation.invokeContractFunction({
+              contract: 'CCJZ5...K2Q',
+              function: 'withdraw',
+              args: [nativeToScVal(1000, { type: 'i128' })],
+            }),
+          )
+          .setTimeout(30)
+          .build()
+
+        // No-restore path: nothing archived, submit directly.
+        const needsRestore = await sr.needsRestore(tx)
+        if (!needsRestore) {
+          log('No archived entries — submitting directly.')
+        } else {
+          log('Archived entries detected — restore will run first.')
+        }
+
+        // Restore path: submitWithRestore handles both cases automatically.
+        const result = await sr.submitWithRestore({ transaction: tx, wallet })
+        if (result.success) {
+          log('Original tx hash: ' + result.originalTxHash)
+          if (result.restoreTxHash) {
+            log('Restore tx hash: ' + result.restoreTxHash)
+            log('Archived keys restored: ' + result.archivedKeysDetected)
+          }
+        } else {
+          log('Failed: ' + result.error)
+        }
+      })
+    </script>
+  </body>
+</html>
+```
+
+`needsRestore` and `submitWithRestore` are the stable entry points used here;
+both accept the same `WalletAdapter` shape shown above. When `needsRestore`
+returns `false` the SDK submits the original transaction unchanged, so the
+no-restore path is a strict subset of the restore path.
 
 ## Quick Start (React)
 
-```tsx
-import { SorobanResurrectProvider, useSorobanResurrectContext } from '@soroban-resurrect/react-hook'
+Your dApp already has a connected wallet. Pass the wallet's signing function to
+the SDK instead of handling keys yourself — the SDK builds the transaction and
+the wallet prompts the user to sign:
 
-function App() {
-  return (
-    <SorobanResurrectProvider config={{ rpcUrl: 'https://soroban-testnet.stellar.org' }}>
-      <WithdrawButton />
-    </SorobanResurrectProvider>
-  )
+```ts
+import { client } from './sdk';
+
+async function submitPayment(destination: string, amount: string) {
+  const result = await client.submit({
+    operation: { type: 'payment', destination, amount },
+    // The wallet owns the secret key and shows its own approval prompt.
+    sign: (envelope) => wallet.signTransaction(envelope),
+  });
+  return result;
 }
+```
 
-function WithdrawButton() {
-  const { submitWithRestore, state, isProcessing } = useSorobanResurrectContext()
+Never read or store the user's secret key in your application; the wallet is the
+only component that signs.
 
-  const handleWithdraw = async () => {
-    const result = await submitWithRestore(tx, wallet)
-    // result.success, result.originalTxHash, etc.
+### Step 3 — Handle failures with clear UX
+
+Submissions can fail at several points: the user rejects the signature request,
+the network rejects the transaction, or the request times out. Surface each case
+distinctly instead of a generic error:
+
+```ts
+import { client } from './sdk';
+
+try {
+  const result = await submitPayment(destination, amount);
+  showSuccess(result.hash);
+} catch (err) {
+  if (err.code === 'USER_REJECTED') {
+    // The user declined the wallet prompt — not an error to alarm them about.
+    showNotice('Signature cancelled. Nothing was submitted.');
+  } else if (err.code === 'NETWORK_ERROR' || err.code === 'TIMEOUT') {
+    // Safe to retry; the transaction may not have been submitted.
+    showRetry('Could not reach the network. Please try again.');
+  } else {
+    // The network rejected the transaction (e.g. insufficient balance).
+    showError(err.message);
   }
-
-  return (
-    <button onClick={handleWithdraw} disabled={isProcessing}>
-      {isProcessing ? state.message : 'Withdraw'}
-    </button>
-  )
 }
 ```
 
-## Generating typed contract invocation examples
+## Production-style React application
 
-If you want typed, inspectable examples of how to call a contract, the SDK
-ships an **opt-in** code generator. It reads a contract's interface (from a
-local WASM file or a deployed contract ID) and emits a small TypeScript module
-with explicit argument types and a ready-to-use `invokeContractFunction`
-operation builder. Nothing is generated unless you run the command, and the
-output is plain source you can read, diff, and commit.
+For a realistic, production-shaped React app — routing, wallet lifecycle,
+user feedback, fee consent, cancellation, and typed error handling — see
+[`examples/react-app`](https://github.com/soroban-resurrect/soroban-resurrect/tree/main/examples/react-app).
+The example is a small Vite + React + TypeScript project that wires the
+`@soroban-resurrect/react-hook` provider into a multi-route app and shows how
+the stable SDK surface is used end to end.
+
+What the example demonstrates:
+
+- **Routing** — `react-router-dom` routes for a dashboard, a withdraw flow, and
+  a transaction history view, all sharing one provider instance.
+- **Wallet lifecycle** — connect, disconnect, and reconnect flows with a
+  `WalletAdapter` implementation, including handling of a wallet that becomes
+  unavailable mid-session.
+- **User feedback** — a status banner driven by the hook's `state`
+  (`idle` → `simulating` → `awaiting-consent` → `signing` → `submitting` →
+  `confirming` → `success` / `error` / `cancelled`).
+- **Fee consent** — before a restore is submitted, the app surfaces the
+  estimated restore cost from `estimateRestoreCost` and requires explicit user
+  confirmation.
+- **Cancellation** — an `AbortController` is created per submission and aborted
+  when the user cancels or navigates away, so `submitWithRestore` resolves with
+  `errorCode === 'ABORTED'`.
+- **Typed error handling** — a `switch` on `result.errorCode` (e.g. `ABORTED`,
+  `WALLET_REJECTED`, `SIMULATION_FAILED`, `RESTORE_FAILED`) with user-facing
+  copy for each case.
+
+Run it locally:
 
 ```bash
-npx @soroban-resurrect/sdk generate \
-  --contract CCJZ5...K2Q \
-  --rpc-url https://soroban-testnet.stellar.org \
-  --out src/contracts/withdraw.ts
+cd examples/react-app
+npm install
+npm run dev
 ```
 
-Or from a local WASM file:
+Run its tests:
 
 ```bash
-npx @soroban-resurrect/sdk generate \
-  --wasm ./target/wasm32-unknown-unknown/release/my_contract.wasm \
-  --out src/contracts/my_contract.ts
+cd examples/react-app
+npm test
 ```
 
-The generated module keeps every type and transaction argument explicit:
-
-```typescript
-// src/contracts/withdraw.ts — generated, do not edit by hand
-export const CONTRACT_ID = 'CCJZ5...K2Q'
-
-export interface WithdrawArgs {
-  amount: bigint
-}
-
-export function withdrawArgs(args: WithdrawArgs): xdr.ScVal[] {
-  return [nativeToScVal(args.amount, { type: 'i128' })]
-}
-
-export function withdrawOperation(args: WithdrawArgs): xdr.Operation {
-  return Operation.invokeContractFunction({
-    contract: CONTRACT_ID,
-    function: 'withdraw',
-    args: withdrawArgs(args),
-  })
-}
-```
-
-You can then use the generated operation with the normal restore flow:
-
-```typescript
-import { withdrawOperation } from './contracts/withdraw'
-
-const tx = new TransactionBuilder(account, { fee: '100', networkPassphrase: Networks.TESTNET })
-  .addOperation(withdrawOperation({ amount: 1000n }))
-  .setTimeout(30)
-  .build()
-
-const result = await sr.submitWithRestore({ transaction: tx, wallet })
-```
-
-### Options
-
-| Flag | Description |
-| --- | --- |
-| `--contract <id>` | Deployed contract ID to introspect via RPC. |
-| `--wasm <path>` | Local WASM file to introspect instead of RPC. |
-| `--rpc-url <url>` | RPC endpoint used with `--contract`. |
-| `--out <path>` | Output file path. Defaults to stdout. |
-| `--functions <a,b>` | Only generate the listed functions. |
-
-Exactly one of `--contract` or `--wasm` must be provided; the command exits
-non-zero with a clear message otherwise. Generated files are deterministic so
-they can be committed and reviewed like any other source.
-
-### Compatibility
-
-Code generation is additive and opt-in. Existing SDK usage is unchanged, and
-the generated modules only depend on `@stellar/stellar-sdk` primitives you
-already use. If you previously hand-wrote invocation helpers, you can migrate
-incrementally by generating alongside them and switching call sites over one
-function at a time.
+The example's tests cover the happy path (no restore needed), the restore path
+with fee consent, user cancellation, and wallet-rejection error handling. The
+interfaces it relies on — `SorobanResurrectProvider`, `useSorobanResurrectContext`,
+`submitWithRestore`, `estimateRestoreCost`, `needsRestore`, and the
+`AbortSignalOptions` type — are the same stable entry points documented above,
+so the example remains compatible across supported package releases.
 
 ## Choosing an approach
 
-If you already use Soroban RPC and only need a single, application-specific
-restore flow, you may prefer to maintain that small flow yourself. See
-[Manual restore flow vs. the SDK](/guide/comparison) for the trade-offs,
-dependencies, and bundle-size measurement command.
+- Treat a user-rejected signature as a normal outcome, not an error.
+- Offer a retry for transient network failures and timeouts.
+- Show the network's rejection reason for validation failures.
+- Never display raw error objects or secret material to the user.
 
-## Cancelling a restore workflow
+### Step 4 — Verify the integration
 
-Pass an `AbortSignal` to cancel further SDK work, including simulation waits,
-wallet prompts that honor the signal, and transaction-confirmation polling:
+Run this repeatable check after wiring the SDK in. It exercises the happy path
+and the failure path so you can confirm both work:
 
-```typescript
-const controller = new AbortController()
-const result = await sr.submitWithRestore({
-  transaction: tx,
-  wallet,
-  signal: controller.signal,
-})
+1. **Happy path** — submit a small payment on testnet. Confirm the wallet prompt
+   appears, approve it, and verify the returned hash appears in your history and
+   on a block explorer.
+2. **User rejection** — submit again and decline the wallet prompt. Confirm your
+   UI shows the cancellation notice and no transaction is submitted.
+3. **Network failure** — disable the network (or point at an unreachable
+   endpoint) and submit. Confirm the retry UI appears.
+4. **History** — confirm the successful transaction is recorded and that
+   clearing history removes it from both memory and any persisted store.
 
-// Call from a cancel button or when the owning view is disposed:
-controller.abort()
+Repeat these steps on every change to the integration; they cover the expected
+path and the relevant failure cases.
 
-if (!result.success && result.errorCode === 'ABORTED') {
-  // A transaction already submitted may still complete on-chain.
-}
-```
+## Next steps
 
 `AbortSignalOptions` is exported as a stable type. A `{ signal }` options object
 is accepted by `simulate`, `detectArchivedKeys`, `detectArchivedKeysBatch`,
-`needsRestore`, `estimateRestoreCost`, `buildRestoreTx` (after its optional
-simulation response), `buildBatchRestoreTx`, `sendTransaction`, `retry`, and
-`restoreKeys`. `submitWithRestore` accepts `signal` in its options object, and
-`submitBatchWithRestore(items, { signal })` uses one signal for the whole batch.
-Existing calls that omit a signal are unchanged.
-
-Cancellation stops the SDK from starting later steps and clears polling timers
-and temporary abort listeners. Wallet adapters may ignore the signal, and the
-Stellar SDK's RPC methods do not expose request cancellation; an in-flight RPC
-or wallet prompt may therefore finish in the background. Aborting cannot undo a
-submitted transaction, so inspect its returned hash/status before retrying.
-
-## Next Steps
-
-- Walk through common patterns in the [Tutorial](/guide/tutorial)
-- Browse the full [API Reference](/api/sdk)
-- See [runnable Examples](/examples/)
-- Wire the SDK into your framework via the [Integration Guides](/integrations/react)
+`needsRestore`, `estimateRestoreCost`, `buildRestoreTx` (after its o

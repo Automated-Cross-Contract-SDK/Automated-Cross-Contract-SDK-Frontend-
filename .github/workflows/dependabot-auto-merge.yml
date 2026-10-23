@@ -4,6 +4,12 @@ name: Dependabot auto-merge
 # Auto-merge waits for all required status checks (CI) to pass before merging,
 # so a failing CI run blocks the merge. Runtime and @stellar/* updates are left
 # for manual review.
+#
+# Dependency update validation (issue #602): the scheduled
+# `dependency-update-validation` workflow exercises the workspace build/test and
+# package fixtures against automated version bumps. Its `validate` job is a
+# required status check, so auto-merge will not land a devDependency bump until
+# that validation passes.
 
 on: pull_request_target
 

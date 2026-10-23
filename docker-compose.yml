@@ -3,6 +3,11 @@
 # Starts a self-contained Stellar quickstart node running Core, Horizon and the
 # Soroban RPC server against an ephemeral local ledger. See
 # docs/guide/local-development.md for usage.
+#
+# Readiness helper: `node scripts/check-soroban-rpc.mjs` (or
+# `npm run soroban:check`) polls the RPC endpoint below and exits non-zero
+# until it answers `getHealth` with a healthy status, so examples can be run
+# only once the network is actually ready.
 
 services:
   soroban-rpc:

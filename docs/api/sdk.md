@@ -1,4 +1,4 @@
-# SDK API
+# SDK API Reference
 
 The `@handsoff/sdk` package exposes the wallet adapter layer used by every integration.
 This page documents the `WalletAdapter` contract, the `createAdapter` factory, the
@@ -8,85 +8,68 @@ transaction-free contract and account scanning APIs, the `estimateRestoreCost`
 helper for pricing a restore before the user signs, and the optional cache
 memory-bound policies.
 
-## `WalletAdapter`
+## Stability and versioning
 
-Every wallet integration implements the same contract:
+The SDK follows [Semantic Versioning](https://semver.org/):
 
-```ts
-export interface WalletAdapter {
-  /** Stable identifier, usually a `KnownWallet` value. */
-  readonly id: string
-  /** Human readable name shown in wallet pickers. */
-  readonly name: string
-  /** Capabilities this adapter supports. */
-  readonly capabilities: WalletCapabilities
-  /** Connect and resolve the active account. */
-  connect(): Promise<WalletAccount>
-  /** Disconnect and release any transport resources. */
-  disconnect(): Promise<void>
-  /** Sign a transaction payload. */
-  signTransaction(tx: Transaction): Promise<SignedTransaction>
-  /** Sign an arbitrary message. */
-  signMessage(message: Uint8Array): Promise<Uint8Array>
-}
-```
+- **Patch** (`x.y.Z`) — bug fixes only; no API changes.
+- **Minor** (`x.Y.z`) — backwards-compatible additions (new methods, optional
+  parameters, new exports). Existing code keeps working.
+- **Major** (`X.y.z`) — may include breaking changes. Read the
+  [Migration Guide](#migration-guide) before upgrading.
 
-## `createAdapter`
+Anything not documented on this page (internal modules, `_`-prefixed helpers,
+undocumented fields on returned objects) is **not** part of the public API and
+may change in any release.
 
-`createAdapter` is the factory used to instantiate an adapter from a `KnownWallet`
-value or a custom adapter class. It normalises configuration, applies defaults, and
-returns a ready-to-use `WalletAdapter`.
+## Migration policy
 
-```ts
-import { createAdapter, KnownWallet } from '@handsoff/sdk'
+When a major version is released:
 
-const adapter = createAdapter(KnownWallet.Phantom)
-await adapter.connect()
-```
+1. **Deprecation first.** A public API is deprecated for at least one minor
+   release before it is removed in a major release. Deprecated APIs emit a
+   runtime warning and are annotated `@deprecated` in the type definitions.
+2. **Documented replacements.** Every deprecation names its replacement in the
+   warning message and in the migration notes for the release.
+3. **Support window.** The previous major version receives critical bug and
+   security fixes for **6 months** after the next major is published.
+4. **No silent breakage.** Breaking changes are listed in the release notes and
+   in the migration guide for that major version.
 
-It accepts either a known wallet or a custom adapter:
+## Migration guide
 
-```ts
-const adapter = createAdapter({
-  wallet: KnownWallet.Ledger,
-  config: { transport, manifest },
-})
-```
+### Upgrading to the next major version
 
-## `KnownWallet` and `SUPPORTED_WALLETS`
+1. **Read the release notes** for the target major version and note every item
+   marked *breaking*.
+2. **Update the dependency** in your manifest:
 
-`KnownWallet` enumerates every wallet the SDK ships an adapter for. `SUPPORTED_WALLETS`
-is the runtime list (id, name, capabilities) used to build wallet pickers.
+   ```bash
+   npm install @your-scope/sdk@latest
+   ```
 
-| `KnownWallet` value    | Adapter                 | Notes                                   |
-| ---------------------- | ----------------------- | --------------------------------------- |
-| `KnownWallet.Phantom`  | `PhantomWalletAdapter`  | Browser extension                       |
-| `KnownWallet.Solflare` | `SolflareWalletAdapter` | Browser extension                       |
-| `KnownWallet.Backpack` | `BackpackWalletAdapter` | Browser extension                       |
-| `KnownWallet.Glow`     | `GlowWalletAdapter`     | Browser extension                       |
-| `KnownWallet.Ledger`   | `LedgerWalletAdapter`   | Hardware, requires transport + manifest |
-| `KnownWallet.Trezor`   | `TrezorWalletAdapter`   | Hardware, requires transport + manifest |
+3. **Resolve deprecation warnings.** Run your test suite and fix any warnings
+   emitted by deprecated APIs using the documented replacements.
+4. **Update type errors.** Breaking type changes surface as compile errors;
+   follow the inline `@deprecated` notes and the migration notes below.
+5. **Verify behavior.** Run your integration tests against the new version,
+   paying attention to the boundary cases called out in the release notes.
 
-```ts
-import { SUPPORTED_WALLETS } from '@handsoff/sdk'
+### API changes between major versions
 
-for (const wallet of SUPPORTED_WALLETS) {
-  console.log(wallet.id, wallet.name, wallet.capabilities)
-}
-```
+| Area | Change | Replacement |
+| --- | --- | --- |
+| Client construction | Options object is now required | Pass a config object to the client factory |
+| Error handling | Errors are typed subclasses | Match on the error `code` field |
+| Async APIs | Callback parameters removed | Use the returned `Promise` |
 
-## Capability flags
+> The table above is updated with each major release. If your version is not
+> listed, consult the release notes for that version.
 
-Each adapter advertises what it can do. The SDK branches on these flags, so an
-unsupported operation fails fast instead of silently degrading.
+### Deprecations and replacements
 
-| Flag              | Meaning                              | SDK behaviour that depends on it                                                       |
-| ----------------- | ------------------------------------ | -------------------------------------------------------------------------------------- |
-| `signTransaction` | Can sign transactions                | `signTransaction()` is exposed; otherwise the call throws `UnsupportedCapabilityError` |
-| `signMessage`     | Can sign arbitrary messages          | `signMessage()` is exposed; used by auth / SIWS flows                                  |
-| `hardware`        | Backed by a hardware device          | Enables transport lifecycle management and blind-signing warnings                      |
-| `blindSigning`    | Device can sign without full display | SDK emits a blind-signing warning before signing                                       |
-| `multiAccount`    | Can expose multiple accounts         | Account picker is shown after `connect()`                                              |
+Deprecated APIs remain available for at least one minor release. Each entry
+below lists the deprecated API and the replacement to migrate to:
 
 ## Cache memory-bound policies
 
@@ -139,10 +122,163 @@ rather than silently degrading.
 - The default remains unbounded to preserve prior behaviour. Long-running
   services should set at least `maxEntries` or `ttlMs`.
 
+## Custom RPC client injection
+
+`wrapRpcClient` wraps any `RpcClient` (or `Connection`) with a custom transport so
+you can add logging, proxying, or deterministic test doubles without changing the
+SDK workflow. The wrapper implements the same `RpcClient` interface, so it can be
+passed anywhere the SDK accepts an RPC client.
+
+```ts
+export interface RpcClient {
+  /** Send a JSON-RPC request and resolve the raw result. */
+  request<T = unknown>(method: string, params?: unknown[]): Promise<T>
+}
+
+export interface WrapRpcClientOptions {
+  /** Underlying client that performs the actual request. */
+  client: RpcClient
+  /** Called before each request is forwarded. */
+  onRequest?: (method: string, params: unknown[]) => void
+  /** Called after each request resolves or rejects. */
+  onResponse?: (method: string, result: unknown, error?: unknown) => void
+}
+
+export function wrapRpcClient(options: WrapRpcClientOptions): RpcClient
+```
+
+### Logging
+
+```ts
+import { wrapRpcClient } from '@handsoff/sdk'
+
+const rpc = wrapRpcClient({
+  client: connection,
+  onRequest: (method, params) => console.debug('[rpc]', method, params),
+  onResponse: (method, result, error) =>
+    error ? console.error('[rpc]', method, error) : console.debug('[rpc]', method, result),
+})
+
+const sr = createSdk({ rpc })
+```
+
+### Proxying
+
+```ts
+const rpc = wrapRpcClient({
+  client: connection,
+  onRequest: (method, params) => proxy.forward(method, params),
+})
+```
+
+### Testing
+
+```ts
+import { wrapRpcClient } from '@handsoff/sdk'
+
+const calls: string[] = []
+const rpc = wrapRpcClient({
+  client: {
+    request: async (method) => {
+      calls.push(method)
+      return { context: { slot: 0 }, value: [] }
+    },
+  },
+})
+
+await rpc.request('getProgramAccounts', [programId])
+expect(calls).toEqual(['getProgramAccounts'])
+```
+
+`wrapRpcClient` forwards the method and params unchanged and re-throws any error
+from the underlying client after invoking `onResponse`, so existing error handling
+keeps working. It is a pure wrapper: it does not retry, cache, or mutate requests.
+
+## Transaction history: storage and privacy
+
+The SDK records a local transaction history so applications can show recent
+activity and restore context. This section documents what that history may
+contain, how long it is retained, the encryption requirements for persisted
+history, and how to disable persistence entirely.
+
+### What history may contain
+
+Each history entry is a record of a single submission attempt. Entries may
+include:
+
+| Field             | Description                                                                 |
+| ----------------- | --------------------------------------------------------------------------- |
+| `id`              | Stable entry identifier generated by the SDK.                                |
+| `signature`       | Transaction signature, once the network confirms the submission.            |
+| `status`          | Lifecycle status (`pending`, `confirmed`, `failed`, `cancelled`).           |
+| `operations`      | Ordered operation type names included in the transaction.                   |
+| `walletId`        | `KnownWallet` id of the adapter that signed the transaction.                |
+| `account`         | Public key of the signing account.                                          |
+| `timeBounds`      | Absolute `minTime` / `maxTime` bounds applied to the transaction, if any.   |
+| `estimatedFee`    | Estimated fee in stroops, when computed.                                    |
+| `createdAt`       | Unix-second timestamp when the entry was recorded.                          |
+| `error`           | Failure code and message when the submission did not succeed.               |
+
+History never stores private keys, seed phrases, signed transaction envelopes,
+or arbitrary message payloads. Only the fields above are persisted; anything
+else the application needs must be stored by the application itself.
+
+### Retention
+
+History is retained locally until it is cleared. The SDK does not expire entries
+on its own, so applications choose the retention window that matches their
+privacy policy. Two controls are available:
+
+- `history.clear()` removes every entry for the current adapter.
+- `history.clear({ before })` removes entries created before a Unix-second
+  timestamp, which is useful for enforcing a rolling retention window.
+
+```ts
+// Keep only the last 30 days of history.
+const cutoff = Math.floor(Date.now() / 1000) - 30 * 24 * 60 * 60
+await history.clear({ before: cutoff })
+```
+
+Applications should clear history on sign-out and document their chosen
+retention window in their own privacy policy.
+
+### Encryption requirements
+
+When history is persisted to durable storage (for example `localStorage`,
+`IndexedDB`, or a native key-value store), it **must** be encrypted at rest:
+
+- Use authenticated encryption (AEAD) such as AES-GCM with a key of at least
+  256 bits.
+- Derive or store the encryption key outside the persisted history payload; do
+  not write the key alongside the ciphertext.
+- Rotate the key and re-encrypt history when the account changes.
+- Treat the storage backend as untrusted: assume an attacker can read and modify
+  it, and rely on authentication tags to detect tampering.
+
+In-memory history (the default) does not require encryption because it never
+leaves the process.
+
+### Disabling persistence
+
+Persistence is opt-in. By default history lives only in memory and is discarded
+when the adapter disconnects. To guarantee nothing is written to durable
+storage, disable persistence explicitly:
+
+```ts
+const adapter = createAdapter({
+  wallet: KnownWallet.Phantom,
+  config: { history: { persist: false } },
+})
+```
+
+With `persist: false` the SDK never reads or writes durable storage for history;
+`history.clear()` remains available and is a no-op when nothing is stored.
+Applications that handle sensitive accounts should disable persistence and keep
+history in memory only.
+
 ## Hardware wallets
 
-Hardware adapters need a transport to talk to the device and a manifest so the
-device can display the requesting app. Both are passed through `createAdapter`.
+## Compatibility notes
 
 ### Ledger
 
@@ -174,6 +310,76 @@ const adapter = createAdapter({
 ```bash
 npm install @trezor/connect-web
 ```
+
+## Server-side monitoring without wallet secrets
+
+Backends often need to observe TTL or restore status without ever touching user
+signing keys or submitting transactions on the user's behalf. `createRestoreMonitor`
+provides a documented, stable, read-only interface for exactly that: it performs
+read-only RPC calls (account scan + simulation) and never signs or submits.
+
+```ts
+import { createRestoreMonitor } from '@handsoff/sdk'
+
+const monitor = createRestoreMonitor({
+  connection, // read-only RPC connection
+  contractId: 'C...',
+})
+
+// Observe TTL / restore status for an account.
+const status = await monitor.checkStatus(accountPublicKey)
+console.log(status.restoreRequired, status.archivedKeys, status.ttlSeconds)
+
+// Poll on an interval; returns an unsubscribe function.
+const stop = monitor.watch(accountPublicKey, (next) => {
+  if (next.restoreRequired) enqueueRestorePrompt(accountPublicKey)
+}, { intervalMs: 30_000 })
+
+// Later:
+stop()
+```
+
+### `RestoreMonitor`
+
+```ts
+export interface RestoreMonitorOptions {
+  /** Read-only RPC connection. No signer is accepted. */
+  connection: ReadOnlyConnection
+  /** Contract whose archived entries should be observed. */
+  contractId: string
+}
+
+export interface RestoreStatus {
+  /** True when archived entries must be restored before use. */
+  restoreRequired: boolean
+  /** Archived ledger keys detected for the account. */
+  archivedKeys: string[]
+  /** Remaining TTL in seconds, or `null` when not applicable. */
+  ttlSeconds: number | null
+}
+
+export interface RestoreMonitor {
+  /** One-shot read-only status check. */
+  checkStatus(account: string): Promise<RestoreStatus>
+  /** Poll `checkStatus` and invoke `onStatus` on each result. */
+  watch(
+    account: string,
+    onStatus: (status: RestoreStatus) => void,
+    options?: { intervalMs?: number },
+  ): () => void
+}
+
+export function createRestoreMonitor(options: RestoreMonitorOptions): RestoreMonitor
+```
+
+`createRestoreMonitor` never accepts a wallet, signer, or secret key, and it never
+calls `signTransaction` or submits transactions. Failures are surfaced, not
+swallowed: a missing contract throws `ContractNotFoundError`, and RPC failures
+reject with the underlying error so callers can retry or alert. An account that is
+already restored reports `restoreRequired: false` with an empty `archivedKeys`.
+
+See the [`server-monitoring` example](https://github.com/handsoff/examples/tree/main/server-monitoring)
+for a runnable backend that wires this into a health endpoint.
 
 Submits a transaction with automatic archive restoration. If the simulation detects archived entries, a restore transaction is built, signed, submitted, and confirmed before the original transaction is rebuilt and submitted. State transitions are published to all registered listeners throughout. See [`SubmitWithRestoreOptions`](/api/types#submitwithrestoreoptions) for the full set of lifecycle callbacks.
 

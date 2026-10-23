@@ -19,6 +19,14 @@ on:
         required: true
         type: string
 
+# Serialize release runs per tag ref. Overlapping triggers for the same tag
+# queue behind the in-flight run instead of racing the publish/provenance
+# steps. `cancel-in-progress: false` ensures a run that is mid-publish is
+# never aborted, which would otherwise leave a partial publish behind.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
   id-token: write
@@ -154,11 +162,125 @@ jobs:
       - run: npm run build:sdk
       - run: npm run build:hook
 
-      - name: Publish all packages atomically with provenance
+      - name: Inspect package tarballs for accidental secrets and unexpected files
+        run: |
+          set -euo pipefail
+          node - <<'EOF'
+          const { execFileSync } = require('child_process');
+          const fs = require('fs');
+          const path = require('path');
+          const os = require('os');
+
+          const packages = ['packages/sdk', 'packages/react-hook', 'packages/vue-hook', 'packages/svelte-hook'];
+
+          // Credential patterns that must never appear in a published tarball.
+          const SECRET_PATTERNS = [
+            { name: 'npm token', re: /npm_[A-Za-z0-9]{36}/ },
+            { name: 'AWS access key id', re: /AKIA[0-9A-Z]{16}/ },
+            { name: 'GitHub token', re: /gh[pousr]_[A-Za-z0-9]{36,}/ },
+            { name: 'Slack token', re: /xox[baprs]-[A-Za-z0-9-]{10,}/ },
+            { name: 'private key block', re: /-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----/ },
+            { name: 'generic bearer token', re: /Bearer\s+[A-Za-z0-9._-]{20,}/ },
+            { name: 'assigned secret literal', re: /(?:api[_-]?key|secret|password|token)\s*[:=]\s*['"][A-Za-z0-9._\-+/=]{16,}['"]/i },
+          ];
+
+          // Files that should never ship in a package tarball.
+          const UNEXPECTED_FILE_PATTERNS = [
+            { name: 'dotenv file', re: /(^|\/)\.env(\..*)?$/ },
+            { name: 'private key file', re: /\.(pem|key|p12|pfx)$/i },
+            { name: 'npmrc', re: /(^|\/)\.npmrc$/ },
+            { name: 'git metadata', re: /(^|\/)\.git(\/|$)/ },
+            { name: 'source map', re: /\.map$/ },
+            { name: 'test file', re: /(^|\/)(__tests__|test|tests)\/|\.(test|spec)\.[cm]?[jt]sx?$/ },
+          ];
+
+          const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tarball-inspect-'));
+          const failures = [];
+
+          for (const pkg of packages) {
+            const pkgJsonPath = path.join(pkg, 'package.json');
+            if (!fs.existsSync(pkgJsonPath)) continue;
+            const meta = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
+            const label = `${meta.name}@${meta.version}`;
+
+            // `npm pack --dry-run --json` reports the exact file list that would
+            // be uploaded, without writing a tarball to disk.
+            const out = execFileSync('npm', ['pack', '-w', pkg, '--dry-run', '--json'], {
+              encoding: 'utf8',
+              stdio: ['ignore', 'pipe', 'inherit'],
+            });
+            const [info] = JSON.parse(out);
+            const files = (info && info.files) || [];
+
+            for (const file of files) {
+              const filePath = file.path;
+              for (const rule of UNEXPECTED_FILE_PATTERNS) {
+                if (rule.re.test(filePath)) {
+                  failures.push(`${label}: unexpected file (${rule.name}): ${filePath}`);
+                }
+              }
+
+              const abs = path.join(pkg, filePath);
+              if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) continue;
+              // Skip large binaries; secrets live in text files.
+              if (fs.statSync(abs).size > 2 * 1024 * 1024) continue;
+              let content;
+              try {
+                content = fs.readFileSync(abs, 'utf8');
+              } catch {
+                continue;
+              }
+              for (const rule of SECRET_PATTERNS) {
+                if (rule.re.test(content)) {
+                  failures.push(`${label}: possible secret (${rule.name}) in ${filePath}`);
+                }
+              }
+            }
+          }
+
+          fs.rmSync(tmp, { recursive: true, force: true });
+
+          if (failures.length) {
+            console.error('Tarball inspection failed. Refusing to publish:');
+            for (const f of failures) console.error('  - ' + f);
+            console.error('See docs/RELEASE.md#tarball-secret-inspection for remediation.');
+            process.exit(1);
+          }
+          console.log('Tarball inspection passed: no secrets or unexpected files detected.');
+          EOF
+
+      - name: Skip already-published versions (duplicate-run protection)
+        id: dupcheck
         run: |
           set -euo pipefail
           tag="${{ steps.channel.outputs.tag }}"
           packages=(packages/sdk packages/react-hook packages/vue-hook packages/svelte-hook)
+          pending=()
+          for pkg in "${packages[@]}"; do
+            name=$(node -p "require('./$pkg/package.json').name")
+            version=$(node -p "require('./$pkg/package.json').version")
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "$name@$version already published; skipping."
+            else
+              pending+=("$pkg")
+            fi
+          done
+          if [ ${#pending[@]} -eq 0 ]; then
+            echo "All package versions already published; nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Pending packages: ${pending[*]}"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            printf '%s\n' "${pending[@]}" > "$RUNNER_TEMP/pending-packages.txt"
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish all packages atomically with provenance
+        if: steps.dupcheck.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          mapfile -t packages < "$RUNNER_TEMP/pending-packages.txt"
           published=()
           failed=""
           for pkg in "${packages[@]}"; do
@@ -182,6 +304,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Verify provenance attestations
+        if: steps.dupcheck.outputs.skip != 'true'
         run: |
           set -euo pipefail
           packages=(packages/sdk packages/react-hook packages/vue-hook packages/svelte-hook)
