@@ -9,6 +9,10 @@ This page documents the full fee model end to end: the formula, all four
 interacting knobs, their defaults, how to preview the cost before signing, and
 how the size guard warns or throws.
 
+> New to these terms? See the [protocol glossary](./glossary.md) for definitions
+> of archived entries, footprints, TTL, restore transactions, and simulation
+> preambles.
+
 ## The formula
 
 ```

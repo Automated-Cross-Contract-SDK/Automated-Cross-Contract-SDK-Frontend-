@@ -71,6 +71,29 @@ new SorobanResurrect({
 })
 ```
 
+## Retention
+
+Persisted history is kept until you remove it; the SDK never expires entries on
+its own. Choose a retention window that matches your privacy policy and clear
+entries you no longer need. `clearHistory()` removes every persisted entry for
+the configured storage key, and `getHistory()` returns the in-memory entries so
+you can prune selectively before re-persisting:
+
+```ts
+// Drop everything the SDK has stored.
+await sdk.clearHistory()
+
+// Or prune entries older than a retention window, then re-persist.
+const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000
+const kept = sdk.getHistory().filter((entry) => entry.timestamp >= cutoff)
+await sdk.clearHistory()
+for (const entry of kept) await sdk.persistEntry(entry)
+```
+
+Call `clearHistory()` on sign-out and when a user requests deletion. Because the
+storage adapter is yours, you can also remove the underlying key directly (for
+example `localStorage.removeItem(key)`) if you need to purge outside the SDK.
+
 ## Encrypted storage
 
 Pass a `serializer` to encrypt (or ship to a server) before anything is stored.

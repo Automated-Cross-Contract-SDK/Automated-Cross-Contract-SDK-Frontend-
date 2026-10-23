@@ -1,17 +1,19 @@
 # Getting Started
 
-Soroban-Resurrect solves the "archived ledger entry" problem for Soroban dApps. When a user's persistent data (token balance, loan position, etc.) expires due to TTL rent, their transaction fails with a cryptic error. This SDK automatically detects archived entries via [CAP-0066](https://github.com/stellar/stellar-protocol/blob/master/core/cap-0066.md) and seamlessly restores them before submitting the user's intended transaction.
+This guide walks you through installing and using the package.
 
 ## Installation
 
 ```bash
-npm install @soroban-resurrect/sdk @stellar/stellar-sdk
+npm install @your-scope/your-package
 ```
 
-If you're building a React dApp, also install the hook package:
+## Basic usage
 
-```bash
-npm install @soroban-resurrect/react-hook
+```ts
+import { createClient } from '@your-scope/your-package';
+
+const client = createClient({ /* options */ });
 ```
 
 `@stellar/stellar-sdk` (`^12.0.0`) and `react` (`^18.0.0`, for the hook package) are peer dependencies — install them alongside the SDK.
@@ -151,18 +153,37 @@ const wallet = {
   signTransaction: async (txXdr, opts) => freighter.signTransaction(txXdr, opts),
 }
 
-// Submit — restoration (if needed) happens automatically
-const result = await sr.submitWithRestore({ transaction: tx, wallet })
+With persistence disabled:
 
-if (result.success) {
-  console.log('Original tx hash:', result.originalTxHash)
-  if (result.restoreTxHash) {
-    console.log('Restore tx hash:', result.restoreTxHash)
-    console.log('Archived keys restored:', result.archivedKeysDetected)
-  }
-} else {
-  console.error('Failed:', result.error)
-}
+- No history is written to disk, `localStorage`, or any database.
+- In-memory history (if enabled) is discarded when the client is disposed or the
+  process exits.
+- Clearing history is a no-op beyond dropping the in-memory cache.
+
+If you need history across restarts, keep persistence enabled and apply the
+encryption requirements above.
+
+## Integrating the SDK into an existing dApp
+
+This tutorial adds the SDK to an application that already works, without
+rewriting it. It covers the wallet signing flow, failure UX, and a repeatable
+verification flow so you can confirm the integration works.
+
+### Step 1 — Install and configure the client
+
+Add the package to your existing project and create a single client instance at
+startup. Keep the configuration in one module so every call site shares it:
+
+```ts
+// src/sdk.ts
+import { createClient } from '@your-scope/your-package';
+
+export const client = createClient({
+  network: 'testnet',
+  // Persist history only if your storage layer meets the encryption
+  // requirements above; otherwise keep it in memory.
+  persistHistory: false,
+});
 ```
 
 ## Quick Start (Plain JavaScript)
@@ -268,30 +289,49 @@ no-restore path is a strict subset of the restore path.
 
 ## Quick Start (React)
 
-```tsx
-import { SorobanResurrectProvider, useSorobanResurrectContext } from '@soroban-resurrect/react-hook'
+Your dApp already has a connected wallet. Pass the wallet's signing function to
+the SDK instead of handling keys yourself — the SDK builds the transaction and
+the wallet prompts the user to sign:
 
-function App() {
-  return (
-    <SorobanResurrectProvider config={{ rpcUrl: 'https://soroban-testnet.stellar.org' }}>
-      <WithdrawButton />
-    </SorobanResurrectProvider>
-  )
+```ts
+import { client } from './sdk';
+
+async function submitPayment(destination: string, amount: string) {
+  const result = await client.submit({
+    operation: { type: 'payment', destination, amount },
+    // The wallet owns the secret key and shows its own approval prompt.
+    sign: (envelope) => wallet.signTransaction(envelope),
+  });
+  return result;
 }
+```
 
-function WithdrawButton() {
-  const { submitWithRestore, state, isProcessing } = useSorobanResurrectContext()
+Never read or store the user's secret key in your application; the wallet is the
+only component that signs.
 
-  const handleWithdraw = async () => {
-    const result = await submitWithRestore(tx, wallet)
-    // result.success, result.originalTxHash, etc.
+### Step 3 — Handle failures with clear UX
+
+Submissions can fail at several points: the user rejects the signature request,
+the network rejects the transaction, or the request times out. Surface each case
+distinctly instead of a generic error:
+
+```ts
+import { client } from './sdk';
+
+try {
+  const result = await submitPayment(destination, amount);
+  showSuccess(result.hash);
+} catch (err) {
+  if (err.code === 'USER_REJECTED') {
+    // The user declined the wallet prompt — not an error to alarm them about.
+    showNotice('Signature cancelled. Nothing was submitted.');
+  } else if (err.code === 'NETWORK_ERROR' || err.code === 'TIMEOUT') {
+    // Safe to retry; the transaction may not have been submitted.
+    showRetry('Could not reach the network. Please try again.');
+  } else {
+    // The network rejected the transaction (e.g. insufficient balance).
+    showError(err.message);
   }
-
-  return (
-    <button onClick={handleWithdraw} disabled={isProcessing}>
-      {isProcessing ? state.message : 'Withdraw'}
-    </button>
-  )
 }
 ```
 
@@ -348,31 +388,30 @@ so the example remains compatible across supported package releases.
 
 ## Choosing an approach
 
-If you already use Soroban RPC and only need a single, application-specific
-restore flow, you may prefer to maintain that small flow yourself. See
-[Manual restore flow vs. the SDK](/guide/comparison) for the trade-offs,
-dependencies, and bundle-size measurement command.
+- Treat a user-rejected signature as a normal outcome, not an error.
+- Offer a retry for transient network failures and timeouts.
+- Show the network's rejection reason for validation failures.
+- Never display raw error objects or secret material to the user.
 
-## Cancelling a restore workflow
+### Step 4 — Verify the integration
 
-Pass an `AbortSignal` to cancel further SDK work, including simulation waits,
-wallet prompts that honor the signal, and transaction-confirmation polling:
+Run this repeatable check after wiring the SDK in. It exercises the happy path
+and the failure path so you can confirm both work:
 
-```typescript
-const controller = new AbortController()
-const result = await sr.submitWithRestore({
-  transaction: tx,
-  wallet,
-  signal: controller.signal,
-})
+1. **Happy path** — submit a small payment on testnet. Confirm the wallet prompt
+   appears, approve it, and verify the returned hash appears in your history and
+   on a block explorer.
+2. **User rejection** — submit again and decline the wallet prompt. Confirm your
+   UI shows the cancellation notice and no transaction is submitted.
+3. **Network failure** — disable the network (or point at an unreachable
+   endpoint) and submit. Confirm the retry UI appears.
+4. **History** — confirm the successful transaction is recorded and that
+   clearing history removes it from both memory and any persisted store.
 
-// Call from a cancel button or when the owning view is disposed:
-controller.abort()
+Repeat these steps on every change to the integration; they cover the expected
+path and the relevant failure cases.
 
-if (!result.success && result.errorCode === 'ABORTED') {
-  // A transaction already submitted may still complete on-chain.
-}
-```
+## Next steps
 
 `AbortSignalOptions` is exported as a stable type. A `{ signal }` options object
 is accepted by `simulate`, `detectArchivedKeys`, `detectArchivedKeysBatch`,

@@ -147,6 +147,111 @@ signatures later.
 | `MultiSigConfig` | Threshold and signer set for an N-of-M wallet. |
 | `SignatureCollectionResult` | Outcome of `collectSignatures`, including collected signatures and per-signer failures. |
 
+## Timeout and partial-failure scenarios
+
+Restore flows can fail or time out at several points. Because a restore may already have
+been submitted to the network when a timeout or error surfaces, an application must know
+**which actions may already have occurred** before it retries or reports failure. The
+diagrams below document those outcomes and how to reconcile status.
+
+### Timeout while submitting
+
+A timeout on `submitWithRestore` does **not** mean the restore did not happen. The signed
+transaction may already have been accepted by the network.
+
+```mermaid
+sequenceDiagram
+    participant App
+    participant Adapter as MultiSigWalletAdapter
+    participant Chain
+
+    App->>Adapter: submitWithRestore(result)
+    Adapter->>Chain: submit signed tx
+    Note over App,Chain: response is slow / lost
+    Chain--xAdapter: (no response before timeout)
+    Adapter-->>App: timeout error
+    Note over App: tx MAY already be on-chain
+    App->>Chain: query tx status by hash
+    Chain-->>App: status (success / not found / pending)
+```
+
+**What may already have occurred:** the signed transaction may have been broadcast and
+included in a ledger. The restore itself may have completed even though the caller saw a
+timeout.
+
+**How to reconcile:** do not blindly resubmit. Query the transaction status by its hash
+first. If it succeeded, treat the restore as complete. If it is not found, it is safe to
+resubmit the same signed transaction. If it is still pending, wait and re-check.
+
+### Partial failure during signature collection
+
+A signer can fail or refuse while others succeed. `collectSignatures` records per-signer
+failures instead of aborting, so the flow can continue when the threshold is still met.
+
+```mermaid
+sequenceDiagram
+    participant App
+    participant Adapter as MultiSigWalletAdapter
+    participant S1 as MultiSigSigner (1)
+    participant S2 as MultiSigSigner (2)
+    participant S3 as MultiSigSigner (3)
+
+    App->>S1: sign(tx)
+    S1-->>App: signature
+    App->>S2: sign(tx)
+    S2-->>App: signature
+    App->>S3: sign(tx)
+    S3-->>App: error
+    App->>Adapter: collectSignatures(tx, signatures)
+    Adapter-->>App: SignatureCollectionResult (2 ok, 1 failed)
+    Note over App: threshold met → submit
+    Note over App: threshold not met → retain result, collect more later
+```
+
+**What may already have occurred:** successful signatures have been collected; no
+on-chain action has happened yet. Nothing is submitted until `submitWithRestore` is called.
+
+**How to reconcile:** inspect the `SignatureCollectionResult`. If the successful count
+meets `config.threshold`, submit. Otherwise retain the partial result and collect the
+remaining signatures before submitting — no on-chain state needs to be undone.
+
+### Failure after submission
+
+If `submitWithRestore` rejects with a non-timeout error after the transaction was sent,
+the transaction may still have been included.
+
+```mermaid
+sequenceDiagram
+    participant App
+    participant Adapter as MultiSigWalletAdapter
+    participant Chain
+
+    App->>Adapter: submitWithRestore(result)
+    Adapter->>Chain: submit signed tx
+    Chain-->>Adapter: error / rejected
+    Adapter-->>App: failure
+    Note over App: tx MAY or MAY NOT be on-chain
+    App->>Chain: query tx status by hash
+    Chain-->>App: status (success / not found)
+```
+
+**What may already have occurred:** the transaction may have been included before the
+error was observed, or it may have been rejected outright.
+
+**How to reconcile:** query the transaction status by hash. If it succeeded, the restore
+is complete. If it is not found, the transaction was not applied and the flow can be
+retried (re-collecting signatures if the transaction changed).
+
+### Reconciliation checklist
+
+- Always keep the signed transaction hash so you can query its status after a timeout or
+  failure.
+- Never assume a timeout means the restore did not happen — check the chain first.
+- Only resubmit the **same** signed transaction when the status query reports it was not
+  found; otherwise you risk a duplicate submission.
+- A partial `SignatureCollectionResult` is safe to retain and resume; it has no on-chain
+  effect until submitted.
+
 ## Restore cost estimation
 
 `estimateRestoreCost(transaction)` is the read-only companion to a restore flow. It inspects a
