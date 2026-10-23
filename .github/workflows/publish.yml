@@ -297,14 +297,6 @@ jobs:
           if [ -n "$failed" ]; then
             echo "::error::Partial publish detected. Failed at $failed."
             echo "::error::Already published: ${published[*]:-none}"
-            echo "::error::Recovery: see docs/RELEASE.md#recovering-from-a-partial-publish"
-            echo "## Partial publish detected" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "Failed at: \`$failed\`" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "Already published: ${published[*]:-none}" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "Recovery: see \`docs/RELEASE.md#recovering-from-a-partial-publish\`." >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
           echo "All packages published successfully with provenance attestations."
