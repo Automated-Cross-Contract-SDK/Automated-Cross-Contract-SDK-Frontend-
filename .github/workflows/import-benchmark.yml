@@ -34,3 +34,30 @@ jobs:
           name: import-benchmark
           path: import-benchmark.json
           if-no-files-found: ignore
+
+  archived-key-detection:
+    name: Archived-key detection benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build packages (benchmark imports published entries)
+        run: npm run build
+
+      - name: Benchmark archived-key detection across footprint sizes
+        run: npm run benchmark:archived-keys -- --summary "$GITHUB_STEP_SUMMARY" --json archived-key-benchmark.json
+
+      - name: Upload benchmark report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: archived-key-benchmark
+          path: archived-key-benchmark.json
+          if-no-files-found: ignore

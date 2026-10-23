@@ -5,8 +5,8 @@ This page documents the `WalletAdapter` contract, the `createAdapter` factory, t
 `KnownWallet` / `SUPPORTED_WALLETS` registry, the capability flags, the hardware
 wallet setup for Ledger and Trezor, the N-of-M multisig restore flow, the
 transaction-free contract and account scanning APIs, the `estimateRestoreCost`
-helper for pricing a restore before the user signs, and the optional RPC
-instrumentation hooks for request duration and payload size.
+helper for pricing a restore before the user signs, and the optional cache
+memory-bound policies.
 
 ## `WalletAdapter`
 
@@ -88,66 +88,56 @@ unsupported operation fails fast instead of silently degrading.
 | `blindSigning`    | Device can sign without full display | SDK emits a blind-signing warning before signing                                       |
 | `multiAccount`    | Can expose multiple accounts         | Account picker is shown after `connect()`                                              |
 
-## RPC instrumentation hooks
+## Cache memory-bound policies
 
-The SDK can optionally report the duration and payload size of every RPC request
-it issues. Instrumentation is **off by default** and never captures payload
-contents — only size metadata is reported.
+The SDK keeps a few optional in-memory caches (for example resolved account
+metadata and simulation results). By default these caches are unbounded, which is
+fine for short-lived scripts but can grow without limit during long-running
+sessions. Pass a `cachePolicy` to `createAdapter` to bound them.
 
 ```ts
-export interface RpcInstrumentationEvent {
-  /** RPC method name, e.g. `getAccountInfo`. */
-  readonly method: string
-  /** Wall-clock duration of the request in milliseconds. */
-  readonly durationMs: number
-  /** Size of the serialized request payload in bytes. */
-  readonly requestBytes: number
-  /** Size of the serialized response payload in bytes, when available. */
-  readonly responseBytes?: number
-  /** `true` when the request failed; `error` carries the reason. */
-  readonly failed: boolean
-  /** Error thrown by the request, if any. */
-  readonly error?: unknown
-}
-
-export interface RpcInstrumentationHooks {
-  /** Called once per completed (or failed) RPC request. */
-  onRequest?(event: RpcInstrumentationEvent): void
+export interface CachePolicy {
+  /** Maximum number of entries retained per cache. `0` disables the cache. */
+  maxEntries?: number
+  /** Maximum total approximate byte size retained per cache. */
+  maxBytes?: number
+  /** Time-to-live in milliseconds; entries older than this are evicted. */
+  ttlMs?: number
+  /** Eviction strategy when a bound is exceeded. Defaults to `'lru'`. */
+  eviction?: 'lru' | 'fifo'
 }
 ```
 
-Pass the hooks through `createAdapter` config. Omitting them disables
-instrumentation entirely, so there is no overhead when it is not used:
+All fields are optional. When omitted, the cache keeps its previous unbounded
+behaviour, so existing integrations are unaffected. Bounds are enforced on every
+write: the least-recently-used (or oldest, for `fifo`) entries are evicted until
+both `maxEntries` and `maxBytes` are satisfied, and entries older than `ttlMs`
+are dropped on read.
 
 ```ts
 import { createAdapter, KnownWallet } from '@handsoff/sdk'
 
 const adapter = createAdapter({
   wallet: KnownWallet.Phantom,
-  config: {
-    rpcInstrumentation: {
-      onRequest: ({ method, durationMs, requestBytes, responseBytes, failed }) => {
-        metrics.histogram('rpc.duration', durationMs, { method })
-        metrics.histogram('rpc.request_bytes', requestBytes, { method })
-        if (responseBytes !== undefined) {
-          metrics.histogram('rpc.response_bytes', responseBytes, { method })
-        }
-        if (failed) metrics.increment('rpc.failure', { method })
-      },
-    },
+  cachePolicy: {
+    maxEntries: 500,
+    maxBytes: 2 * 1024 * 1024,
+    ttlMs: 5 * 60 * 1000,
+    eviction: 'lru',
   },
 })
 ```
 
-Notes:
+Set `maxEntries: 0` to disable a cache entirely. Invalid policies (negative
+bounds, non-finite numbers) throw `InvalidCachePolicyError` at construction time
+rather than silently degrading.
 
-- Payload contents are never passed to the hooks; only byte sizes are reported.
-- `onRequest` is invoked for both successful and failed requests, so failures can
-  be counted alongside latency.
-- `responseBytes` is omitted when the response could not be serialized (for
-example, on a transport error).
-- Hooks are synchronous and must not throw; a throwing hook is caught and ignored
-  so instrumentation can never break an RPC call.
+### Migration notes
+
+- `cachePolicy` is additive and optional; no changes are required for existing
+  callers.
+- The default remains unbounded to preserve prior behaviour. Long-running
+  services should set at least `maxEntries` or `ttlMs`.
 
 ## Hardware wallets
 

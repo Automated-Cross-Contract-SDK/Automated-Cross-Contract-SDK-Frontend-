@@ -40,6 +40,8 @@
     "test": "turbo run test --filter=\"./packages/*\"",
     "test:root": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:mutation": "stryker run",
+    "test:mutation:report": "stryker run --reporters html,clear-text,progress",
     "verify": "turbo run verify --filter=\"./packages/*\" --output-logs=errors-only --continue",
     "test:types": "turbo run test:types --filter=\"./packages/*\"",
     "test:watch": "npm run test:watch -w packages/sdk",
@@ -49,12 +51,16 @@
     "prepare": "husky",
     "verify:pins": "node scripts/verify-workspace-pins.mjs",
     "verify:packaging": "node scripts/verify-packaging.mjs",
+    "verify:provenance": "node scripts/verify-provenance.mjs",
+    "health": "node scripts/health-report.mjs",
     "publish:packages": "node scripts/publish-packages.mjs --provenance",
-    "release": "npm run verify:pins && npm run build && npm run verify:packaging && node scripts/publish-packages.mjs --provenance",
-    "release:recover": "node scripts/publish-packages.mjs --provenance --resume"
+    "release": "npm run verify:pins && npm run build && npm run verify:packaging && node scripts/publish-packages.mjs --provenance && npm run verify:provenance",
+    "release:recover": "node scripts/publish-packages.mjs --provenance --resume && npm run verify:provenance"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@stryker-mutator/core": "^8.7.1",
+    "@stryker-mutator/vitest-runner": "^8.7.1",
     "@vitest/coverage-v8": "^5.0.5",
     "esbuild": "^0.28.2",
     "eslint": "^10.13.0",

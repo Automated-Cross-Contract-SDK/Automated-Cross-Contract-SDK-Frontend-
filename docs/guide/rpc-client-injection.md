@@ -68,50 +68,32 @@ Only override the methods you care about — spreading `...client` first means
 every method not explicitly overridden still delegates to the wrapped
 client, so `ISorobanRpcClient`'s six-method contract stays satisfied.
 
-## Instrumentation hooks
+## Concurrency limits for ledger lookups
 
-For request duration and payload-size metrics, pass an optional
-`instrumentation` object in the SDK config. Hooks are invoked after each RPC
-call and receive only metadata — **payload contents are never captured by
-default**, only their byte size.
+When the SDK needs to look up many ledger entries at once (for example when
+checking TTLs across a large set of keys), it issues `getLedgerEntries`
+calls in parallel. To avoid overwhelming the RPC endpoint, the number of
+in-flight requests is bounded by `config.maxConcurrentLedgerLookups`.
 
 ```typescript
-import { SorobanResurrect, type RpcInstrumentation } from '@soroban-resurrect/sdk'
-
-const instrumentation: RpcInstrumentation = {
-  onRequest(event) {
-    // event.method: e.g. 'simulateTransaction'
-    // event.durationMs: wall-clock duration of the call
-    // event.requestBytes / event.responseBytes: serialized payload sizes
-    // event.ok: whether the call resolved without throwing
-    metrics.histogram('rpc.duration', event.durationMs, { method: event.method })
-    metrics.histogram('rpc.request_bytes', event.requestBytes, { method: event.method })
-    metrics.histogram('rpc.response_bytes', event.responseBytes, { method: event.method })
-  },
-}
-
 const sdk = new SorobanResurrect({
   rpcUrl: 'https://soroban-testnet.stellar.org',
-  instrumentation,
+  // At most 5 ledger lookups in flight at any time. Defaults to 10.
+  maxConcurrentLedgerLookups: 5,
 })
 ```
 
-The `RpcInstrumentationEvent` shape is stable:
+- **Setting:** `maxConcurrentLedgerLookups` (optional, positive integer).
+- **Default:** `10` when omitted.
+- **Behavior:** large inputs are split into batches that respect the limit;
+  results are returned in the same order as the input keys, so no entries
+  are lost or reordered regardless of the limit.
+- **Validation:** a non-positive or non-integer value throws a
+  `ConfigurationError` at construction time.
 
-```typescript
-type RpcInstrumentationEvent = {
-  method: keyof ISorobanRpcClient
-  durationMs: number
-  requestBytes: number
-  responseBytes: number
-  ok: boolean
-}
-```
-
-Hooks are best-effort: a throwing hook never fails the underlying RPC call.
-Omit `instrumentation` to disable all overhead. Payload contents are not
-included in the event; if you need them, wrap the client yourself as shown
-above.
+This setting is purely a client-side bound and does not change the RPC
+protocol or the shape of any response, so it is backward compatible: existing
+configurations that omit it keep the previous default behavior.
 
 ## Check restore compatibility
 
