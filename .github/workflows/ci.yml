@@ -9,6 +9,13 @@ on:
     - cron: '0 3 * * *'
   workflow_dispatch:
 
+# Serialize overlapping CI runs for the same ref so release/provenance steps
+# never execute in conflicting parallel executions. Newer triggers cancel
+# in-flight runs on the same ref (duplicate-run protection).
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   npm-audit:
     name: npm-audit
@@ -187,6 +194,68 @@ jobs:
 
       - name: Test
         run: npm run test -w packages/${{ matrix.package }}
+
+  # Scheduled dependency update validation.
+  #
+  # Purpose: catch breakage from automated dependency version bumps before they
+  # are merged. Runs on a nightly schedule, on manual dispatch, and on
+  # dependency-update PRs (Dependabot/Renovate).
+  #
+  # Stable interface:
+  #   - Trigger: schedule (cron '0 3 * * *'), workflow_dispatch, and
+  #     pull_request events whose branch/author indicates an automated
+  #     dependency update.
+  #   - Inputs (workflow_dispatch): `node-version` (default 20) selects the
+  #     Node.js version used for validation.
+  #   - Failure semantics: any failing step fails the job; the job is the
+  #     required signal that a dependency bump is safe to merge.
+  #
+  # See docs/guide/local-package-development.md for how to run and interpret
+  # this workflow locally.
+  dependency-update-validation:
+    name: dependency-update-validation
+    if: >
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+        (startsWith(github.head_ref, 'dependabot/') ||
+         startsWith(github.head_ref, 'renovate/') ||
+         github.actor == 'dependabot[bot]' ||
+         github.actor == 'renovate[bot]'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ github.event.inputs.node-version || '20' }}
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Build workspace (all packages via Turbo)
+        run: npm run build
+
+      - name: Typecheck workspace (all packages via Turbo)
+        run: npm run typecheck
+
+      - name: Test workspace (all packages via Turbo)
+        run: npm test
+
+      - name: Validate package fixtures
+        run: |
+          if [ -d fixtures ]; then
+            for dir in fixtures/*/; do
+              [ -f "${dir}package.json" ] || continue
+              echo "::group::fixture ${dir}"
+              (cd "${dir}" && npm install --no-audit --no-fund && npm test --if-present)
+              echo "::endgroup::"
+            done
+          else
+            echo "No fixtures directory present; skipping fixture validation."
+          fi
 
   wallet-e2e:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

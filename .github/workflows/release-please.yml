@@ -1,5 +1,20 @@
 name: release-please
 
+# Release workflow concurrency and duplicate-run protection.
+#
+# Behavior contract (stable interface):
+# - All triggers for this workflow share a single concurrency group
+#   (`release-please`), so overlapping release triggers are serialized
+#   instead of running concurrently.
+# - `cancel-in-progress: false` ensures an in-flight release run is never
+#   cancelled mid-publish; queued runs wait for the active one to finish.
+# - Duplicate-run protection: release-please is idempotent per merged commit
+#   and only opens/updates a release PR or publishes a version that does not
+#   already exist, so a repeated trigger cannot publish an already-published
+#   or inconsistent package version.
+# - Because runs are serialized, provenance/release steps cannot execute in
+#   conflicting parallel executions.
+
 on:
   push:
     branches: [main]
@@ -7,6 +22,10 @@ on:
 permissions:
   contents: write
   pull-requests: write
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
 
 jobs:
   release-please:
