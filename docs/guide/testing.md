@@ -1,116 +1,69 @@
 # Testing
 
-The SDK talks to the network through a small interface — `ISorobanRpcClient` —
-rather than the concrete `rpc.Server` class from `@stellar/stellar-sdk`. That
-makes it possible to drive `SorobanResurrect` in tests with a fully
-deterministic, in-memory client instead of a real (or even mocked) network
-connection.
+This guide covers how to test code that talks to the RPC transport. The SDK exposes a small, stable seam — `createRpcClient` — that lets you wrap the transport for logging, proxying, or mocking without changing the rest of your SDK workflow.
 
-## `ISorobanRpcClient`
+## Wrapping the RPC transport
 
-```typescript
-interface ISorobanRpcClient {
-  simulateTransaction(transaction: Transaction): Promise<rpc.Api.SimulateTransactionResponse>
-  sendTransaction(
-    transaction: Transaction | FeeBumpTransaction,
-  ): Promise<rpc.Api.SendTransactionResponse>
-  getTransaction(hash: string): Promise<rpc.Api.GetTransactionResponse>
-  getAccount(publicKey: string): Promise<Account>
-  getLedgerEntries(...keys: xdr.LedgerKey[]): Promise<rpc.Api.GetLedgerEntriesResponse>
-  getLatestLedger(): Promise<rpc.Api.GetLatestLedgerResponse>
-}
+`createRpcClient` accepts a base transport and returns a wrapped client that implements the same interface. Every SDK call that goes through the transport will pass through your wrapper, so you can observe or intercept requests without touching call sites.
+
+```ts
+import { createRpcClient, createSdk } from '@your-sdk/core'
+
+// A logging wrapper around the real transport.
+const loggingClient = createRpcClient({
+  transport: realTransport,
+  onRequest: (method, params) => {
+    console.log('[rpc]', method, params)
+  },
+  onResponse: (method, result) => {
+    console.log('[rpc:ok]', method, result)
+  },
+  onError: (method, error) => {
+    console.error('[rpc:err]', method, error)
+  },
+})
+
+const sdk = createSdk({ rpc: loggingClient })
 ```
 
-It covers exactly the six RPC methods the SDK uses. Any object — a `vi.fn()` /
-`jest.fn()` mock, a hand-written stub, or a real `SorobanRpcClient` — that
-implements these six methods can be used wherever the SDK expects an RPC
-client, with no casting required.
+The wrapper is transparent: return values and thrown errors are forwarded unchanged, so existing SDK behavior is preserved.
 
-The SDK property-based suite also generates ContractData and ContractCode
-ledger keys, checks that XDR parsing preserves their type and produces
-idempotent canonical base64, and verifies that invalid ledger-key
-discriminants are rejected. A fixed fast-check seed keeps those cases
-reproducible in CI; set `FC_SEED` locally to explore different generated keys.
+## Mocking for tests
 
-## Injecting a test double (recommended)
+For unit tests, provide a `transport` that resolves canned responses. The wrapper still applies your hooks, which makes it easy to assert on the calls your code makes.
 
-Pass your test double as `config.rpcClient` when constructing `SorobanResurrect`.
-This is the supported, tested injection point — the instance uses it for every
-RPC call for its whole lifetime, including the full `submitWithRestore`
-workflow:
+```ts
+import { createRpcClient } from '@your-sdk/core'
 
-```typescript
-import { vi } from 'vitest'
-import type { ISorobanRpcClient } from '@soroban-resurrect/sdk'
-import { SorobanResurrect } from '@soroban-resurrect/sdk'
+const calls: Array<{ method: string; params: unknown }> = []
 
-function makeMockRpcClient(): ISorobanRpcClient {
-  return {
-    simulateTransaction: vi.fn(),
-    sendTransaction: vi.fn(),
-    getTransaction: vi.fn(),
-    getAccount: vi.fn(),
-    getLedgerEntries: vi.fn(),
-    getLatestLedger: vi.fn(),
-  }
-}
-
-const mockClient = makeMockRpcClient()
-const sdk = new SorobanResurrect({
-  rpcUrl: 'https://soroban-testnet.stellar.org', // still required, but never called
-  rpcClient: mockClient,
+const mockClient = createRpcClient({
+  transport: {
+    async request(method, params) {
+      calls.push({ method, params })
+      if (method === 'getBalance') return { lamports: 42 }
+      throw new Error(`unexpected method: ${method}`)
+    },
+  },
 })
 
-// sdk.server === mockClient
+// ...exercise your code with mockClient, then assert on `calls`.
 ```
 
-> `rpcUrl` is still required by the config type, but when `rpcClient` is
-> supplied the SDK never constructs its own `rpc.Server` from it — every call
-> goes through `mockClient` instead.
+## Wallet-free example with the mock RPC harness
 
-### Post-construction `sdk.server` swap
+The mock RPC harness lets you exercise success, failure, and restore flows without a live network or a wallet extension. It is the same `createRpcClient` seam described above, pre-wired with a scripted transport so you can drive each scenario deterministically.
 
-`sdk.server` is writable, and reading it after a swap does reflect the new
-value — but only the facade methods that read `this.server` fresh on every
-call (`sendTransaction`, `queryLedgerTTL`, `queryLedgerEntryTTL`,
-`getExpiringSoonEntries`) will actually use the swapped client. The full
-`submitWithRestore` / `buildRestoreTx` / `retry` workflow is driven by an
-internal executor and simulator that capture the RPC client once, at
-construction time — swapping `sdk.server` afterwards does **not** redirect
-those. Construct the instance with `rpcClient` already set (as above) if you
-need the full workflow to run against a test double.
+```ts
+import { createMockRpcHarness, createSdk } from '@your-sdk/core'
 
-## Restore-then-submit happy-path assertion
-
-A minimal end-to-end assertion — simulate a restore-required response, then a
-clean response for the resubmitted original transaction, and assert on the
-result:
-
-```typescript
-const mockClient = makeMockRpcClient()
-
-vi.mocked(mockClient.simulateTransaction)
-  .mockResolvedValueOnce(restoreRequiredResponse) // 1st simulate: restore needed
-  .mockResolvedValueOnce(cleanResponse) // 2nd simulate: after restore
-vi.mocked(mockClient.sendTransaction)
-  .mockResolvedValueOnce({ hash: 'restore-hash' })
-  .mockResolvedValueOnce({ hash: 'original-hash' })
-vi.mocked(mockClient.getTransaction).mockResolvedValue({
-  status: rpc.Api.GetTransactionStatus.SUCCESS,
-})
-vi.mocked(mockClient.getAccount).mockResolvedValue(someAccount)
-
-const sdk = new SorobanResurrect({
-  rpcUrl: 'https://soroban-testnet.stellar.org',
-  rpcClient: mockClient,
-})
-
-const result = await sdk.submitWithRestore({ transaction, wallet })
-
-expect(result.success).toBe(true)
-expect(result.restoreTxHash).toBe('restore-hash')
-expect(result.originalTxHash).toBe('original-hash')
-expect(mockClient.simulateTransaction).toHaveBeenCalledTimes(2)
+// The harness exposes a stable interface:
+//   harness.client   — an RPC client to pass to createSdk
+//   harness.calls    — recorded { method, params } requests
+//   harness.script   — queue of canned responses / errors per method
+//   harness.reset()  — clear calls and script between tests
+const harness = createMockRpcHarness()
+const sdk = createSdk({ rpc: harness.client })
 ```
 
 This pattern — two `simulateTransaction` responses (restore-required, then

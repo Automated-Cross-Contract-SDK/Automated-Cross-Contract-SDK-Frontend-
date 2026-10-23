@@ -122,6 +122,78 @@ rather than silently degrading.
 - The default remains unbounded to preserve prior behaviour. Long-running
   services should set at least `maxEntries` or `ttlMs`.
 
+## Custom RPC client injection
+
+`wrapRpcClient` wraps any `RpcClient` (or `Connection`) with a custom transport so
+you can add logging, proxying, or deterministic test doubles without changing the
+SDK workflow. The wrapper implements the same `RpcClient` interface, so it can be
+passed anywhere the SDK accepts an RPC client.
+
+```ts
+export interface RpcClient {
+  /** Send a JSON-RPC request and resolve the raw result. */
+  request<T = unknown>(method: string, params?: unknown[]): Promise<T>
+}
+
+export interface WrapRpcClientOptions {
+  /** Underlying client that performs the actual request. */
+  client: RpcClient
+  /** Called before each request is forwarded. */
+  onRequest?: (method: string, params: unknown[]) => void
+  /** Called after each request resolves or rejects. */
+  onResponse?: (method: string, result: unknown, error?: unknown) => void
+}
+
+export function wrapRpcClient(options: WrapRpcClientOptions): RpcClient
+```
+
+### Logging
+
+```ts
+import { wrapRpcClient } from '@handsoff/sdk'
+
+const rpc = wrapRpcClient({
+  client: connection,
+  onRequest: (method, params) => console.debug('[rpc]', method, params),
+  onResponse: (method, result, error) =>
+    error ? console.error('[rpc]', method, error) : console.debug('[rpc]', method, result),
+})
+
+const sr = createSdk({ rpc })
+```
+
+### Proxying
+
+```ts
+const rpc = wrapRpcClient({
+  client: connection,
+  onRequest: (method, params) => proxy.forward(method, params),
+})
+```
+
+### Testing
+
+```ts
+import { wrapRpcClient } from '@handsoff/sdk'
+
+const calls: string[] = []
+const rpc = wrapRpcClient({
+  client: {
+    request: async (method) => {
+      calls.push(method)
+      return { context: { slot: 0 }, value: [] }
+    },
+  },
+})
+
+await rpc.request('getProgramAccounts', [programId])
+expect(calls).toEqual(['getProgramAccounts'])
+```
+
+`wrapRpcClient` forwards the method and params unchanged and re-throws any error
+from the underlying client after invoking `onResponse`, so existing error handling
+keeps working. It is a pure wrapper: it does not retry, cache, or mutate requests.
+
 ## Hardware wallets
 
 ## Compatibility notes

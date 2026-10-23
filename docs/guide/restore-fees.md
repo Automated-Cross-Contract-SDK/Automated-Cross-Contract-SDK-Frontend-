@@ -180,6 +180,43 @@ If the cap were unset, the fee would be the uncapped `200` stroops. If the
 multiplier were left at the default `1`, the fee would be `100` stroops, which
 is at or below the cap and therefore not clamped.
 
+## DeFi position recovery example
+
+A worked example of restoring a DeFi contract position lives in
+`examples/defi-position-recovery`. It demonstrates the full flow a dApp should
+follow: detect that a position's ledger entries are archived, preview the
+recovery cost with `estimateRestoreCost`, present the recovery transaction and
+its fees to the user for review, and only then request a signature and submit.
+
+### Presenting the recovery transaction and fees before signing
+
+Before asking the user to sign, a dApp should surface three things so the
+recovery is transparent:
+
+1. **What is being restored** — the contract position and the archived ledger
+   entries the recovery touches.
+2. **The fee** — the value returned by `estimateRestoreCost`, which already
+   includes the multiplier and any cap. Show it in stroops and in the display
+   unit your users expect.
+3. **The validity window** — the ledger range from `RESTORE_TX_LEDGER_BOUNDS_WINDOW`
+   so users understand how long the signed transaction stays valid.
+
+The example builds a review object from the estimate and the restore
+footprint, renders it, and only calls the signing path after the user confirms.
+If the footprint-size guard warns, the example shows the warning alongside the
+fee so the user can decide whether to proceed or split the restore.
+
+### Compatibility and migration notes
+
+- The example uses the same `estimateRestoreCost` and footprint-size guard
+  documented above, so the fee it shows matches what the restore charges.
+- If you previously computed restore fees by hand, replace that logic with
+  `estimateRestoreCost` so the multiplier and cap are applied consistently.
+- If your dApp signs restores without a review step, add one: present the
+  estimate and validity window before requesting a signature, and handle the
+  `INCOMPLETE_FOOTPRINT` error by retrying only after a complete simulation
+  response is available.
+
 ## Summary
 
 - The fee is `minResourceFee * restoreFeeMultiplier`, optionally clamped to

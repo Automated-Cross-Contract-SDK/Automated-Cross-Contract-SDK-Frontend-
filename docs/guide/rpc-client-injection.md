@@ -145,3 +145,89 @@ const sdk = new SorobanResurrect({
 
 // Drive assertions against mockClient.simulateTransaction, etc.
 ```
+
+## Example: a wallet-free test using the mock RPC harness
+
+For end-to-end style tests that exercise success, failure, and restore
+scenarios without a live network or a wallet extension, use the mock RPC
+harness instead of hand-rolling a client. The harness implements
+`ISorobanRpcClient`, so it plugs into `config.rpcClient` exactly like a real
+client and requires no signing or browser wallet.
+
+```typescript
+import { SorobanResurrect } from '@soroban-resurrect/sdk'
+import { createMockRpcHarness } from '@soroban-resurrect/sdk/testing'
+import { describe, it, expect } from 'vitest'
+
+function makeSdk(harness: ReturnType<typeof createMockRpcHarness>) {
+  return new SorobanResurrect({
+    rpcUrl: 'https://mock.local',
+    rpcClient: harness.client,
+  })
+}
+
+describe('restore flows (wallet-free)', () => {
+  it('succeeds when the entry is restorable', async () => {
+    const harness = createMockRpcHarness()
+    harness.setLedgerEntry({ /* live entry */ })
+    harness.setSimulation({ success: true })
+
+    const result = await makeSdk(harness).restore({ /* keys */ })
+
+    expect(result.status).toBe('restored')
+    expect(harness.calls.simulateTransaction).toHaveLength(1)
+  })
+
+  it('reports failure when simulation fails', async () => {
+    const harness = createMockRpcHarness()
+    harness.setSimulation({ success: false, error: 'host invocation failed' })
+
+    const result = await makeSdk(harness).restore({ /* keys */ })
+
+    expect(result.status).toBe('failed')
+    expect(harness.calls.sendTransaction).toHaveLength(0)
+  })
+
+  it('restores after an expired entry is detected', async () => {
+    const harness = createMockRpcHarness()
+    harness.setLedgerEntry({ /* archived entry */, liveUntilLedger: 0 })
+    harness.setLatestLedger(100)
+    harness.setSimulation({ success: true })
+
+    const result = await makeSdk(harness).restore({ /* keys */ })
+
+    expect(result.status).toBe('restored')
+    expect(harness.calls.sendTransaction).toHaveLength(1)
+  })
+})
+```
+
+The harness exposes a stable surface for tests:
+
+- `harness.client` — an `ISorobanRpcClient` to pass as `config.rpcClient`.
+- `harness.setLedgerEntry(entry)` / `harness.setLatestLedger(n)` — seed
+  ledger state, including archived entries for restore scenarios.
+- `harness.setSimulation({ success, error? })` — control whether
+  `simulateTransaction` succeeds or fails.
+- `harness.calls` — recorded invocations per method, for assertions.
+
+Because the harness is a plain `ISorobanRpcClient`, no wallet extension or
+signing key is involved: transactions are simulated and sent against the
+in-memory harness, so tests run deterministically in CI.
+
+## Compatibility and migration notes
+
+- `config.rpcClient` is optional and additive. Existing code that only sets
+  `config.rpcUrl` keeps working unchanged; the SDK builds a default client
+  for you.
+- `ISorobanRpcClient` requires six methods (`simulateTransaction`,
+  `sendTransaction`, `getTransaction`, `getAccount`, `getLedgerEntries`,
+  `getLatestLedger`). `getNetwork()` and `getVersionInfo()` are optional.
+- Custom clients written before `getNetwork()`/`getVersionInfo()` existed
+  remain valid; `checkNetworkCapabilities()` reports `unknown` for the
+  metadata probes it cannot answer rather than failing.
+- When both `rpcUrl` and `rpcClient` are provided, `rpcClient` wins for all
+  network calls; `rpcUrl` is still used for display and diagnostics.
+- The mock RPC harness (`@soroban-resurrect/sdk/testing`) is a test-only
+  entry point. It is additive and does not affect production bundles; code
+  that never imports it is unaffected.
