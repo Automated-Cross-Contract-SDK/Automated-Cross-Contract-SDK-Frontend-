@@ -45,35 +45,94 @@ If the user declines account access or a signature, the adapter throws
 `WalletError` with code `USER_REJECTED`. Missing permissions or connectivity
 are reported as `NOT_CONNECTED`; unclassified wallet errors use `UNKNOWN`.
 
-## Scaffolder setup
+## Minimal plain JavaScript example
 
-When generating a project with the scaffolder, select Freighter as the wallet
-integration to get matching setup guidance and environment examples:
+A dependency-light browser example that connects Freighter, builds a
+transaction, and demonstrates both the restore and no-restore paths. It uses
+only the browser globals and the SDK's ESM build — no framework or bundler
+required.
 
-```bash
-npx @soroban-resurrect/scaffolder my-app --wallet freighter
+```html
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Freighter + Soroban Resurrect</title>
+  </head>
+  <body>
+    <button id="connect">Connect wallet</button>
+    <button id="build">Build transaction</button>
+    <button id="restore">Sign (restore)</button>
+    <button id="no-restore">Sign (no restore)</button>
+    <pre id="log"></pre>
+
+    <script type="module">
+      import { FreighterAdapter } from '@soroban-resurrect/adapter-freighter'
+      import { SorobanResurrect } from '@soroban-resurrect/sdk'
+
+      const log = (msg) => {
+        document.getElementById('log').textContent += msg + '\n'
+      }
+
+      const wallet = new FreighterAdapter()
+      let publicKey
+      let transactionXdr
+
+      document.getElementById('connect').onclick = async () => {
+        try {
+          publicKey = await wallet.getPublicKey()
+          log('Connected: ' + publicKey)
+        } catch (err) {
+          log('Connect failed: ' + err.code + ' ' + err.message)
+        }
+      }
+
+      document.getElementById('build').onclick = async () => {
+        try {
+          const networkPassphrase = await wallet.getNetwork()
+          const sdk = new SorobanResurrect({ networkPassphrase })
+          const tx = await sdk.buildTransaction({ source: publicKey })
+          transactionXdr = tx.toXDR()
+          log('Built transaction: ' + transactionXdr)
+        } catch (err) {
+          log('Build failed: ' + err.code + ' ' + err.message)
+        }
+      }
+
+      const sign = async (restore) => {
+        try {
+          const networkPassphrase = await wallet.getNetwork()
+          const sdk = new SorobanResurrect({ networkPassphrase })
+          const prepared = await sdk.prepareTransaction(transactionXdr, { restore })
+          const signedXdr = await wallet.signTransaction(prepared.toXDR(), {
+            networkPassphrase,
+          })
+          log((restore ? 'Restore' : 'No-restore') + ' signed: ' + signedXdr)
+        } catch (err) {
+          log('Sign failed: ' + err.code + ' ' + err.message)
+        }
+      }
+
+      document.getElementById('restore').onclick = () => sign(true)
+      document.getElementById('no-restore').onclick = () => sign(false)
+    </script>
+  </body>
+</html>
 ```
 
-Supported wallet integrations are `freighter` and `rabet`. Omitting `--wallet`
-keeps the default (no wallet integration) and generates no wallet-specific
-files. Passing an unsupported value fails with a clear error listing the
-supported integrations.
+### Restore vs. no-restore
 
-Selecting `freighter` generates a `.env.example` entry and a short setup note
-in the generated project's README:
+- **Restore** (`restore: true`): `prepareTransaction` detects archived ledger
+  entries and includes the required restore operations before signing, so the
+  transaction can be submitted successfully.
+- **No-restore** (`restore: false`): `prepareTransaction` leaves archived entries
+  untouched. Use this when the caller handles restoration separately or wants to
+  inspect the transaction before any restore operations are added.
 
-```bash
-# .env.example
-VITE_WALLET_INTEGRATION=freighter
-```
+### Compatibility notes
 
-Install the Freighter browser extension, then follow the adapter usage above to
-connect and sign. The generated project reads `VITE_WALLET_INTEGRATION` to pick
-the wallet adapter at runtime.
-
-### Migration notes
-
-Projects generated before wallet selection was added have no
-`VITE_WALLET_INTEGRATION` entry. Add it manually (or re-run the scaffolder into
-a fresh directory) and install the matching adapter package. Existing projects
-that do not set the variable continue to run without a wallet integration.
+- Requires a browser with native ES module support and Freighter API v3.
+- The example imports the SDK's ESM build directly; if you use a bundler, the
+  same imports resolve through the package's `exports` map.
+- Errors surface as `WalletError` with codes such as `USER_REJECTED`,
+  `NOT_CONNECTED`, `NETWORK_MISMATCH`, and `UNKNOWN`; handle them as shown above.

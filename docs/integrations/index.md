@@ -19,3 +19,7 @@ All adapters sign transactions; the columns are the `WalletCapabilities` flags.
 | `walletkit`            | `@soroban-resurrect/adapter-walletkit` · `WalletKitAdapter`         | —               | ✅        | —          | [Wallets Kit](./walletkit.md)      |
 | `ledger`               | `@soroban-resurrect/sdk` · `createLedgerAdapter`                    | —               | ✅        | ✅         | [Adapters](./adapters-and-wallets.md) |
 | `trezor`               | `@soroban-resurrect/sdk` · `createTrezorAdapter`                    | —               | ✅        | ✅         | [Adapters](./adapters-and-wallets.md) |
+
+## Tutorials
+
+- [Add the SDK to an existing dApp](./existing-dapp-tutorial.md) — step-by-step walkthrough covering wallet signing, failure UX, and a repeatable verification flow.

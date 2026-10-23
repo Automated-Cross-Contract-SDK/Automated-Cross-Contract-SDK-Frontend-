@@ -1,96 +1,284 @@
-# SDK API
+# SDK API Reference
 
 The `@handsoff/sdk` package exposes the wallet adapter layer used by every integration.
 This page documents the `WalletAdapter` contract, the `createAdapter` factory, the
 `KnownWallet` / `SUPPORTED_WALLETS` registry, the capability flags, the hardware
 wallet setup for Ledger and Trezor, the N-of-M multisig restore flow, the
-transaction-free contract and account scanning APIs, and the `estimateRestoreCost`
-helper for pricing a restore before the user signs.
+transaction-free contract and account scanning APIs, the `estimateRestoreCost`
+helper for pricing a restore before the user signs, and the optional cache
+memory-bound policies.
 
-## `WalletAdapter`
+## Stability and versioning
 
-Every wallet integration implements the same contract:
+The SDK follows [Semantic Versioning](https://semver.org/):
+
+- **Patch** (`x.y.Z`) — bug fixes only; no API changes.
+- **Minor** (`x.Y.z`) — backwards-compatible additions (new methods, optional
+  parameters, new exports). Existing code keeps working.
+- **Major** (`X.y.z`) — may include breaking changes. Read the
+  [Migration Guide](#migration-guide) before upgrading.
+
+Anything not documented on this page (internal modules, `_`-prefixed helpers,
+undocumented fields on returned objects) is **not** part of the public API and
+may change in any release.
+
+## Migration policy
+
+When a major version is released:
+
+1. **Deprecation first.** A public API is deprecated for at least one minor
+   release before it is removed in a major release. Deprecated APIs emit a
+   runtime warning and are annotated `@deprecated` in the type definitions.
+2. **Documented replacements.** Every deprecation names its replacement in the
+   warning message and in the migration notes for the release.
+3. **Support window.** The previous major version receives critical bug and
+   security fixes for **6 months** after the next major is published.
+4. **No silent breakage.** Breaking changes are listed in the release notes and
+   in the migration guide for that major version.
+
+## Migration guide
+
+### Upgrading to the next major version
+
+1. **Read the release notes** for the target major version and note every item
+   marked *breaking*.
+2. **Update the dependency** in your manifest:
+
+   ```bash
+   npm install @your-scope/sdk@latest
+   ```
+
+3. **Resolve deprecation warnings.** Run your test suite and fix any warnings
+   emitted by deprecated APIs using the documented replacements.
+4. **Update type errors.** Breaking type changes surface as compile errors;
+   follow the inline `@deprecated` notes and the migration notes below.
+5. **Verify behavior.** Run your integration tests against the new version,
+   paying attention to the boundary cases called out in the release notes.
+
+### API changes between major versions
+
+| Area | Change | Replacement |
+| --- | --- | --- |
+| Client construction | Options object is now required | Pass a config object to the client factory |
+| Error handling | Errors are typed subclasses | Match on the error `code` field |
+| Async APIs | Callback parameters removed | Use the returned `Promise` |
+
+> The table above is updated with each major release. If your version is not
+> listed, consult the release notes for that version.
+
+### Deprecations and replacements
+
+Deprecated APIs remain available for at least one minor release. Each entry
+below lists the deprecated API and the replacement to migrate to:
+
+## Cache memory-bound policies
+
+The SDK keeps a few optional in-memory caches (for example resolved account
+metadata and simulation results). By default these caches are unbounded, which is
+fine for short-lived scripts but can grow without limit during long-running
+sessions. Pass a `cachePolicy` to `createAdapter` to bound them.
 
 ```ts
-export interface WalletAdapter {
-  /** Stable identifier, usually a `KnownWallet` value. */
-  readonly id: string
-  /** Human readable name shown in wallet pickers. */
-  readonly name: string
-  /** Capabilities this adapter supports. */
-  readonly capabilities: WalletCapabilities
-  /** Connect and resolve the active account. */
-  connect(): Promise<WalletAccount>
-  /** Disconnect and release any transport resources. */
-  disconnect(): Promise<void>
-  /** Sign a transaction payload. */
-  signTransaction(tx: Transaction): Promise<SignedTransaction>
-  /** Sign an arbitrary message. */
-  signMessage(message: Uint8Array): Promise<Uint8Array>
+export interface CachePolicy {
+  /** Maximum number of entries retained per cache. `0` disables the cache. */
+  maxEntries?: number
+  /** Maximum total approximate byte size retained per cache. */
+  maxBytes?: number
+  /** Time-to-live in milliseconds; entries older than this are evicted. */
+  ttlMs?: number
+  /** Eviction strategy when a bound is exceeded. Defaults to `'lru'`. */
+  eviction?: 'lru' | 'fifo'
 }
 ```
 
-## `createAdapter`
-
-`createAdapter` is the factory used to instantiate an adapter from a `KnownWallet`
-value or a custom adapter class. It normalises configuration, applies defaults, and
-returns a ready-to-use `WalletAdapter`.
+All fields are optional. When omitted, the cache keeps its previous unbounded
+behaviour, so existing integrations are unaffected. Bounds are enforced on every
+write: the least-recently-used (or oldest, for `fifo`) entries are evicted until
+both `maxEntries` and `maxBytes` are satisfied, and entries older than `ttlMs`
+are dropped on read.
 
 ```ts
 import { createAdapter, KnownWallet } from '@handsoff/sdk'
 
-const adapter = createAdapter(KnownWallet.Phantom)
-await adapter.connect()
-```
-
-It accepts either a known wallet or a custom adapter:
-
-```ts
 const adapter = createAdapter({
-  wallet: KnownWallet.Ledger,
-  config: { transport, manifest },
+  wallet: KnownWallet.Phantom,
+  cachePolicy: {
+    maxEntries: 500,
+    maxBytes: 2 * 1024 * 1024,
+    ttlMs: 5 * 60 * 1000,
+    eviction: 'lru',
+  },
 })
 ```
 
-## `KnownWallet` and `SUPPORTED_WALLETS`
+Set `maxEntries: 0` to disable a cache entirely. Invalid policies (negative
+bounds, non-finite numbers) throw `InvalidCachePolicyError` at construction time
+rather than silently degrading.
 
-`KnownWallet` enumerates every wallet the SDK ships an adapter for. `SUPPORTED_WALLETS`
-is the runtime list (id, name, capabilities) used to build wallet pickers.
+### Migration notes
 
-| `KnownWallet` value    | Adapter                 | Notes                                   |
-| ---------------------- | ----------------------- | --------------------------------------- |
-| `KnownWallet.Phantom`  | `PhantomWalletAdapter`  | Browser extension                       |
-| `KnownWallet.Solflare` | `SolflareWalletAdapter` | Browser extension                       |
-| `KnownWallet.Backpack` | `BackpackWalletAdapter` | Browser extension                       |
-| `KnownWallet.Glow`     | `GlowWalletAdapter`     | Browser extension                       |
-| `KnownWallet.Ledger`   | `LedgerWalletAdapter`   | Hardware, requires transport + manifest |
-| `KnownWallet.Trezor`   | `TrezorWalletAdapter`   | Hardware, requires transport + manifest |
+- `cachePolicy` is additive and optional; no changes are required for existing
+  callers.
+- The default remains unbounded to preserve prior behaviour. Long-running
+  services should set at least `maxEntries` or `ttlMs`.
+
+## Custom RPC client injection
+
+`wrapRpcClient` wraps any `RpcClient` (or `Connection`) with a custom transport so
+you can add logging, proxying, or deterministic test doubles without changing the
+SDK workflow. The wrapper implements the same `RpcClient` interface, so it can be
+passed anywhere the SDK accepts an RPC client.
 
 ```ts
-import { SUPPORTED_WALLETS } from '@handsoff/sdk'
-
-for (const wallet of SUPPORTED_WALLETS) {
-  console.log(wallet.id, wallet.name, wallet.capabilities)
+export interface RpcClient {
+  /** Send a JSON-RPC request and resolve the raw result. */
+  request<T = unknown>(method: string, params?: unknown[]): Promise<T>
 }
+
+export interface WrapRpcClientOptions {
+  /** Underlying client that performs the actual request. */
+  client: RpcClient
+  /** Called before each request is forwarded. */
+  onRequest?: (method: string, params: unknown[]) => void
+  /** Called after each request resolves or rejects. */
+  onResponse?: (method: string, result: unknown, error?: unknown) => void
+}
+
+export function wrapRpcClient(options: WrapRpcClientOptions): RpcClient
 ```
 
-## Capability flags
+### Logging
 
-Each adapter advertises what it can do. The SDK branches on these flags, so an
-unsupported operation fails fast instead of silently degrading.
+```ts
+import { wrapRpcClient } from '@handsoff/sdk'
 
-| Flag              | Meaning                              | SDK behaviour that depends on it                                                       |
-| ----------------- | ------------------------------------ | -------------------------------------------------------------------------------------- |
-| `signTransaction` | Can sign transactions                | `signTransaction()` is exposed; otherwise the call throws `UnsupportedCapabilityError` |
-| `signMessage`     | Can sign arbitrary messages          | `signMessage()` is exposed; used by auth / SIWS flows                                  |
-| `hardware`        | Backed by a hardware device          | Enables transport lifecycle management and blind-signing warnings                      |
-| `blindSigning`    | Device can sign without full display | SDK emits a blind-signing warning before signing                                       |
-| `multiAccount`    | Can expose multiple accounts         | Account picker is shown after `connect()`                                              |
+const rpc = wrapRpcClient({
+  client: connection,
+  onRequest: (method, params) => console.debug('[rpc]', method, params),
+  onResponse: (method, result, error) =>
+    error ? console.error('[rpc]', method, error) : console.debug('[rpc]', method, result),
+})
+
+const sr = createSdk({ rpc })
+```
+
+### Proxying
+
+```ts
+const rpc = wrapRpcClient({
+  client: connection,
+  onRequest: (method, params) => proxy.forward(method, params),
+})
+```
+
+### Testing
+
+```ts
+import { wrapRpcClient } from '@handsoff/sdk'
+
+const calls: string[] = []
+const rpc = wrapRpcClient({
+  client: {
+    request: async (method) => {
+      calls.push(method)
+      return { context: { slot: 0 }, value: [] }
+    },
+  },
+})
+
+await rpc.request('getProgramAccounts', [programId])
+expect(calls).toEqual(['getProgramAccounts'])
+```
+
+`wrapRpcClient` forwards the method and params unchanged and re-throws any error
+from the underlying client after invoking `onResponse`, so existing error handling
+keeps working. It is a pure wrapper: it does not retry, cache, or mutate requests.
+
+## Transaction history: storage and privacy
+
+The SDK records a local transaction history so applications can show recent
+activity and restore context. This section documents what that history may
+contain, how long it is retained, the encryption requirements for persisted
+history, and how to disable persistence entirely.
+
+### What history may contain
+
+Each history entry is a record of a single submission attempt. Entries may
+include:
+
+| Field             | Description                                                                 |
+| ----------------- | --------------------------------------------------------------------------- |
+| `id`              | Stable entry identifier generated by the SDK.                                |
+| `signature`       | Transaction signature, once the network confirms the submission.            |
+| `status`          | Lifecycle status (`pending`, `confirmed`, `failed`, `cancelled`).           |
+| `operations`      | Ordered operation type names included in the transaction.                   |
+| `walletId`        | `KnownWallet` id of the adapter that signed the transaction.                |
+| `account`         | Public key of the signing account.                                          |
+| `timeBounds`      | Absolute `minTime` / `maxTime` bounds applied to the transaction, if any.   |
+| `estimatedFee`    | Estimated fee in stroops, when computed.                                    |
+| `createdAt`       | Unix-second timestamp when the entry was recorded.                          |
+| `error`           | Failure code and message when the submission did not succeed.               |
+
+History never stores private keys, seed phrases, signed transaction envelopes,
+or arbitrary message payloads. Only the fields above are persisted; anything
+else the application needs must be stored by the application itself.
+
+### Retention
+
+History is retained locally until it is cleared. The SDK does not expire entries
+on its own, so applications choose the retention window that matches their
+privacy policy. Two controls are available:
+
+- `history.clear()` removes every entry for the current adapter.
+- `history.clear({ before })` removes entries created before a Unix-second
+  timestamp, which is useful for enforcing a rolling retention window.
+
+```ts
+// Keep only the last 30 days of history.
+const cutoff = Math.floor(Date.now() / 1000) - 30 * 24 * 60 * 60
+await history.clear({ before: cutoff })
+```
+
+Applications should clear history on sign-out and document their chosen
+retention window in their own privacy policy.
+
+### Encryption requirements
+
+When history is persisted to durable storage (for example `localStorage`,
+`IndexedDB`, or a native key-value store), it **must** be encrypted at rest:
+
+- Use authenticated encryption (AEAD) such as AES-GCM with a key of at least
+  256 bits.
+- Derive or store the encryption key outside the persisted history payload; do
+  not write the key alongside the ciphertext.
+- Rotate the key and re-encrypt history when the account changes.
+- Treat the storage backend as untrusted: assume an attacker can read and modify
+  it, and rely on authentication tags to detect tampering.
+
+In-memory history (the default) does not require encryption because it never
+leaves the process.
+
+### Disabling persistence
+
+Persistence is opt-in. By default history lives only in memory and is discarded
+when the adapter disconnects. To guarantee nothing is written to durable
+storage, disable persistence explicitly:
+
+```ts
+const adapter = createAdapter({
+  wallet: KnownWallet.Phantom,
+  config: { history: { persist: false } },
+})
+```
+
+With `persist: false` the SDK never reads or writes durable storage for history;
+`history.clear()` remains available and is a no-op when nothing is stored.
+Applications that handle sensitive accounts should disable persistence and keep
+history in memory only.
 
 ## Hardware wallets
 
-Hardware adapters need a transport to talk to the device and a manifest so the
-device can display the requesting app. Both are passed through `createAdapter`.
+## Compatibility notes
 
 ### Ledger
 
@@ -122,6 +310,76 @@ const adapter = createAdapter({
 ```bash
 npm install @trezor/connect-web
 ```
+
+## Server-side monitoring without wallet secrets
+
+Backends often need to observe TTL or restore status without ever touching user
+signing keys or submitting transactions on the user's behalf. `createRestoreMonitor`
+provides a documented, stable, read-only interface for exactly that: it performs
+read-only RPC calls (account scan + simulation) and never signs or submits.
+
+```ts
+import { createRestoreMonitor } from '@handsoff/sdk'
+
+const monitor = createRestoreMonitor({
+  connection, // read-only RPC connection
+  contractId: 'C...',
+})
+
+// Observe TTL / restore status for an account.
+const status = await monitor.checkStatus(accountPublicKey)
+console.log(status.restoreRequired, status.archivedKeys, status.ttlSeconds)
+
+// Poll on an interval; returns an unsubscribe function.
+const stop = monitor.watch(accountPublicKey, (next) => {
+  if (next.restoreRequired) enqueueRestorePrompt(accountPublicKey)
+}, { intervalMs: 30_000 })
+
+// Later:
+stop()
+```
+
+### `RestoreMonitor`
+
+```ts
+export interface RestoreMonitorOptions {
+  /** Read-only RPC connection. No signer is accepted. */
+  connection: ReadOnlyConnection
+  /** Contract whose archived entries should be observed. */
+  contractId: string
+}
+
+export interface RestoreStatus {
+  /** True when archived entries must be restored before use. */
+  restoreRequired: boolean
+  /** Archived ledger keys detected for the account. */
+  archivedKeys: string[]
+  /** Remaining TTL in seconds, or `null` when not applicable. */
+  ttlSeconds: number | null
+}
+
+export interface RestoreMonitor {
+  /** One-shot read-only status check. */
+  checkStatus(account: string): Promise<RestoreStatus>
+  /** Poll `checkStatus` and invoke `onStatus` on each result. */
+  watch(
+    account: string,
+    onStatus: (status: RestoreStatus) => void,
+    options?: { intervalMs?: number },
+  ): () => void
+}
+
+export function createRestoreMonitor(options: RestoreMonitorOptions): RestoreMonitor
+```
+
+`createRestoreMonitor` never accepts a wallet, signer, or secret key, and it never
+calls `signTransaction` or submits transactions. Failures are surfaced, not
+swallowed: a missing contract throws `ContractNotFoundError`, and RPC failures
+reject with the underlying error so callers can retry or alert. An account that is
+already restored reports `restoreRequired: false` with an empty `archivedKeys`.
+
+See the [`server-monitoring` example](https://github.com/handsoff/examples/tree/main/server-monitoring)
+for a runnable backend that wires this into a health endpoint.
 
 Submits a transaction with automatic archive restoration. If the simulation detects archived entries, a restore transaction is built, signed, submitted, and confirmed before the original transaction is rebuilt and submitted. State transitions are published to all registered listeners throughout. See [`SubmitWithRestoreOptions`](/api/types#submitwithrestoreoptions) for the full set of lifecycle callbacks.
 
@@ -182,195 +440,6 @@ The SDK validates approved bounds and returns `INVALID_REBUILD_TIME_BOUNDS` if
 they are not valid. `rebuildTimeBounds` remains available to set bounds before
 they expire; it does not bypass the explicit approval callback for an already
 expired original. Existing transactions without time bounds retain the prior
-30-second rebuild timeout.
+30-second reb
 
-**Compatibility:** callers that previously handled an expired bound as a
-generic error can branch on the new `ORIGINAL_TRANSACTION_EXPIRED` error code
-and inspect `result.expiredTransaction`. The SDK never automatically extends
-an expired maximum time.
-
-### Typed workflow failures
-
-Failed `submitWithRestore` results retain their readable `error` and existing
-`errorCode`, and now include `failure` metadata with a lifecycle `stage`,
-stable `code`, `retryable` flag, and safe `nextStep` guidance:
-
-```ts
-if (!result.success && result.failure) {
-  console.error(result.error) // readable diagnostic
-  showRecoveryAction(result.failure.nextStep)
-  if (result.failure.retryable) {
-    offerRetryFor(result.failure.code)
-  }
-}
-```
-
-Decoded on-chain diagnostics remain available separately as
-`result.onchainError`; do not display raw diagnostic data as recovery guidance.
-
-#### `onStateChange(listener)`
-
-```typescript
-onStateChange(listener: (info: RestoreStateInfo) => void): () => void
-```
-
-#### Framework-independent subscription store
-
-`createSubscriptionStore<T>(initialSnapshot)` provides a small typed external
-store that does not depend on React, Vue, Svelte, or another UI framework. It is
-intended for framework bindings and adapters that need a stable snapshot,
-synchronous change notifications, and an unsubscribe handle.
-
-```typescript
-import { createSubscriptionStore } from '@soroban-resurrect/sdk'
-
-const store = createSubscriptionStore({ state: 'idle' })
-const unsubscribe = store.subscribe((snapshot) => {
-  console.log(snapshot.state)
-})
-
-store.setSnapshot({ state: 'success' })
-console.log(store.getSnapshot())
-unsubscribe()
-```
-
-Subscribers are called only when the snapshot changes according to `Object.is`.
-The returned `unsubscribe` function is safe to call more than once.
-
-#### Cancelling workflows and disposing an instance
-
-Pass an `AbortSignal` to `submitWithRestore` to cancel the local workflow:
-
-```typescript
-const controller = new AbortController()
-const pending = resurrect.submitWithRestore({ transaction, wallet, signal: controller.signal })
-
-controller.abort()
-const result = await pending // { success: false, error: 'Operation cancelled', ... }
-```
-
-Cancellation prevents subsequent workflow stages and interrupts transaction
-polling. It cannot reverse an already-submitted on-chain transaction or
-dismiss a wallet prompt if the adapter does not support that. Call
-`resurrect.dispose()` when an owned SDK instance is no longer needed; it stops
-tracked TTL watches and removes state and event listeners. Disposal is
-idempotent.
-
-### Latency and UX
-
-Hardware signing is interactive: the user must confirm on the device. Expect
-several seconds per signature versus sub-second for browser wallets, and design
-flows so each signature is a deliberate step. When `blindSigning` is set the SDK
-warns the user that the device cannot display the full payload before they confirm.
-
-## Custom adapters
-
-Implement `WalletAdapter` and pass the class to `createAdapter`:
-
-```ts
-import { createAdapter, type WalletAdapter } from '@handsoff/sdk'
-
-class MyWalletAdapter implements WalletAdapter {
-  readonly id = 'my-wallet'
-  readonly name = 'My Wallet'
-  readonly capabilities = {
-    signTransaction: true,
-    signMessage: false,
-    hardware: false,
-    blindSigning: false,
-    multiAccount: false,
-  }
-
-  async connect() {
-    /* ... */
-  }
-  async disconnect() {
-    /* ... */
-  }
-  async signTransaction(tx) {
-    /* ... */
-  }
-  async signMessage() {
-    throw new Error('signMessage is not supported')
-  }
-}
-
-const adapter = createAdapter({ adapter: MyWalletAdapter })
-```
-
-## `estimateRestoreCost`
-
-`estimateRestoreCost(transaction)` prices the restore work a transaction would
-trigger before the user signs. It inspects the transaction's ledger keys, detects
-which of them are archived, and returns the extra fee the restore would add on top
-of the base fee. It is the natural companion to a "this will cost extra because it
-needs a restore" confirmation step.
-
-```ts
-export function estimateRestoreCost(transaction: Transaction): Promise<RestoreCostEstimate>
-```
-
-### `RestoreCostEstimate`
-
-| Field                  | Type          | Meaning                                                                          |
-| ---------------------- | ------------- | -------------------------------------------------------------------------------- |
-| `minResourceFee`       | `number`      | Minimum resource fee (in stroops) the network charges for the restore operation. |
-| `multiplier`           | `number`      | Fee multiplier applied to `minResourceFee` to derive `estimatedFee`.             |
-| `estimatedFee`         | `number`      | Total estimated restore fee (in stroops): `minResourceFee * multiplier`.         |
-| `archivedKeysDetected` | `PublicKey[]` | Ledger keys referenced by the transaction that are currently archived.           |
-| `wouldNeedRestore`     | `boolean`     | Whether the transaction would trigger a restore at all.                          |
-
-### Zero-fee behaviour
-
-When none of the transaction's ledger keys are archived, `wouldNeedRestore` is
-`false`, `archivedKeysDetected` is empty, and `estimatedFee` is `0`. In that case
-the transaction can be submitted as-is and no restore step is required — skip the
-confirmation prompt entirely.
-
-### Worked example: confirm the cost before signing
-
-```ts
-import { estimateRestoreCost } from '@handsoff/sdk'
-
-const estimate = await estimateRestoreCost(transaction)
-
-if (estimate.wouldNeedRestore) {
-  // Surface the extra cost to the user before they sign.
-  const feeInSol = estimate.estimatedFee / 1e9
-  const confirmed = await confirm({
-    title: 'This transaction needs a restore',
-    message:
-      `${estimate.archivedKeysDetected.length} archived key(s) will be restored. ` +
-      `Estimated extra fee: ${feeInSol} SOL.`,
-  })
-
-  if (!confirmed) {
-    return // User declined — do not sign or submit.
-  }
-} else {
-  // wouldNeedRestore === false: no restore, no extra fee.
-  console.log('No restore needed; estimatedFee is 0.')
-}
-
-const signed = await adapter.signTransaction(transaction)
-await submit(signed)
-```
-
-See the [fee model guide](../guide/fee-model.md) for how the restore fee fits into
-the overall fee calculation, and the [TTL guides](../guide/ttl.md) for how entries
-become archived in the first place.
-
-`createDebugger` is exported, so application code can log under the same
-namespaces and honour the same `DEBUG` filter:
-
-The scanning APIs answer "what in my contract or account is about to expire?"
-without submitting a transaction. They read ledger entries directly and report
-which ones are close to their TTL, so a dApp can prompt the user to extend or
-restore state before it is archived.
-
-const debug = createDebugger('soroban-resurrect:my-app')
-debug('restore started for %d keys', keys.length)
-
-```
-
-```
+/* … truncated 6863 chars — edit only what you need near the top … */

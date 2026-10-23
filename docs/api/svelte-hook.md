@@ -96,3 +96,97 @@ subscriptions; call it from Svelte's `onDestroy()`.
 Simulates the transaction, detects archived keys, and returns a `FeeEstimate`
 (`{ archivedKeysDetected, minResourceFee, estimatedRestoreFee, multiplier }`)
 while also pushing it into the `feeEstimate` store.
+
+## Example application: restore recovery UX
+
+The `examples/svelte-restore-recovery` sample app demonstrates the full store
+lifecycle with a restore-recovery flow. It is a reference for the patterns
+below; copy the relevant pieces into your own app rather than depending on the
+example package.
+
+### Lifecycle
+
+1. Create the store once at component setup with a `writable` config.
+2. Subscribe to `state` / `isProcessing` / `archivedKeys` in the template.
+3. Call `destroy()` from `onDestroy()` so SDK TTL watches and subscriptions are
+   released when the user navigates away.
+
+### Wallet signing prompts and user consent
+
+The example never restores or submits without explicit consent. When the SDK
+reaches `restore_needed`, the UI shows the archived keys and the
+`feeEstimate` (via `estimate()`), then requires the user to confirm before
+calling `submitWithRestore`. The wallet's own signing prompt is the final
+consent gate; a wallet cancellation resolves as a failed `ResurrectResult`
+(not a thrown error) and the UI returns to an idle, retryable state.
+
+```svelte
+<script>
+  import { onDestroy } from 'svelte'
+  import { writable } from 'svelte/store'
+  import { createSorobanResurrect } from '@soroban-resurrect/svelte-hook'
+
+  export let transaction
+  export let wallet
+
+  const config = writable({ rpcUrl: 'https://soroban-testnet.stellar.org' })
+  const {
+    state,
+    isProcessing,
+    archivedKeys,
+    feeEstimate,
+    lastResult,
+    estimate,
+    submitWithRestore,
+    reset,
+    destroy,
+  } = createSorobanResurrect(config)
+
+  let consented = false
+
+  async function onEstimate() {
+    consented = false
+    await estimate(transaction)
+  }
+
+  async function onConfirmRestore() {
+    consented = true
+    await submitWithRestore({ transaction, wallet })
+  }
+
+  onDestroy(destroy)
+</script>
+
+{#if $state.name === 'restore_needed'}
+  <p>This transaction touches {$archivedKeys.length} archived ledger entries.</p>
+  {#if $feeEstimate}
+    <p>Estimated restore fee: {$feeEstimate.estimatedRestoreFee}</p>
+  {/if}
+  <button on:click={onConfirmRestore} disabled={$isProcessing || !consented}>
+    Restore and submit
+  </button>
+{/if}
+
+{#if $lastResult && !$lastResult.success}
+  <p>Submission failed: {$lastResult.error}</p>
+  <button on:click={() => reset('restore_needed')}>Retry</button>
+{/if}
+```
+
+### Safe cleanup after navigation
+
+Because `destroy()` is idempotent and aborts in-flight submissions, it is safe
+to call from `onDestroy()` even if the user navigates away mid-restore. After
+destruction the store's SDK-backed methods throw
+`SorobanResurrect store has been destroyed.`; the example guards against this by
+only invoking them from user actions on a mounted component.
+
+### Compatibility and migration notes
+
+- The example targets the current store shape; no migration is required for
+  existing consumers of `state`, `isProcessing`, `submitWithRestore`,
+  `detectArchivedKeys`, `reset`, `resurrect`, and `destroy`.
+- `cancel()` is preferred over `destroy()` when you want to abort an in-flight
+  submission but keep the store usable (e.g. a "Cancel" button).
+- `destroy()` must be called from `onDestroy()`; relying on Svelte's automatic
+  subscriber teardown alone does not stop SDK-owned TTL watches.

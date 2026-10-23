@@ -2,6 +2,120 @@
 
 This tutorial walks through the scenarios you'll run into most often when integrating Soroban-Resurrect into a dApp.
 
+## 0. Adding the SDK to an existing dApp (step-by-step)
+
+This section is a complete, repeatable walkthrough for retrofitting an existing dApp with Soroban-Resurrect. It covers installation, wiring the SDK into an existing submit path, failure UX, wallet signing, and a verification flow you can re-run any time.
+
+### Step 1 — Install
+
+```bash
+npm install @soroban-resurrect/sdk
+```
+
+### Step 2 — Create a single SDK instance
+
+Create one `SorobanResurrect` instance per network and share it across your app (e.g. in a module or context provider). Reusing the instance lets you subscribe to state changes globally and reset between actions.
+
+```typescript
+// src/soroban-resurrect.ts
+import { SorobanResurrect } from '@soroban-resurrect/sdk'
+
+export const sr = new SorobanResurrect({
+  rpcUrl: 'https://soroban-testnet.stellar.org',
+})
+```
+
+### Step 3 — Wrap your existing wallet
+
+If your dApp already has a wallet integration, adapt it to the `WalletAdapter` interface (see section 8 for a custom adapter). If you use a supported wallet, pass it directly.
+
+```typescript
+import type { WalletAdapter } from '@soroban-resurrect/sdk'
+
+const wallet: WalletAdapter = {
+  isConnected: async () => Boolean(window.myWallet?.isConnected),
+  getPublicKey: async () => window.myWallet.getPublicKey(),
+  signTransaction: async (txXdr, opts) =>
+    window.myWallet.sign(txXdr, { networkPassphrase: opts?.networkPassphrase }),
+}
+```
+
+### Step 4 — Replace your submit call
+
+Find the place in your dApp where you currently build and submit a transaction, and route it through `submitWithRestore` instead. The SDK detects archived state, restores it if needed, and then submits your original transaction.
+
+```typescript
+import { sr } from './soroban-resurrect'
+
+async function submit(tx) {
+  return sr.submitWithRestore({ transaction: tx, wallet })
+}
+```
+
+### Step 5 — Add failure UX
+
+Restoration can fail for reasons your original submit path never had to handle: the user rejects the restore signature, the restore transaction fails on-chain, or polling times out. Surface these distinctly so users know what happened and can retry.
+
+```typescript
+const result = await sr.submitWithRestore({
+  transaction: tx,
+  wallet,
+  onRestoreFailed: (error) => {
+    // The restore step failed; the original transaction was NOT submitted.
+    showError({
+      title: 'Could not restore archived state',
+      detail: error.message,
+      retry: () => submit(tx),
+    })
+  },
+})
+```
+
+You can also react to the terminal `error` state globally:
+
+```typescript
+sr.onStateChange((info) => {
+  if (info.state === 'error') {
+    showError({ title: 'Transaction failed', detail: info.message })
+  }
+})
+```
+
+Distinguish user cancellation (a rejected signature) from a genuine failure so you don't show a scary error when the user simply changed their mind.
+
+### Step 6 — Wallet signing flow
+
+Signing happens in two places: the restore transaction (only when archived state is detected) and the original transaction. Drive your UI from the lifecycle callbacks so the user always knows which signature is being requested:
+
+```typescript
+await sr.submitWithRestore({
+  transaction: tx,
+  wallet,
+  onSigningRestore: () => setStatus('Confirm the restore transaction in your wallet…'),
+  onSigningOriginal: () => setStatus('Confirm your transaction in your wallet…'),
+  onOriginalSubmitted: (txHash) => setStatus(`Done: ${txHash}`),
+})
+```
+
+If no restoration is needed, only `onSigningOriginal` and `onOriginalSubmitted` fire — your existing UX is unchanged.
+
+### Step 7 — Verify the integration (repeatable)
+
+Run this checklist against testnet to confirm the integration works end-to-end. Repeat it after any change to your submit path.
+
+1. **No-restore path.** Submit a transaction that touches only live state. Confirm only `onSigningOriginal` / `onOriginalSubmitted` fire and the transaction succeeds.
+2. **Restore path.** Submit a transaction that touches archived state. Confirm `onRestoreNeeded` fires, the restore signature is requested, and the original transaction is submitted after the restore confirms.
+3. **Failure path.** Reject the restore signature in your wallet. Confirm `onRestoreFailed` fires, the original transaction is *not* submitted, and your retry affordance works.
+4. **Status check.** Call `sr.needsRestore(tx)` on the same transaction and confirm it reports `true` before restoration and `false` after.
+
+```typescript
+// Quick programmatic check for step 4
+const before = await sr.needsRestore(tx)
+console.log('needs restore before:', before) // expect true for archived state
+```
+
+Once all four checks pass, the integration is complete and can be promoted to mainnet by pointing `rpcUrl` at the mainnet endpoint.
+
 ## 1. Checking restoration status before submitting
 
 Sometimes you want to warn the user ("this will require an extra signature") before they commit to an action:
@@ -203,22 +317,15 @@ const result = await sr.submitWithRestore({
   wallet,
   restoreKeys: archivedKeys,
   onRestoreFailed: (error) => {
-    // e.g. "signature collection failed: signer G... refused"
-    console.error('Restore aborted:', error)
+    // Fewer than `threshold` signatures were collected; nothing was submitted.
+    showError({ title: 'Restore not authorized', detail: error.message })
   },
 })
-```
 
-Because the threshold was never reached, no restore transaction is submitted and the original transaction is left untouched — the caller can retry with a different set of signers. If you collect signatures yourself, inspect the `SignatureCollectionResult` before submitting:
-
-```typescript
-const collection = await wallet.collectSignatures(restoreXdr)
-
-if (!collection.satisfied) {
-  // collection.signatures holds the ones you did get; collection.missing
-  // lists the signers that have not signed yet.
-  throw new Error(`Need ${collection.missing.length} more signature(s)`)
+if (!result.success) {
+  // e.g. 'signature_collection_failed' — no restore was submitted
+  console.error(result.error)
 }
-
-await sr.submitRestore(collection.transaction)
 ```
+
+Because the original transaction is only submitted after the restore confirms, a refused signature leaves on-chain state untouched and the user can retry safely.
