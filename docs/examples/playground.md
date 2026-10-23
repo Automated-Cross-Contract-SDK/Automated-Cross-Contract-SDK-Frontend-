@@ -66,79 +66,67 @@ Use the selector above to change what the fake RPC client returns:
 - Subscribe with `sr.onStateChange(...)` and render your own progress bar inside
   the snippet.
 
-## Multi-network demo
+## DeFi position recovery with fee review
 
-The playground runs entirely offline, but the same `SorobanResurrect` facade is
-what you'd point at a real network. The multi-network example shows how to
-configure **testnet** and **public** networks side by side and switch between
-them explicitly, while refusing to sign when the connected wallet's network does
-not match the configured one.
+A common real-world case: a lending or AMM position whose contract data has
+been archived. Before the user signs anything, a dApp should show **what will be
+restored** and **what it will cost**. The SDK exposes both pieces so you can
+build that review screen.
 
 ```ts
 import { SorobanResurrect, createRpcClient } from '@soroban-resurrect/sdk'
 
-// A stable, documented map of the networks the demo supports.
-const NETWORKS = {
-  testnet: {
-    rpcUrl: 'https://soroban-testnet.stellar.org',
-    networkPassphrase: 'Test SDF Network ; September 2015',
-  },
-  public: {
-    rpcUrl: 'https://soroban.stellar.org',
-    networkPassphrase: 'Public Global Stellar Network ; September 2015',
-  },
-} as const
+const sr = new SorobanResurrect({
+  rpcClient: createRpcClient('https://soroban-testnet.stellar.org'),
+  networkPassphrase: 'Test SDF Network ; September 2015',
+})
 
-type NetworkName = keyof typeof NETWORKS
-
-// Explicit switching: build a fresh facade for the selected network.
-function createForNetwork(name: NetworkName) {
-  const net = NETWORKS[name]
-  return new SorobanResurrect({
-    rpcClient: createRpcClient(net.rpcUrl),
-    networkPassphrase: net.networkPassphrase,
-  })
+// 1. The user's action (e.g. withdraw from a lending pool) is simulated.
+//    If any of its footprint entries are archived, this returns true.
+const needsRestore = await sr.needsRestore(positionTx)
+if (!needsRestore) {
+  // Nothing archived — sign and submit the original transaction directly.
+  return submitOriginal(positionTx)
 }
 
-// Mismatch guard: never sign against a wallet on a different network.
-async function submitSafely(
-  name: NetworkName,
-  wallet: { getNetwork(): Promise<string>; publicKey: string },
-  tx: unknown,
-) {
-  const expected = NETWORKS[name].networkPassphrase
-  const actual = await wallet.getNetwork()
-  if (actual !== expected) {
-    throw new Error(
-      `Wallet network mismatch: expected ${name} (${expected}), got ${actual}`,
-    )
-  }
-  return createForNetwork(name).submitWithRestore(wallet.publicKey, tx)
-}
+// 2. Inspect exactly which ledger keys will be restored so the UI can list
+//    the affected contracts/positions.
+const archivedKeys = await sr.detectArchivedKeys(positionTx)
+
+// 3. Build the restore transaction and read its fee before signing. The
+//    restore tx is a separate `restoreFootprint` operation, so its fee is
+//    independent of the original transaction's fee.
+const restoreTx = await sr.buildRestoreTx(walletPublicKey, positionTx)
+const restoreFee = restoreTx.fee          // stroops, as a string
+const originalFee = positionTx.fee        // stroops, as a string
+
+// 4. Present the review to the user: what is restored, and the total cost
+//    (restore fee + original fee) they are about to authorize.
+await showFeeReview({
+  archivedKeys,
+  restoreFee,
+  originalFee,
+  totalFee: (BigInt(restoreFee) + BigInt(originalFee)).toString(),
+})
+
+// 5. Only after the user confirms, run the full flow. `submitWithRestore`
+//    signs and submits the restore tx, waits for confirmation, rebuilds the
+//    original tx, then signs and submits it.
+const result = await sr.submitWithRestore(walletPublicKey, positionTx)
 ```
 
-Key points:
+Key points for the review screen:
 
-- **Explicit switching** — the selected `NetworkName` fully determines the RPC
-  URL and network passphrase; there is no implicit default that could silently
-  target the wrong network.
-- **Mismatch guard** — `submitSafely` compares the wallet's reported network
-  against the configured passphrase and throws *before* any signing or
-  submission, so a testnet wallet can never sign a public-network transaction
-  (or vice versa).
-- **Boundary cases** — a wallet that reports an unknown or empty network, or a
-  disconnected wallet, fails the guard rather than falling through to signing.
-
-### Compatibility / migration notes
-
-- The `networkPassphrase` option is required when constructing a facade for a
-  real network; omitting it keeps the previous testnet-only behavior for
-  backwards compatibility.
-- If you previously hard-coded a single RPC URL, move it into a `NETWORKS` map
-  like the one above and route all construction through `createForNetwork` so
-  switching stays explicit.
-- The mismatch guard is additive: existing callers that already verify the
-  wallet network are unaffected, but new code should prefer `submitSafely`.
+- **`detectArchivedKeys`** returns the archived ledger keys, so you can map them
+  back to human-readable positions (e.g. "Your XLM/USDC LP position").
+- **`buildRestoreTx`** returns a fully-formed transaction whose `fee` field is
+  the restore cost. Show it alongside the original transaction's fee so the user
+  sees the total they are authorizing.
+- **`submitWithRestore`** is the single call that performs the whole flow; the
+  review step above is purely informational and does not change the outcome.
+- If the restore transaction fails to confirm, `submitWithRestore` rejects and
+  the original transaction is never submitted — surface that as an error rather
+  than a silent retry.
 
 ## Using this in real code
 
@@ -151,3 +139,11 @@ network (or a deterministic test double), see:
   canned-response pattern used behind this page.
 - [SDK API reference](/api/sdk) — `SorobanResurrect`, `ISorobanRpcClient`, and
   `ResurrectResult`.
+
+## Production-style React example
+
+The playground above is a single snippet. For a realistic application structure
+that wires the SDK into a full UI — routing, wallet lifecycle, user feedback, fee
+consent, cancellation, and typed error handling — see the
+[React example app](/examples/react-app). It is the recommended starting point
+when you are moving from a prototype to a production integration.

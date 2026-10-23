@@ -18,6 +18,28 @@ dev container starts ready to build:
   container and the RPC is reachable at `http://localhost:8000/soroban/rpc`. If your
   environment disallows nested Docker, run the compose network on the host instead.
 
+## Repository health report
+
+Before opening a pull request, run the read-only health report. It never writes
+to the working tree — it only inspects the repo and prints actionable results:
+
+```bash
+npm run health
+```
+
+Each check reports `PASS`, `WARN`, or `FAIL` with a hint on how to fix it:
+
+| Check | What it verifies |
+|-------|------------------|
+| `formatting` | Prettier config is present and `format:check` is wired up. |
+| `scripts` | Required npm scripts (`build`, `test`, `lint`, `format:check`, `verify`) exist. |
+| `tests` | Each workspace package ships at least one test file. |
+| `exports` | Package `exports`/`main`/`types` entries point at files that exist. |
+| `docs` | Relative links in `docs/` resolve to real files. |
+
+The command exits non-zero when any check `FAIL`s, so it can gate CI. Pass
+`--json` for machine-readable output and `--strict` to treat warnings as failures.
+
 ## Prerequisites
 
 | Tool | Minimum version |
@@ -54,6 +76,55 @@ curl -s -X POST http://localhost:8000/soroban/rpc \
 ```
 
 A healthy node responds with `{"jsonrpc":"2.0","id":1,"result":{"status":"healthy"}}`.
+
+## Verifying endpoint readiness
+
+Rather than eyeballing `curl` output, use the bundled readiness helper. It polls
+the RPC endpoint until it reports healthy, then exits `0`; on timeout or a
+malformed response it exits non-zero with a diagnostic. Run it before examples
+or in CI to fail fast when the local node is not up yet.
+
+```bash
+# Defaults to http://localhost:8000/soroban/rpc
+npm run rpc:check
+
+# Or point it at any endpoint
+npm run rpc:check -- --url http://localhost:8000/soroban/rpc --timeout 60000
+```
+
+Stable interface:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--url <url>` | `http://localhost:8000/soroban/rpc` | Soroban RPC endpoint to probe. |
+| `--timeout <ms>` | `30000` | Total time to keep retrying before failing. |
+| `--interval <ms>` | `1000` | Delay between retries. |
+
+Exit codes: `0` healthy, `1` timed out / unreachable, `2` malformed response.
+
+## Inspecting package release readiness
+
+Before cutting a release, run the release-readiness inspector. It summarizes
+workspace version alignment, build results, package contents, and required
+release metadata, then exits non-zero if anything is not ready. It is
+inspection-only: it never publishes or mutates artifacts.
+
+```bash
+# Inspect the whole workspace
+npm run release:check
+
+# Or scope it to a single package
+npm run release:check -- --package @soroban-resurrect/sdk
+```
+
+Stable interface:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--package <name>` | all workspace packages | Limit the report to a single package by name. |
+| `--json` | off | Emit the report as machine-readable JSON instead of a table. |
+
+Exit codes: `0` ready, `1` one or more checks failed, `2` invalid arguments.
 
 ## Endpoints
 
@@ -116,9 +187,19 @@ Omitting `-v` keeps the ledger between restarts.
 | Healthcheck never passes | The node needs up to a minute on first boot. Check `docker compose logs soroban-rpc` for a Core error before restarting. |
 | `Transaction simulation failed` on every call | Usually a passphrase mismatch. The local network is Testnet-passphrased, not Standalone-passphrased. |
 | Requests hang from a browser app | The RPC server allows cross-origin requests, but a mixed-content page served over HTTPS cannot call `http://localhost`. Serve the dev app over HTTP. |
+| `rpc:check` exits `1` | The node is not up yet or the URL is wrong. Confirm with `docker compose ps` and the `curl` probe above. |
+| `rpc:check` exits `2` | The endpoint answered but not with a valid `getHealth` result. Check the URL points at `/soroban/rpc`, not Horizon. |
+| `release:check` exits `1` | One or more readiness checks failed. Re-run with `--json` to see which package and check failed. |
 
 ## Stopping the network
 
 ```bash
 docker compose down
 ```
+
+## Handling a broken release
+
+If a published release turns out to be broken, follow the
+[release rollback and incident-response runbook](./release-runbook.md). It covers
+confirming the problem, assessing impact, communicating with consumers, choosing
+between rollback and forward-fix, and directing consumers to a safe version.

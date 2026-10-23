@@ -71,6 +71,29 @@ new SorobanResurrect({
 })
 ```
 
+## Retention
+
+Persisted history is kept until you remove it; the SDK never expires entries on
+its own. Choose a retention window that matches your privacy policy and clear
+entries you no longer need. `clearHistory()` removes every persisted entry for
+the configured storage key, and `getHistory()` returns the in-memory entries so
+you can prune selectively before re-persisting:
+
+```ts
+// Drop everything the SDK has stored.
+await sdk.clearHistory()
+
+// Or prune entries older than a retention window, then re-persist.
+const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000
+const kept = sdk.getHistory().filter((entry) => entry.timestamp >= cutoff)
+await sdk.clearHistory()
+for (const entry of kept) await sdk.persistEntry(entry)
+```
+
+Call `clearHistory()` on sign-out and when a user requests deletion. Because the
+storage adapter is yours, you can also remove the underlying key directly (for
+example `localStorage.removeItem(key)`) if you need to purge outside the SDK.
+
 ## Encrypted storage
 
 Pass a `serializer` to encrypt (or ship to a server) before anything is stored.
@@ -104,82 +127,79 @@ const serializer = {
 new SorobanResurrect({ rpcUrl, persistHistory: { storage, serializer } })
 ```
 
-## Example: token transfer with archived balance recovery
+## ADR: Rebuilding the original transaction after restoration
 
-This walkthrough shows the user-visible flow for a token balance that has been
-archived on-chain: the balance reads as unavailable, the SDK restores the
-archived entry, and the transfer then succeeds with the recovered balance.
+### Status
 
-### Before restoration
+Accepted.
 
-When the balance entry is archived, reads return no balance and a transfer
-would fail. Surface this state to the user instead of showing a stale amount:
+### Context
 
-```ts
-const balance = await token.balanceOf(account)
-if (balance === null) {
-  // Archived: the ledger entry is no longer live.
-  showArchivedState(account) // e.g. "Balance unavailable — restore to continue"
-}
-```
+When a restored (resurrected) ledger entry is submitted, the network needs a
+transaction that references the restored entry. The SDK keeps the original
+transaction envelope in history so it can be re-submitted, but a restored entry
+is only valid for a bounded window and the original envelope may have been
+built against a stale ledger state. Re-submitting the stored envelope verbatim
+is therefore unsafe: its sequence number may already be consumed, its
+simulation footprint may no longer match the restored entry, and its fee may be
+stale.
 
-### Restore and transfer
+### Decision
 
-Call `restore` for the archived keys, wait for `sdk.ready`, then re-read the
-balance and submit the transfer. The same `persistHistory` configuration from
-above records the restore and transfer so the flow survives reloads.
+After restoration, the SDK **rebuilds** the original transaction rather than
+reusing the restored envelope. The rebuilt transaction is derived from the
+original operation(s) plus fresh network data, and the caller is responsible
+for supplying the pieces the SDK cannot infer.
 
-```ts
-const sdk = new SorobanResurrect({
-  rpcUrl,
-  persistHistory: { storage, mode: 'minimal' },
-})
-await sdk.ready
+### Rationale
 
-// 1. Restore the archived balance entry.
-const restore = await sdk.restore({ contractId: tokenId, keys: [balanceKey(account)] })
-if (restore.status !== 'success') {
-  showRestoreFailure(restore) // e.g. insufficient fee, footprint mismatch
-  return
-}
+- **Sequence numbers.** A stored envelope carries the account sequence number
+  that was current when it was first built. Once that transaction (or any
+  later one) is submitted, the stored sequence is consumed and re-submitting it
+  fails with `txBAD_SEQ`. Rebuilding fetches the current account sequence and
+  applies it, so the rebuilt transaction is valid against the live ledger.
+- **Simulation data.** Soroban transactions embed a footprint and resource
+  limits produced by simulation. After a restore, the entry's TTL and the
+  ledger state differ from the original simulation, so the footprint and
+  resource limits must be re-simulated. Rebuilding re-runs simulation against
+  the restored state instead of trusting stale results.
+- **Fees.** Resource fees depend on the re-simulated resource usage; rebuilding
+  recomputes them so the transaction is not rejected for insufficient fees.
+- **Safety.** Rebuilding keeps the original intent (the operations) while
+  discarding stale, network-dependent fields, which is the only way to produce
+  a transaction the network will accept after restoration.
 
-// 2. Re-read the now-live balance.
-const recovered = await token.balanceOf(account)
-if (recovered === null) {
-  showRestoreFailure(restore) // restore reported success but entry still missing
-  return
-}
+### Mechanism
 
-// 3. Transfer using the recovered balance.
-const transfer = await token.transfer({ from: account, to: recipient, amount })
-showTransferResult(transfer)
-```
+1. The original operation(s) are read from the stored history entry
+   (`transactionXdr` in `'full'` mode).
+2. The current account sequence number is fetched from the network and applied
+   to the rebuilt transaction.
+3. The transaction is re-simulated against the restored ledger state to obtain
+   a fresh footprint and resource limits.
+4. Fees are recomputed from the re-simulated resource usage.
+5. The rebuilt envelope is signed and submitted.
 
-### After restoration
+### Caller responsibilities
 
-The balance is live again and the transfer completes. The history entry written
-by the SDK lets you show the recovery in the UI:
+- **Provide the source account and signer.** The SDK rebuilds the transaction
+  but cannot sign on the caller's behalf; the caller must supply a signer for
+  the source account.
+- **Persist in `'full'` mode to rebuild.** Rebuilding requires the original
+  operation(s), which are only stored in `'full'` mode. `'minimal'` records
+  keep only metadata and cannot be rebuilt; use `parseMinimalHistory()` to read
+  them for display.
+- **Handle sequence contention.** If the account submits other transactions
+  concurrently, the caller must serialize submissions or retry on
+  `txBAD_SEQ`, since the rebuilt sequence can be consumed between build and
+  submit.
+- **Re-simulate after state changes.** If ledger state changes between rebuild
+  and submit, the caller should rebuild again rather than reuse the previous
+  envelope.
 
-```ts
-const [entry] = sdk.getHistory()
-// entry.status === 'success', entry.transactionHash is the transfer hash
-```
+### Consequences
 
-### Boundary and failure cases
-
-- **Restore fails** (`restore.status !== 'success'`): keep the archived state
-  visible and let the user retry; do not attempt the transfer.
-- **Balance still missing after restore**: treat as a failure even if the
-  restore call reported success, and surface it to the user.
-- **Transfer fails after a successful restore**: the balance is live, so the
-  user can retry the transfer without restoring again.
-- **Reload mid-flow**: with `persistHistory` configured, `sdk.getHistory()`
-  after `sdk.ready` shows the restore/transfer attempts so the UI can resume.
-
-### Compatibility and migration
-
-This example uses the same `HistoryStorage` interface and `persistHistory`
-options documented above; no new configuration is required. If you previously
-stored history with `mode: 'full'`, switching to `'minimal'` is safe for this
-example — read prior records with `parseMinimalHistory()` and keep the existing
-`storage` adapter unchanged.
+Rebuilding adds a network round-trip (sequence fetch + simulation) per
+submission, but produces transactions that are valid against the live ledger.
+Callers that need to re-submit must use `'full'` persistence and provide a
+signer; `'minimal'` history remains display-only.

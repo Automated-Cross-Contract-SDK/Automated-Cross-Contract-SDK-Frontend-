@@ -2,6 +2,120 @@
 
 This tutorial walks through the scenarios you'll run into most often when integrating Soroban-Resurrect into a dApp.
 
+## 0. Adding the SDK to an existing dApp (step-by-step)
+
+This section is a complete, repeatable walkthrough for retrofitting an existing dApp with Soroban-Resurrect. It covers installation, wiring the SDK into an existing submit path, failure UX, wallet signing, and a verification flow you can re-run any time.
+
+### Step 1 — Install
+
+```bash
+npm install @soroban-resurrect/sdk
+```
+
+### Step 2 — Create a single SDK instance
+
+Create one `SorobanResurrect` instance per network and share it across your app (e.g. in a module or context provider). Reusing the instance lets you subscribe to state changes globally and reset between actions.
+
+```typescript
+// src/soroban-resurrect.ts
+import { SorobanResurrect } from '@soroban-resurrect/sdk'
+
+export const sr = new SorobanResurrect({
+  rpcUrl: 'https://soroban-testnet.stellar.org',
+})
+```
+
+### Step 3 — Wrap your existing wallet
+
+If your dApp already has a wallet integration, adapt it to the `WalletAdapter` interface (see section 8 for a custom adapter). If you use a supported wallet, pass it directly.
+
+```typescript
+import type { WalletAdapter } from '@soroban-resurrect/sdk'
+
+const wallet: WalletAdapter = {
+  isConnected: async () => Boolean(window.myWallet?.isConnected),
+  getPublicKey: async () => window.myWallet.getPublicKey(),
+  signTransaction: async (txXdr, opts) =>
+    window.myWallet.sign(txXdr, { networkPassphrase: opts?.networkPassphrase }),
+}
+```
+
+### Step 4 — Replace your submit call
+
+Find the place in your dApp where you currently build and submit a transaction, and route it through `submitWithRestore` instead. The SDK detects archived state, restores it if needed, and then submits your original transaction.
+
+```typescript
+import { sr } from './soroban-resurrect'
+
+async function submit(tx) {
+  return sr.submitWithRestore({ transaction: tx, wallet })
+}
+```
+
+### Step 5 — Add failure UX
+
+Restoration can fail for reasons your original submit path never had to handle: the user rejects the restore signature, the restore transaction fails on-chain, or polling times out. Surface these distinctly so users know what happened and can retry.
+
+```typescript
+const result = await sr.submitWithRestore({
+  transaction: tx,
+  wallet,
+  onRestoreFailed: (error) => {
+    // The restore step failed; the original transaction was NOT submitted.
+    showError({
+      title: 'Could not restore archived state',
+      detail: error.message,
+      retry: () => submit(tx),
+    })
+  },
+})
+```
+
+You can also react to the terminal `error` state globally:
+
+```typescript
+sr.onStateChange((info) => {
+  if (info.state === 'error') {
+    showError({ title: 'Transaction failed', detail: info.message })
+  }
+})
+```
+
+Distinguish user cancellation (a rejected signature) from a genuine failure so you don't show a scary error when the user simply changed their mind.
+
+### Step 6 — Wallet signing flow
+
+Signing happens in two places: the restore transaction (only when archived state is detected) and the original transaction. Drive your UI from the lifecycle callbacks so the user always knows which signature is being requested:
+
+```typescript
+await sr.submitWithRestore({
+  transaction: tx,
+  wallet,
+  onSigningRestore: () => setStatus('Confirm the restore transaction in your wallet…'),
+  onSigningOriginal: () => setStatus('Confirm your transaction in your wallet…'),
+  onOriginalSubmitted: (txHash) => setStatus(`Done: ${txHash}`),
+})
+```
+
+If no restoration is needed, only `onSigningOriginal` and `onOriginalSubmitted` fire — your existing UX is unchanged.
+
+### Step 7 — Verify the integration (repeatable)
+
+Run this checklist against testnet to confirm the integration works end-to-end. Repeat it after any change to your submit path.
+
+1. **No-restore path.** Submit a transaction that touches only live state. Confirm only `onSigningOriginal` / `onOriginalSubmitted` fire and the transaction succeeds.
+2. **Restore path.** Submit a transaction that touches archived state. Confirm `onRestoreNeeded` fires, the restore signature is requested, and the original transaction is submitted after the restore confirms.
+3. **Failure path.** Reject the restore signature in your wallet. Confirm `onRestoreFailed` fires, the original transaction is *not* submitted, and your retry affordance works.
+4. **Status check.** Call `sr.needsRestore(tx)` on the same transaction and confirm it reports `true` before restoration and `false` after.
+
+```typescript
+// Quick programmatic check for step 4
+const before = await sr.needsRestore(tx)
+console.log('needs restore before:', before) // expect true for archived state
+```
+
+Once all four checks pass, the integration is complete and can be promoted to mainnet by pointing `rpcUrl` at the mainnet endpoint.
+
 ## 1. Checking restoration status before submitting
 
 Sometimes you want to warn the user ("this will require an extra signature") before they commit to an action:
@@ -202,6 +316,10 @@ const result = await sr.submitWithRestore({
   transaction: tx,
   wallet,
   restoreKeys: archivedKeys,
+  onRestoreFailed: (error) => {
+    // Fewer than `threshold` signatures were collected; nothing was submitted.
+    showError({ title: 'Restore not authorized', detail: error.message })
+  },
 })
 
 if (!result.success) {
@@ -210,59 +328,4 @@ if (!result.success) {
 }
 ```
 
-## 10. Token transfer with archived balance recovery
-
-A common real-world case: a user holds a token balance in a contract whose balance entry has been archived (e.g. after a long period of inactivity). Before restoration the balance is unavailable; after restoration the transfer succeeds and the balance is visible again.
-
-### User-visible flow
-
-| Stage | What the user sees |
-| --- | --- |
-| Before | Balance shows as **unavailable (archived)** — the transfer cannot proceed |
-| Restore needed | Prompt: "Your balance is archived. Confirm the restore transaction to continue." |
-| Restoring | Restore transaction submitted and confirmed |
-| After | Balance is **recovered** and the transfer completes normally |
-
-### Example
-
-```typescript
-import { SorobanResurrect, type WalletAdapter } from '@soroban-resurrect/sdk'
-
-const sr = new SorobanResurrect({ rpcUrl: 'https://soroban-testnet.stellar.org' })
-
-// 1. Build the token transfer transaction (contract call: transfer(from, to, amount)).
-const tx = await buildTokenTransfer({ from, to, amount })
-
-// 2. Check whether the sender's balance entry is archived before submitting.
-const needsRestore = await sr.needsRestore(tx)
-if (needsRestore) {
-  showBalanceUnavailable() // user-visible: balance is archived
-}
-
-// 3. Submit; the SDK restores the archived balance entry, then submits the transfer.
-const result = await sr.submitWithRestore({
-  transaction: tx,
-  wallet,
-  onRestoreNeeded: () => showRestorePrompt(),
-  onRestoreConfirmed: () => showRestoring(),
-  onOriginalSubmitted: (txHash) => showTransferComplete(txHash),
-  onRestoreFailed: (error) => showError(error),
-})
-
-// 4. After restoration the balance is readable again.
-const balance = await readTokenBalance({ account: from })
-showBalance(balance) // user-visible: balance recovered
-```
-
-### Boundary and failure cases
-
-- **No archived balance** — `needsRestore` returns `false`; only the transfer is submitted and the balance is unchanged in flow.
-- **Restore succeeds, transfer fails** — the balance entry is restored but the transfer (e.g. insufficient funds) still fails; surface the transfer error separately from the restore error.
-- **Restore fails** — the original transfer is never submitted; the balance remains archived and the user can retry.
-- **Insufficient balance after restore** — restoration succeeds but the transfer is rejected by the contract; report it as a transfer failure, not a restore failure.
-
-### Compatibility and migration notes
-
-- This example uses the same `submitWithRestore` interface as sections 2 and 9; no new API surface is required.
-- If you previously handled archived balances by manually building restore transactions, migrate to `submitWithRestore` (or `needsRestore` + `detectArchivedKeys`) so the restore and transfer are sequenced by the SDK.
-- `needsRestore` is read-only and safe to call on page load to decide whether to show the "balance unavailable" state.
+Because the original transaction is only submitted after the restore confirms, a refused signature leaves on-chain state untouched and the user can retry safely.
