@@ -139,3 +139,11 @@ network (or a deterministic test double), see:
   canned-response pattern used behind this page.
 - [SDK API reference](/api/sdk) — `SorobanResurrect`, `ISorobanRpcClient`, and
   `ResurrectResult`.
+
+## Production-style React example
+
+The playground above is a single snippet. For a realistic application structure
+that wires the SDK into a full UI — routing, wallet lifecycle, user feedback, fee
+consent, cancellation, and typed error handling — see the
+[React example app](/examples/react-app). It is the recommended starting point
+when you are moving from a prototype to a production integration.

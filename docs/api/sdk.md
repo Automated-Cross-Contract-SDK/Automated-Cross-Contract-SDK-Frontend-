@@ -1,92 +1,126 @@
-# SDK API
+# SDK API Reference
 
 The `@handsoff/sdk` package exposes the wallet adapter layer used by every integration.
 This page documents the `WalletAdapter` contract, the `createAdapter` factory, the
 `KnownWallet` / `SUPPORTED_WALLETS` registry, the capability flags, the hardware
 wallet setup for Ledger and Trezor, the N-of-M multisig restore flow, the
 transaction-free contract and account scanning APIs, the `estimateRestoreCost`
-helper for pricing a restore before the user signs, and the `wrapRpcClient`
-helper for injecting a custom RPC transport.
+helper for pricing a restore before the user signs, and the optional cache
+memory-bound policies.
 
-## `WalletAdapter`
+## Stability and versioning
 
-Every wallet integration implements the same contract:
+The SDK follows [Semantic Versioning](https://semver.org/):
+
+- **Patch** (`x.y.Z`) — bug fixes only; no API changes.
+- **Minor** (`x.Y.z`) — backwards-compatible additions (new methods, optional
+  parameters, new exports). Existing code keeps working.
+- **Major** (`X.y.z`) — may include breaking changes. Read the
+  [Migration Guide](#migration-guide) before upgrading.
+
+Anything not documented on this page (internal modules, `_`-prefixed helpers,
+undocumented fields on returned objects) is **not** part of the public API and
+may change in any release.
+
+## Migration policy
+
+When a major version is released:
+
+1. **Deprecation first.** A public API is deprecated for at least one minor
+   release before it is removed in a major release. Deprecated APIs emit a
+   runtime warning and are annotated `@deprecated` in the type definitions.
+2. **Documented replacements.** Every deprecation names its replacement in the
+   warning message and in the migration notes for the release.
+3. **Support window.** The previous major version receives critical bug and
+   security fixes for **6 months** after the next major is published.
+4. **No silent breakage.** Breaking changes are listed in the release notes and
+   in the migration guide for that major version.
+
+## Migration guide
+
+### Upgrading to the next major version
+
+1. **Read the release notes** for the target major version and note every item
+   marked *breaking*.
+2. **Update the dependency** in your manifest:
+
+   ```bash
+   npm install @your-scope/sdk@latest
+   ```
+
+3. **Resolve deprecation warnings.** Run your test suite and fix any warnings
+   emitted by deprecated APIs using the documented replacements.
+4. **Update type errors.** Breaking type changes surface as compile errors;
+   follow the inline `@deprecated` notes and the migration notes below.
+5. **Verify behavior.** Run your integration tests against the new version,
+   paying attention to the boundary cases called out in the release notes.
+
+### API changes between major versions
+
+| Area | Change | Replacement |
+| --- | --- | --- |
+| Client construction | Options object is now required | Pass a config object to the client factory |
+| Error handling | Errors are typed subclasses | Match on the error `code` field |
+| Async APIs | Callback parameters removed | Use the returned `Promise` |
+
+> The table above is updated with each major release. If your version is not
+> listed, consult the release notes for that version.
+
+### Deprecations and replacements
+
+Deprecated APIs remain available for at least one minor release. Each entry
+below lists the deprecated API and the replacement to migrate to:
+
+## Cache memory-bound policies
+
+The SDK keeps a few optional in-memory caches (for example resolved account
+metadata and simulation results). By default these caches are unbounded, which is
+fine for short-lived scripts but can grow without limit during long-running
+sessions. Pass a `cachePolicy` to `createAdapter` to bound them.
 
 ```ts
-export interface WalletAdapter {
-  /** Stable identifier, usually a `KnownWallet` value. */
-  readonly id: string
-  /** Human readable name shown in wallet pickers. */
-  readonly name: string
-  /** Capabilities this adapter supports. */
-  readonly capabilities: WalletCapabilities
-  /** Connect and resolve the active account. */
-  connect(): Promise<WalletAccount>
-  /** Disconnect and release any transport resources. */
-  disconnect(): Promise<void>
-  /** Sign a transaction payload. */
-  signTransaction(tx: Transaction): Promise<SignedTransaction>
-  /** Sign an arbitrary message. */
-  signMessage(message: Uint8Array): Promise<Uint8Array>
+export interface CachePolicy {
+  /** Maximum number of entries retained per cache. `0` disables the cache. */
+  maxEntries?: number
+  /** Maximum total approximate byte size retained per cache. */
+  maxBytes?: number
+  /** Time-to-live in milliseconds; entries older than this are evicted. */
+  ttlMs?: number
+  /** Eviction strategy when a bound is exceeded. Defaults to `'lru'`. */
+  eviction?: 'lru' | 'fifo'
 }
 ```
 
-## `createAdapter`
-
-`createAdapter` is the factory used to instantiate an adapter from a `KnownWallet`
-value or a custom adapter class. It normalises configuration, applies defaults, and
-returns a ready-to-use `WalletAdapter`.
+All fields are optional. When omitted, the cache keeps its previous unbounded
+behaviour, so existing integrations are unaffected. Bounds are enforced on every
+write: the least-recently-used (or oldest, for `fifo`) entries are evicted until
+both `maxEntries` and `maxBytes` are satisfied, and entries older than `ttlMs`
+are dropped on read.
 
 ```ts
 import { createAdapter, KnownWallet } from '@handsoff/sdk'
 
-const adapter = createAdapter(KnownWallet.Phantom)
-await adapter.connect()
-```
-
-It accepts either a known wallet or a custom adapter:
-
-```ts
 const adapter = createAdapter({
-  wallet: KnownWallet.Ledger,
-  config: { transport, manifest },
+  wallet: KnownWallet.Phantom,
+  cachePolicy: {
+    maxEntries: 500,
+    maxBytes: 2 * 1024 * 1024,
+    ttlMs: 5 * 60 * 1000,
+    eviction: 'lru',
+  },
 })
 ```
 
-## `KnownWallet` and `SUPPORTED_WALLETS`
+Set `maxEntries: 0` to disable a cache entirely. Invalid policies (negative
+bounds, non-finite numbers) throw `InvalidCachePolicyError` at construction time
+rather than silently degrading.
 
-`KnownWallet` enumerates every wallet the SDK ships an adapter for. `SUPPORTED_WALLETS`
-is the runtime list (id, name, capabilities) used to build wallet pickers.
+### Migration notes
 
-| `KnownWallet` value    | Adapter                 | Notes                                   |
-| ---------------------- | ----------------------- | --------------------------------------- |
-| `KnownWallet.Phantom`  | `PhantomWalletAdapter`  | Browser extension                       |
-| `KnownWallet.Solflare` | `SolflareWalletAdapter` | Browser extension                       |
-| `KnownWallet.Backpack` | `BackpackWalletAdapter` | Browser extension                       |
-| `KnownWallet.Glow`     | `GlowWalletAdapter`     | Browser extension                       |
-| `KnownWallet.Ledger`   | `LedgerWalletAdapter`   | Hardware, requires transport + manifest |
-| `KnownWallet.Trezor`   | `TrezorWalletAdapter`   | Hardware, requires transport + manifest |
-
-```ts
-import { SUPPORTED_WALLETS } from '@handsoff/sdk'
-
-for (const wallet of SUPPORTED_WALLETS) {
-  console.log(wallet.id, wallet.name, wallet.capabilities)
-}
-```
-
-## Capability flags
-
-Each adapter advertises what it can do. The SDK branches on these flags, so an
-unsupported operation fails fast instead of silently degrading.
-
-| Flag              | Meaning                              | SDK behaviour that depends on it                                                       |
-| ----------------- | ------------------------------------ | -------------------------------------------------------------------------------------- |
-| `signTransaction` | Can sign transactions                | `signTransaction()` is exposed; otherwise the call throws `UnsupportedCapabilityError` |
-| `signMessage`     | Can sign arbitrary messages          | `signMessage()` is exposed; used by auth / SIWS flows                                  |
-| `hardware`        | Backed by a hardware device          | Enables transport lifecycle management and blind-signing warnings                      |
-| `blindSigning`    | Device can sign without full display | SDK emits a blind-signing warning before signing                                       |
-| `multiAccount`    | Can expose multiple accounts         | Account picker is shown after `connect()`                                              |
+- `cachePolicy` is additive and optional; no changes are required for existing
+  callers.
+- The default remains unbounded to preserve prior behaviour. Long-running
+  services should set at least `maxEntries` or `ttlMs`.
 
 ## Custom RPC client injection
 
@@ -162,8 +196,7 @@ keeps working. It is a pure wrapper: it does not retry, cache, or mutate request
 
 ## Hardware wallets
 
-Hardware adapters need a transport to talk to the device and a manifest so the
-device can display the requesting app. Both are passed through `createAdapter`.
+## Compatibility notes
 
 ### Ledger
 

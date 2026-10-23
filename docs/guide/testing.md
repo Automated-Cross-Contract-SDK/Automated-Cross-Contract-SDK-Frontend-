@@ -66,59 +66,94 @@ const harness = createMockRpcHarness()
 const sdk = createSdk({ rpc: harness.client })
 ```
 
-### Success path
+This pattern — two `simulateTransaction` responses (restore-required, then
+clean) plus two `sendTransaction` responses (restore, then original) — is
+enough to drive the entire state machine (`restore_needed` →
+`signing_restore` → `submitting_restore` → `confirming_restore` →
+`signing_original` → `submitting_original` → `success`) deterministically,
+with no network access. A full workflow test should also verify that rebuilding
+preserves the original operations and that each submitted envelope matches the
+XDR returned by its corresponding wallet-signing call.
 
-```ts
-harness.script('getBalance', { lamports: 42 })
+Wallet-rejection integration tests should cover both signing prompts
+separately: rejecting the restore signature must send neither transaction,
+while rejecting the rebuilt original signature may send the confirmed restore
+transaction but must never send the unsigned original transaction.
 
-const balance = await sdk.getBalance('SomeAddress')
-expect(balance).toEqual({ lamports: 42 })
-expect(harness.calls).toEqual([
-  { method: 'getBalance', params: ['SomeAddress'] },
-])
+## Simulation serialization cache
+
+Simulation reuses a cached serialized transaction envelope when the inputs
+have not changed, avoiding repeated XDR serialization on the hot path. The
+cache is keyed on the transaction's serialized identity (envelope XDR plus
+network passphrase); any change to the transaction — new operations, updated
+sequence number, different fee, or a different network passphrase — produces a
+different key and therefore a fresh serialization. Tests should assert both
+directions:
+
+- **Reuse:** simulating the same unchanged transaction twice serializes the
+  envelope once (the second simulate hits the cache).
+- **Invalidation:** mutating the transaction (e.g. bumping the sequence number
+  or adding an operation) or changing the network passphrase causes the next
+  simulate to re-serialize rather than reuse a stale representation.
+
+Because the cache is keyed on the serialized envelope itself, a reused entry is
+byte-for-byte identical to a freshly serialized one — there is no behavioral
+difference, only fewer serialization calls. This is a transparent optimization
+with no API or wire-format change, so no migration is required.
+
+## Free functions
+
+Lower-level functions such as `executeWithRestore`, `waitForTransaction`, and
+`detectArchivedEntries` accept an `ISorobanRpcClient` directly as their
+`server` parameter, so the same test doubles work at that level too if you're
+testing below the `SorobanResurrect` facade.
+
+The SDK's `src/__tests__/fixtures/soroban-rpc/v1.ts` fixture set covers success,
+restore-required, error, malformed, and extended simulation response shapes.
+Keep representative RPC shape changes in a new fixture version and exercise
+them through the response guards and extraction helpers.
+
+To verify published package files rather than workspace links, first build the
+packages and then run `npm run test:packed-exports`. It packs each package with
+an `exports` map, installs the tarballs in a temporary clean project, smoke
+tests every declared runtime export, checks declaration imports with TypeScript,
+and verifies required peer dependencies resolve.
+
+See also: [API Reference](/api/sdk), [`SorobanResurrectConfig`](/api/types#sorobanresurrectconfig).
+
+## Shared mock-RPC harness
+
+Instead of hand-rolling a stub per test, use the workspace-only
+`@soroban-resurrect/testing` package (`packages/testing`). It is marked
+`private`, so it is never published and never appears in an SDK tarball.
+
+It exports:
+
+- `createMockRpcClient(script)` — a scripted `ISorobanRpcClient`. Each of
+  `simulate`, `send` and `getTransaction` takes one response or an array of
+  responses returned in order (the last one repeats). `calls` records every RPC
+  call and `sent` every submitted envelope.
+- `fixtures` — canned responses: `simulateSuccess`, `simulateRestore`,
+  `simulateError`, `sendPending`, `sendError('txBadSeq' | ...)`, `txSuccess`,
+  `txFailed`, `txNotFound`, `archivedKey`, `account`.
+- `ledgerEntryFixture(status, seed?, currentLedger?)` — deterministic
+  `getLedgerEntries` responses for `active`, `near-expiry`, `archived`,
+  `missing`, and `unsupported` ledger keys. Each fixture includes its key,
+  current ledger, and typed RPC response; `missing` omits the key, while
+  `archived` returns an entry whose live-until ledger has passed.
+- `scenarios` — ready-made scripts: `noRestore`, `restore`,
+  `restoreSimulationError`, `badSequence`, `slowConfirmation`.
+
+Add it as a dev dependency of the workspace you are testing:
+
+```json
+{ "devDependencies": { "@soroban-resurrect/testing": "0.0.0" } }
 ```
 
-### Failure path
+## Mock wallet adapter
 
-Scripted errors surface to the caller unchanged, matching real transport behavior.
+Integration tests that exercise the signing steps need a wallet, not just an
+RPC client. `@soroban-resurrect/testing` also exports a reusable mock wallet
+adapter so you don't have to hand-roll one per suite.
 
-```tsnharness.script('getBalance', new Error('rpc unavailable'))
-
-await expect(sdk.getBalance('SomeAddress')).rejects.toThrow('rpc unavailable')
-```
-
-### Restore path
-
-Restore flows issue several RPC calls in sequence. Script each step and assert the final state; `reset()` keeps scenarios isolated.
-
-```ts
-harness.script('getAccountInfo', { owner: 'program', data: restoredData })
-harness.script('sendTransaction', { signature: 'sig-1' })
-
-const result = await sdk.restore({ account: 'SomeAddress' })
-expect(result.signature).toBe('sig-1')
-expect(harness.calls.map((c) => c.method)).toEqual([
-  'getAccountInfo',
-  'sendTransaction',
-])
-
-harness.reset()
-```
-
-### Boundary cases
-
-- **Unscripted methods** reject with a descriptive error so missing fixtures fail loudly instead of silently returning `undefined`.
-- **Scripted errors** are rethrown unchanged, so `try/catch` and `rejects` assertions behave as they would against a live transport.
-- **Isolation** — call `harness.reset()` between tests to clear recorded calls and any remaining scripted responses.
-
-## Boundary and failure cases
-
-- **Errors propagate.** If the underlying transport rejects, the wrapper rethrows the same error after invoking `onError`. Tests should assert that failures surface to the caller unchanged.
-- **Hooks are optional.** Omitting `onRequest`/`onResponse`/`onError` leaves the transport untouched.
-- **Ordering.** `onRequest` fires before the transport call; `onResponse` or `onError` fires after it settles.
-
-## Compatibility
-
-`createRpcClient` is additive. Existing code that passes a transport directly to `createSdk` continues to work; wrapping is opt-in and requires no migration. The wrapper preserves the transport interface, so any custom transport you already use can be wrapped as-is.
-
-`createMockRpcHarness` is also additive and built on `createRpcClient`, so no migration is required. Existing tests that hand-roll a mock transport keep working; the harness is an opt-in convenience for wallet-free success, failure, and restore scenarios.
+| Behavior                         | Module                            |

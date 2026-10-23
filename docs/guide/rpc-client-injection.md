@@ -68,50 +68,32 @@ Only override the methods you care about — spreading `...client` first means
 every method not explicitly overridden still delegates to the wrapped
 client, so `ISorobanRpcClient`'s six-method contract stays satisfied.
 
-## Example: a proxying wrapper
+## Concurrency limits for ledger lookups
 
-To route calls through an intermediary (a gateway, a metrics sidecar, or a
-regional proxy) without touching SDK call sites, wrap the client and forward
-every method. Because the wrapper is a plain object, you can add
-cross-cutting concerns like retries or request IDs in one place:
+When the SDK needs to look up many ledger entries at once (for example when
+checking TTLs across a large set of keys), it issues `getLedgerEntries`
+calls in parallel. To avoid overwhelming the RPC endpoint, the number of
+in-flight requests is bounded by `config.maxConcurrentLedgerLookups`.
 
 ```typescript
-import {
-  createRpcClient,
-  SorobanResurrect,
-  type ISorobanRpcClient,
-} from '@soroban-resurrect/sdk'
-
-function withProxy(
-  client: ISorobanRpcClient,
-  proxyUrl: string,
-): ISorobanRpcClient {
-  // Forward each call through the proxy endpoint. The wrapped client still
-  // owns serialization and response parsing; the proxy only sees the
-  // request/response envelope.
-  return {
-    ...client,
-
-    async getAccount(accountId) {
-      console.log(`[proxy] getAccount ${accountId} via ${proxyUrl}`)
-      return client.getAccount(accountId)
-    },
-
-    async getLedgerEntries(keys) {
-      console.log(`[proxy] getLedgerEntries (${keys.length} keys)`)
-      return client.getLedgerEntries(keys)
-    },
-  }
-}
-
 const sdk = new SorobanResurrect({
   rpcUrl: 'https://soroban-testnet.stellar.org',
-  rpcClient: withProxy(
-    createRpcClient('https://soroban-testnet.stellar.org'),
-    'https://rpc-proxy.internal.example',
-  ),
+  // At most 5 ledger lookups in flight at any time. Defaults to 10.
+  maxConcurrentLedgerLookups: 5,
 })
 ```
+
+- **Setting:** `maxConcurrentLedgerLookups` (optional, positive integer).
+- **Default:** `10` when omitted.
+- **Behavior:** large inputs are split into batches that respect the limit;
+  results are returned in the same order as the input keys, so no entries
+  are lost or reordered regardless of the limit.
+- **Validation:** a non-positive or non-integer value throws a
+  `ConfigurationError` at construction time.
+
+This setting is purely a client-side bound and does not change the RPC
+protocol or the shape of any response, so it is backward compatible: existing
+configurations that omit it keep the previous default behavior.
 
 ## Check restore compatibility
 
