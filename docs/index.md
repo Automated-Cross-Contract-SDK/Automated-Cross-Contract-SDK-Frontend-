@@ -28,3 +28,27 @@ features:
   - title: Typed End-to-End
     details: Written in TypeScript with a fully typed public API — config, results, callbacks, and state machine are all exported types.
 ---
+
+## Documentation Versions
+
+This site serves documentation for each supported package release. Use the
+**version selector** in the navigation bar to switch between versions; the
+active version is shown next to the selector.
+
+| Version | Status | Notes |
+| --- | --- | --- |
+| `latest` | Current release | Tracks the most recent published package. |
+| `v1.x` | Supported | Stable public API; see migration notes when upgrading from `v0.x`. |
+| `v0.x` | Legacy | No longer receiving features; upgrade to `v1.x`. |
+
+Version identifiers match the published package releases. If you are unsure
+which version applies to your project, check the `soroban-resurrect` dependency
+version in your `package.json`.
+
+### Migration notes
+
+- `v0.x` → `v1.x`: the restore flow and TTL helpers are unchanged, but several
+  config fields were renamed. Consult the `v1.x` API reference for the current
+  names before upgrading.
+- Documentation for a version is only available while that release is
+  supported. Unsupported versions are removed from the selector.
