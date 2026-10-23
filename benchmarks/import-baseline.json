@@ -10,7 +10,31 @@
   "notes": [
     "Baseline for scripts/benchmark-imports.mjs (cold import wall-time per package entry, in ms).",
     "Regenerate on a CI-class runner with: npm run benchmark:imports:update",
-    "Entries missing here are reported as 'new' and never fail the gate, so this file must be populated once for the gate to be active."
+    "Entries missing here are reported as 'new' and never fail the gate, so this file must be populated once for the gate to be active.",
+    "Archived-key detection benchmarks (scripts/benchmark-archived-keys.mjs) cover representative footprint sizes and record time and allocation growth; see archivedKeyDetection below."
   ],
+  "archivedKeyDetection": {
+    "version": 1,
+    "generatedAt": null,
+    "node": null,
+    "config": {
+      "iterations": 5,
+      "maxDeltaMs": 5,
+      "maxDeltaRatio": 0.5,
+      "maxAllocDeltaRatio": 0.5
+    },
+    "notes": [
+      "Baseline for scripts/benchmark-archived-keys.mjs: archived-key detection across representative footprint sizes.",
+      "Each entry records wall-time (ms) and allocated bytes for a given footprint size.",
+      "Regenerate on a CI-class runner with: npm run benchmark:archived-keys:update",
+      "Entries missing here are reported as 'new' and never fail the gate, so this file must be populated once for the gate to be active."
+    ],
+    "footprints": [
+      { "size": 100, "timeMs": null, "allocBytes": null },
+      { "size": 1000, "timeMs": null, "allocBytes": null },
+      { "size": 10000, "timeMs": null, "allocBytes": null },
+      { "size": 100000, "timeMs": null, "allocBytes": null }
+    ]
+  },
   "entries": {}
 }
