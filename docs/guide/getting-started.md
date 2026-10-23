@@ -165,6 +165,107 @@ if (result.success) {
 }
 ```
 
+## Quick Start (Plain JavaScript)
+
+No framework required — this example runs directly in the browser. It connects
+a wallet, builds a transaction, and demonstrates both the restore and
+no-restore paths. See [`examples/plain-js`](https://github.com/soroban-resurrect/soroban-resurrect/tree/main/examples/plain-js)
+for the full runnable project.
+
+```html
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Soroban-Resurrect — Plain JS</title>
+  </head>
+  <body>
+    <button id="connect">Connect wallet</button>
+    <button id="submit" disabled>Submit withdraw</button>
+    <pre id="log"></pre>
+
+    <script type="module">
+      import { SorobanResurrect } from '@soroban-resurrect/sdk'
+      import {
+        TransactionBuilder,
+        Account,
+        Operation,
+        Networks,
+        nativeToScVal,
+      } from '@stellar/stellar-sdk'
+
+      const log = (msg) => {
+        document.getElementById('log').textContent += msg + '\n'
+      }
+
+      const sr = new SorobanResurrect({
+        rpcUrl: 'https://soroban-testnet.stellar.org',
+        networkPassphrase: Networks.TESTNET,
+      })
+
+      let publicKey = null
+
+      // WalletAdapter shape — swap in xBull or a custom signer as needed.
+      const wallet = {
+        isConnected: async () => publicKey !== null,
+        getPublicKey: async () => publicKey,
+        signTransaction: async (txXdr, opts) =>
+          window.freighter.signTransaction(txXdr, opts),
+      }
+
+      document.getElementById('connect').addEventListener('click', async () => {
+        const { publicKey: pk } = await window.freighter.requestAccess()
+        publicKey = pk
+        log('Connected: ' + publicKey)
+        document.getElementById('submit').disabled = false
+      })
+
+      document.getElementById('submit').addEventListener('click', async () => {
+        const account = await sr.rpc.getAccount(publicKey)
+        const tx = new TransactionBuilder(account, {
+          fee: '100',
+          networkPassphrase: Networks.TESTNET,
+        })
+          .addOperation(
+            Operation.invokeContractFunction({
+              contract: 'CCJZ5...K2Q',
+              function: 'withdraw',
+              args: [nativeToScVal(1000, { type: 'i128' })],
+            }),
+          )
+          .setTimeout(30)
+          .build()
+
+        // No-restore path: nothing archived, submit directly.
+        const needsRestore = await sr.needsRestore(tx)
+        if (!needsRestore) {
+          log('No archived entries — submitting directly.')
+        } else {
+          log('Archived entries detected — restore will run first.')
+        }
+
+        // Restore path: submitWithRestore handles both cases automatically.
+        const result = await sr.submitWithRestore({ transaction: tx, wallet })
+        if (result.success) {
+          log('Original tx hash: ' + result.originalTxHash)
+          if (result.restoreTxHash) {
+            log('Restore tx hash: ' + result.restoreTxHash)
+            log('Archived keys restored: ' + result.archivedKeysDetected)
+          }
+        } else {
+          log('Failed: ' + result.error)
+        }
+      })
+    </script>
+  </body>
+</html>
+```
+
+`needsRestore` and `submitWithRestore` are the stable entry points used here;
+both accept the same `WalletAdapter` shape shown above. When `needsRestore`
+returns `false` the SDK submits the original transaction unchanged, so the
+no-restore path is a strict subset of the restore path.
+
 ## Quick Start (React)
 
 ```tsx
@@ -193,6 +294,57 @@ function WithdrawButton() {
   )
 }
 ```
+
+## Production-style React application
+
+For a realistic, production-shaped React app — routing, wallet lifecycle,
+user feedback, fee consent, cancellation, and typed error handling — see
+[`examples/react-app`](https://github.com/soroban-resurrect/soroban-resurrect/tree/main/examples/react-app).
+The example is a small Vite + React + TypeScript project that wires the
+`@soroban-resurrect/react-hook` provider into a multi-route app and shows how
+the stable SDK surface is used end to end.
+
+What the example demonstrates:
+
+- **Routing** — `react-router-dom` routes for a dashboard, a withdraw flow, and
+  a transaction history view, all sharing one provider instance.
+- **Wallet lifecycle** — connect, disconnect, and reconnect flows with a
+  `WalletAdapter` implementation, including handling of a wallet that becomes
+  unavailable mid-session.
+- **User feedback** — a status banner driven by the hook's `state`
+  (`idle` → `simulating` → `awaiting-consent` → `signing` → `submitting` →
+  `confirming` → `success` / `error` / `cancelled`).
+- **Fee consent** — before a restore is submitted, the app surfaces the
+  estimated restore cost from `estimateRestoreCost` and requires explicit user
+  confirmation.
+- **Cancellation** — an `AbortController` is created per submission and aborted
+  when the user cancels or navigates away, so `submitWithRestore` resolves with
+  `errorCode === 'ABORTED'`.
+- **Typed error handling** — a `switch` on `result.errorCode` (e.g. `ABORTED`,
+  `WALLET_REJECTED`, `SIMULATION_FAILED`, `RESTORE_FAILED`) with user-facing
+  copy for each case.
+
+Run it locally:
+
+```bash
+cd examples/react-app
+npm install
+npm run dev
+```
+
+Run its tests:
+
+```bash
+cd examples/react-app
+npm test
+```
+
+The example's tests cover the happy path (no restore needed), the restore path
+with fee consent, user cancellation, and wallet-rejection error handling. The
+interfaces it relies on — `SorobanResurrectProvider`, `useSorobanResurrectContext`,
+`submitWithRestore`, `estimateRestoreCost`, `needsRestore`, and the
+`AbortSignalOptions` type — are the same stable entry points documented above,
+so the example remains compatible across supported package releases.
 
 ## Choosing an approach
 
@@ -224,21 +376,4 @@ if (!result.success && result.errorCode === 'ABORTED') {
 
 `AbortSignalOptions` is exported as a stable type. A `{ signal }` options object
 is accepted by `simulate`, `detectArchivedKeys`, `detectArchivedKeysBatch`,
-`needsRestore`, `estimateRestoreCost`, `buildRestoreTx` (after its optional
-simulation response), `buildBatchRestoreTx`, `sendTransaction`, `retry`, and
-`restoreKeys`. `submitWithRestore` accepts `signal` in its options object, and
-`submitBatchWithRestore(items, { signal })` uses one signal for the whole batch.
-Existing calls that omit a signal are unchanged.
-
-Cancellation stops the SDK from starting later steps and clears polling timers
-and temporary abort listeners. Wallet adapters may ignore the signal, and the
-Stellar SDK's RPC methods do not expose request cancellation; an in-flight RPC
-or wallet prompt may therefore finish in the background. Aborting cannot undo a
-submitted transaction, so inspect its returned hash/status before retrying.
-
-## Next Steps
-
-- Walk through common patterns in the [Tutorial](/guide/tutorial)
-- Browse the full [API Reference](/api/sdk)
-- See [runnable Examples](/examples/)
-- Wire the SDK into your framework via the [Integration Guides](/integrations/react)
+`needsRestore`, `estimateRestoreCost`, `buildRestoreTx` (after its o

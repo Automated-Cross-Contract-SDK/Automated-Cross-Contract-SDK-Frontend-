@@ -73,3 +73,57 @@ async function submit(transaction, wallet) {
 | `injectSorobanResurrect()`      | Returns the shared `SorobanResurrect`. Must run in `setup()`. Throws if the plugin was not installed. |
 | `SOROBAN_RESURRECT_KEY`         | The `InjectionKey` used internally — for advanced/SSR wiring.                                         |
 | `SorobanResurrectPluginOptions` | `{ config: SorobanResurrectConfig }`.                                                                 |
+
+## Example application: wallet connection flow
+
+A complete Vue example lives in `examples/vue-wallet`. It wires the composable
+to a wallet connection and renders every UI state the flow can produce:
+
+| State            | Trigger                                                       | UI shown                                              |
+| ---------------- | ------------------------------------------------------------- | ----------------------------------------------------- |
+| `idle`           | Initial render                                                | Connect wallet button                                 |
+| `loading`        | Wallet connect / restore in progress                          | Spinner + disabled controls                           |
+| `rejected`       | User dismisses the wallet prompt                              | Rejection notice with a retry action                  |
+| `restored`       | A previously submitted transaction is restored                | Success banner with the restored transaction hash     |
+| `failed`         | Wallet or RPC error, or a failed `ResurrectResult`            | Error message with the failure reason and retry       |
+
+The example exposes a single stable interface, `useWalletConnection`, so the
+flow can be reused and tested independently of the UI:
+
+```ts
+import { useWalletConnection } from './useWalletConnection'
+
+const {
+  status, // Ref<'idle' | 'loading' | 'rejected' | 'restored' | 'failed'>
+  error, // Ref<string | null>
+  result, // Ref<ResurrectResult | null>
+  connect, // (wallet) => Promise<void>
+  retry, // () => Promise<void>
+  reset, // () => void
+} = useWalletConnection({ resurrect })
+```
+
+`connect(wallet)` sets `status` to `loading`, then resolves to `restored` when
+the SDK returns a successful `ResurrectResult`, `rejected` when the wallet
+cancels, and `failed` (with `error` populated) on any thrown error. `retry()`
+re-runs the last `connect` call; `reset()` returns to `idle` and clears
+`error`/`result`.
+
+### Tests
+
+The example ships with Vitest tests (`examples/vue-wallet/useWalletConnection.spec.ts`)
+covering the expected path plus boundary and failure cases:
+
+- successful connect transitions `idle → loading → restored`
+- wallet rejection resolves to `rejected` without throwing
+- a thrown wallet/RPC error resolves to `failed` and populates `error`
+- `retry()` after a failure re-enters `loading` and can succeed
+- `reset()` clears `error` and `result` back to `idle`
+- calling `connect()` while already `loading` is a no-op (boundary)
+
+### Compatibility
+
+The example targets Vue 3 (`>=3.3`) and the same `@soroban-resurrect/vue-hook`
+version as the rest of the monorepo. No migration is required for existing
+consumers — `useWalletConnection` is example-local and not exported from the
+published package.

@@ -16,3 +16,42 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  canary:
+    # Publish a clearly versioned prerelease from main without touching stable tags.
+    # Canary versions look like `<next-version>-canary.<run_number>` and are
+    # published under the `canary` dist-tag, so `latest` and stable tags are
+    # never affected. Install with: `npm install <pkg>@canary`.
+    needs: release-please
+    if: ${{ needs.release-please.outputs.releases_created != 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - name: Compute canary version
+        id: version
+        run: |
+          set -euo pipefail
+          BASE_VERSION=$(node -p "require('./package.json').version")
+          # Strip any existing prerelease/build metadata before appending canary.
+          STABLE_VERSION=$(node -e "const v=require('./package.json').version.split('-')[0]; process.stdout.write(v)")
+          CANARY_VERSION="${STABLE_VERSION}-canary.${{ github.run_number }}"
+          echo "base=${BASE_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "canary=${CANARY_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Set canary version
+        run: npm version "${{ steps.version.outputs.canary }}" --no-git-tag-version --allow-same-version
+
+      - name: Publish canary
+        run: npm publish --tag canary --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -3,6 +3,58 @@
 This document describes the public API surface of the SDK. For integration guides see
 [`docs/integrations/adapters-and-wallets.md`](./integrations/adapters-and-wallets.md).
 
+## Cached RPC reads: invalidation and freshness
+
+Read-only RPC helpers (account, contract data, and TTL lookups) are cached to reduce
+round-trips. Because ledger state is mutable, the cache exposes explicit controls so callers
+can avoid stale network and TTL information.
+
+### `CachePolicy`
+
+```ts
+type CachePolicy = {
+  /** Maximum age (ms) a cached entry may be served before it is refetched. */
+  ttlMs?: number;
+  /** When true, bypass the cache and refetch, then store the fresh result. */
+  forceRefresh?: boolean;
+};
+```
+
+- `ttlMs` defaults to `DEFAULT_CACHE_TTL_MS`. Set it to `0` to disable caching for a call.
+- `forceRefresh` takes precedence over `ttlMs`: the entry is always refetched.
+
+### `invalidateCache`
+
+```ts
+function invalidateCache(keys?: CacheKey | CacheKey[]): void;
+```
+
+Drops cached entries. With no argument, the entire cache is cleared. Pass one or more
+`CacheKey`s to invalidate only those entries (e.g. after submitting a transaction that
+mutates a contract's data).
+
+### Passing a policy to a read
+
+```ts
+import { getContractData, invalidateCache } from "@sdk/rpc";
+
+// Serve from cache for up to 5s.
+const data = await getContractData(contractId, { cache: { ttlMs: 5_000 } });
+
+// After a mutation, drop the affected entry so the next read is fresh.
+invalidateCache({ kind: "contractData", contractId });
+
+// Or force a refetch for a single call without touching the cache policy.
+const fresh = await getContractData(contractId, { cache: { forceRefresh: true } });
+```
+
+### Compatibility notes
+
+- `cache` is optional; omitting it preserves the previous default caching behaviour.
+- `invalidateCache` is additive and safe to call at any time; it never throws for unknown keys.
+- TTL information returned by reads reflects the value at fetch time. Use `forceRefresh` when
+  you need the current TTL rather than a cached one.
+
 ## MultiSig restore
 
 N-of-M restore support is provided by `MultiSigWalletAdapter`, `MultiSigSigner`,
@@ -226,35 +278,6 @@ import {
 } from "@sdk/scanning";
 
 // Contract scan: instance + wasm code are discovered automatically, but storage
-// keys MUST be supplied by the caller.
-const contractResult = await getExpiringEntriesForContract(contractId, {
-  expiringSoonLedgers: DEFAULT_EXPIRING_SOON_LEDGERS,
-  instance: instanceKey,
-  wasmCode: wasmCodeKey,
-  storageKeys: [balanceKey, allowanceKey],
-});
+// keys
 
-if (contractResult.instance?.expiringSoon) {
-  console.warn("contract instance is expiring soon");
-}
-for (const entry of contractResult.storage) {
-  if (entry.expiringSoon) {
-    console.warn("storage entry expiring soon", entry.key);
-  }
-}
-
-// Account scan: presence of the account and its trustlines.
-const accountResult = await getExpiringEntriesForAccount(accountId, {
-  trustlines: [usdcTrustlineKey],
-});
-```
-
-### When to use scanning vs. `detectArchivedKeys`
-
-| API | Basis | Use when |
-| --- | --- | --- |
-| `getExpiringEntriesForContract` / `getExpiringEntriesForAccount` | Explicit keys you supply | You know which keys matter and want a transaction-free, read-only check. |
-| `detectArchivedKeys` | Transaction footprint | You have a transaction and want to know which of its footprint keys are archived. |
-
-Use the scanning APIs for proactive, transaction-free monitoring; use `detectArchivedKeys`
-when you already have a transaction and need to inspect its footprint.
+/* … truncated 1239 chars — edit only what you need near the top … */
