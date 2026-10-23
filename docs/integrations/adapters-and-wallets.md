@@ -18,6 +18,61 @@ const wallet = await createAdapter('freighter')
 const publicKey = await wallet.getPublicKey()
 ```
 
+## Scaffolder wallet selection
+
+The scaffolder (`create-soroban-resurrect-app`) can generate a project wired to
+a supported wallet integration. Pass `--wallet <name>` to select one
+non-interactively, or omit it to be prompted. Supported values are `freighter`
+and `rabet`; any other value fails fast with a non-zero exit code and a message
+listing the supported wallets.
+
+```sh
+npx create-soroban-resurrect-app my-app --wallet freighter
+```
+
+When a wallet is selected, the generated project includes:
+
+- a wallet module that instantiates the matching adapter via `createAdapter`,
+- a `.env.example` with the environment variables the integration expects,
+- a `WALLET_SETUP.md` with install and configuration steps for that wallet.
+
+### Freighter
+
+```sh
+npm install @soroban-resurrect/adapter-freighter
+```
+
+```sh
+# .env.example
+VITE_WALLET=freighter
+VITE_STELLAR_NETWORK=testnet
+```
+
+Install the [Freighter](https://www.freighter.app/) browser extension, switch it
+to the network matching `VITE_STELLAR_NETWORK`, and fund the account before
+connecting.
+
+### Rabet
+
+```sh
+npm install @soroban-resurrect/adapter-rabet
+```
+
+```sh
+# .env.example
+VITE_WALLET=rabet
+VITE_STELLAR_NETWORK=testnet
+```
+
+Install the [Rabet](https://rabet.io/) browser extension, switch it to the
+network matching `VITE_STELLAR_NETWORK`, and fund the account before connecting.
+
+### Migration notes
+
+Projects scaffolded before wallet selection was added have no `VITE_WALLET`
+entry. Add it (and the matching adapter dependency) to opt into the generated
+wallet module; existing custom adapters continue to work unchanged.
+
 ## Hardware wallets
 
 Both hardware adapters declare `hardware: true`, `feeBump: true`, and

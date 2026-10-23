@@ -33,3 +33,23 @@ jobs:
       - run: npm ci
 
       - run: npm run test:integration
+
+  scaffolder-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build scaffolder
+        run: npm run build --workspace packages/scaffolder
+
+      - name: Generate app and run smoke test
+        run: |
+          npx --workspace packages/scaffolder scaffolder generate smoke-app --yes
+          npx --workspace packages/scaffolder scaffolder smoke-test smoke-app

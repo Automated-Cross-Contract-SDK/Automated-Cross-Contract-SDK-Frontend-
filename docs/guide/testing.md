@@ -119,6 +119,43 @@ an `exports` map, installs the tarballs in a temporary clean project, smoke
 tests every declared runtime export, checks declaration imports with TypeScript,
 and verifies required peer dependencies resolve.
 
+## Smoke-testing a generated app
+
+The scaffolder ships an integration smoke-test command that validates a
+freshly generated app without requiring wallet credentials or network access.
+Run it from the generated app's directory:
+
+```bash
+npx soroban-resurrect smoke-test
+```
+
+Or programmatically via the stable interface exported from the scaffolder
+package:
+
+```typescript
+import { runSmokeTest } from '@soroban-resurrect/scaffolder'
+
+const result = await runSmokeTest({ cwd: '/path/to/generated-app' })
+if (!result.ok) {
+  console.error(result.failures)
+  process.exit(1)
+}
+```
+
+The command performs three checks in order and reports each result:
+
+1. **Dependencies** — verifies the generated app's `package.json` declares the
+   expected SDK and peer dependencies and that they resolve from
+   `node_modules`.
+2. **Build** — runs the app's build script and fails if it exits non-zero.
+3. **Public SDK imports** — imports every public entry point the generated app
+   uses (e.g. `SorobanResurrect`, `ISorobanRpcClient`) to confirm the published
+   surface is intact.
+
+No wallet credentials, secret keys, or live RPC endpoints are needed — the
+smoke test is safe to run in CI. It exits non-zero on the first failing check
+and prints a per-check summary so failures are easy to triage.
+
 See also: [API Reference](/api/sdk), [`SorobanResurrectConfig`](/api/types#sorobanresurrectconfig).
 
 ## Shared mock-RPC harness

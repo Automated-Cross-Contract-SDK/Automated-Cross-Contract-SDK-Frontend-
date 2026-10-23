@@ -28,6 +28,25 @@ const wallet2 = await createAdapter('rabet')
 
 No environment variables are required.
 
+## Scaffolder
+
+When generating a new project with the scaffolder, select Rabet as the wallet
+integration:
+
+```bash
+npx @soroban-resurrect/scaffolder my-app --wallet rabet
+```
+
+Supported wallet values are `freighter` and `rabet`. Omitting `--wallet` (or
+passing an unsupported value) fails with a clear error listing the supported
+integrations. The generated project includes a `README` section and a
+`.env.example` entry matching the chosen wallet:
+
+```bash
+# .env.example (rabet)
+VITE_WALLET_INTEGRATION=rabet
+```
+
 ## SSR / browser constraints
 
 The adapter reads `window.rabet`, so construct it only in the browser (e.g. inside
