@@ -1,8 +1,12 @@
 # SDK API Reference
 
-This page documents the public SDK surface and the compatibility guarantees that
-apply across releases. For upgrade instructions between major versions, see the
-[Migration Guide](#migration-guide) section below.
+The `@handsoff/sdk` package exposes the wallet adapter layer used by every integration.
+This page documents the `WalletAdapter` contract, the `createAdapter` factory, the
+`KnownWallet` / `SUPPORTED_WALLETS` registry, the capability flags, the hardware
+wallet setup for Ledger and Trezor, the N-of-M multisig restore flow, the
+transaction-free contract and account scanning APIs, the `estimateRestoreCost`
+helper for pricing a restore before the user signs, and the optional cache
+memory-bound policies.
 
 ## Stability and versioning
 
@@ -67,19 +71,151 @@ When a major version is released:
 Deprecated APIs remain available for at least one minor release. Each entry
 below lists the deprecated API and the replacement to migrate to:
 
-| Deprecated | Replacement | Removal |
-| --- | --- | --- |
-| Callback-style async methods | `Promise`-returning methods | Next major |
-| Untyped error strings | Typed error `code` values | Next major |
-| Positional constructor arguments | Options object | Next major |
+## Cache memory-bound policies
+
+The SDK keeps a few optional in-memory caches (for example resolved account
+metadata and simulation results). By default these caches are unbounded, which is
+fine for short-lived scripts but can grow without limit during long-running
+sessions. Pass a `cachePolicy` to `createAdapter` to bound them.
+
+```ts
+export interface CachePolicy {
+  /** Maximum number of entries retained per cache. `0` disables the cache. */
+  maxEntries?: number
+  /** Maximum total approximate byte size retained per cache. */
+  maxBytes?: number
+  /** Time-to-live in milliseconds; entries older than this are evicted. */
+  ttlMs?: number
+  /** Eviction strategy when a bound is exceeded. Defaults to `'lru'`. */
+  eviction?: 'lru' | 'fifo'
+}
+```
+
+All fields are optional. When omitted, the cache keeps its previous unbounded
+behaviour, so existing integrations are unaffected. Bounds are enforced on every
+write: the least-recently-used (or oldest, for `fifo`) entries are evicted until
+both `maxEntries` and `maxBytes` are satisfied, and entries older than `ttlMs`
+are dropped on read.
+
+```ts
+import { createAdapter, KnownWallet } from '@handsoff/sdk'
+
+const adapter = createAdapter({
+  wallet: KnownWallet.Phantom,
+  cachePolicy: {
+    maxEntries: 500,
+    maxBytes: 2 * 1024 * 1024,
+    ttlMs: 5 * 60 * 1000,
+    eviction: 'lru',
+  },
+})
+```
+
+Set `maxEntries: 0` to disable a cache entirely. Invalid policies (negative
+bounds, non-finite numbers) throw `InvalidCachePolicyError` at construction time
+rather than silently degrading.
+
+### Migration notes
+
+- `cachePolicy` is additive and optional; no changes are required for existing
+  callers.
+- The default remains unbounded to preserve prior behaviour. Long-running
+  services should set at least `maxEntries` or `ttlMs`.
+
+## Hardware wallets
 
 ## Compatibility notes
 
-- **Runtime:** the SDK targets the Node.js LTS releases and modern evergreen
-  browsers. Check the release notes for the minimum supported runtime of each
-  major version.
-- **Peer dependencies:** major versions may bump peer dependency ranges; align
-  them when upgrading.
-- **Serialized data:** persisted data written by an older major version is
-  readable by the next major version unless the release notes state otherwise.
-  Downgrading across a major version is not supported.
+### Ledger
+
+```bash
+npm install @ledgerhq/hw-transport-webhid @ledgerhq/hw-app-solana
+```
+
+```ts
+import TransportWebHID from '@ledgerhq/hw-transport-webhid'
+import { createAdapter, KnownWallet } from '@handsoff/sdk'
+
+const transport = await TransportWebHID.create()
+
+const adapter = createAdapter({
+  wallet: KnownWallet.Ledger,
+  config: {
+    transport,
+    manifest: {
+      name: 'My App',
+      url: 'https://example.com',
+      icon: 'https://example.com/icon.png',
+    },
+  } satisfies LedgerAdapterConfig,
+})
+```
+
+### Trezor
+
+```bash
+npm install @trezor/connect-web
+```
+
+Submits a transaction with automatic archive restoration. If the simulation detects archived entries, a restore transaction is built, signed, submitted, and confirmed before the original transaction is rebuilt and submitted. State transitions are published to all registered listeners throughout. See [`SubmitWithRestoreOptions`](/api/types#submitwithrestoreoptions) for the full set of lifecycle callbacks.
+
+Call `sr.cancel()` to abort every active `submitWithRestore` workflow, or pass
+an `AbortSignal` as `signal` in `SubmitWithRestoreOptions` to cancel one call.
+Cancellation prevents subsequent workflow steps and stops confirmation polling;
+it cannot dismiss an in-flight wallet prompt or retract a transaction already
+submitted to the network. The method returns `true` only when it newly cancels
+at least one active workflow.
+
+Call `previewRestore` for a walletless preview, or pass `dryRun: true` to
+`submitWithRestore` when using the same options shape as a normal submission:
+
+```typescript
+const preview = await sr.previewRestore(transaction)
+console.log(preview.intendedOperations)
+console.log(preview.archivedKeys)
+console.log(preview.estimatedRestoreFee)
+
+const result = await sr.submitWithRestore({ transaction, wallet, dryRun: true })
+```
+
+Both paths simulate only and return the ordered operation type names, detected
+archived ledger entries, and estimated restore fee when needed. Neither path
+signs or submits; `previewRestore` does not require a wallet. The `dryRun`
+option also does not record history or invoke lifecycle callbacks. Simulation
+failures are returned in `simulationError` (and typed `failure` guidance), not
+silently treated as a successful preview.
+
+### Rebuilding with transaction time bounds
+
+After a successful restore, the SDK rebuilds the original operations using a fresh
+sequence number. The rebuilt transaction preserves the original absolute
+`minTime` and `maxTime` bounds; it does not turn a nearly expired bound into a new
+relative timeout. If the original `maxTime` has elapsed before rebuilding, the
+SDK refuses to extend the user's intent.
+
+When the application has explicit authorization to replace the original expiry,
+provide `approveExpiredRebuild`. It receives the original bounds and must return
+new future Unix-second bounds to approve the rebuild. Omitting the callback or
+returning `undefined` stops after the restore transaction and returns
+`ORIGINAL_TRANSACTION_EXPIRED` with an `expiredTransaction` payload:
+
+```ts
+const result = await sr.submitWithRestore({
+  transaction,
+  wallet,
+  approveExpiredRebuild: async ({ originalTimeBounds }) => {
+    const approved = await confirmReplaceExpiry(originalTimeBounds)
+    if (!approved) return undefined
+    const now = Math.floor(Date.now() / 1000)
+    return { minTime: now, maxTime: now + 60 }
+  },
+})
+```
+
+The SDK validates approved bounds and returns `INVALID_REBUILD_TIME_BOUNDS` if
+they are not valid. `rebuildTimeBounds` remains available to set bounds before
+they expire; it does not bypass the explicit approval callback for an already
+expired original. Existing transactions without time bounds retain the prior
+30-second reb
+
+/* … truncated 6863 chars — edit only what you need near the top … */

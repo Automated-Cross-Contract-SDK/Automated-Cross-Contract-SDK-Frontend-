@@ -13,6 +13,154 @@ npm run dev:example
 
 This starts a local dev server demonstrating connecting a wallet, building a transaction, and calling `submitWithRestore`.
 
+## Production-Style React Application
+
+[`examples/react-app`](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/tree/main/examples/react-app) is a realistic React + TypeScript application that goes beyond the minimal example. It demonstrates the patterns you need to ship the SDK in production:
+
+- **Routing** — `react-router-dom` with a wallet-gated route tree (`/`, `/wallet`, `/submit`, `/history`).
+- **Wallet lifecycle** — connect, disconnect, account/network change handling, and reconnection on reload via a `WalletProvider`.
+- **User feedback** — a state-machine-driven progress indicator plus toast notifications for success and failure.
+- **Fee consent** — an explicit confirmation dialog before any restore fee is signed, with the estimated fee surfaced to the user.
+- **Cancellation** — an `AbortController`-based cancel path that stops in-flight restore/submit work and returns the UI to a clean state.
+- **Typed error handling** — a discriminated `Result` type and exhaustive error rendering for every SDK failure mode.
+
+```bash
+git clone https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-.git
+cd Automated-Cross-Contract-SDK-Frontend-/examples/react-app
+npm install
+npm run dev
+```
+
+### Stable interface
+
+The example exposes a small, documented surface so you can copy it into your own app:
+
+```typescript
+// src/sdk/useResurrect.ts
+export interface UseResurrectOptions {
+  rpcUrl: string
+  wallet: WalletAdapter | null
+}
+
+export interface UseResurrectResult {
+  state: ResurrectState
+  submit: (tx: Transaction) => Promise<SubmitResult>
+  cancel: () => void
+  reset: () => void
+}
+
+export function useResurrect(options: UseResurrectOptions): UseResurrectResult
+```
+
+`submit` resolves to a typed `SubmitResult` (`{ success: true; originalTxHash: string } | { success: false; error: ResurrectError }`), and `cancel` aborts any in-flight work. The hook is covered by automated tests for the happy path, fee-consent rejection, cancellation, and each typed error branch.
+
+### Compatibility notes
+
+- Requires React 18+ and `react-router-dom` 6+.
+- Targets the same SDK version as the rest of the docs; if you upgrade the SDK, update the dependency in `examples/react-app/package.json` to match.
+- The wallet adapter is pluggable — the example ships with a Freighter adapter, but any adapter implementing `WalletAdapter` works.
+
+## Vue Application
+
+[`examples/vue-app`](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/tree/main/examples/vue-app) is a Vue 3 + TypeScript application that wires the Vue composable to a wallet connection flow. It demonstrates the full restore lifecycle with explicit UI states:
+
+- **Loading** — a spinner and status label while the wallet connects and while restore/submit work is in flight.
+- **Rejection** — a clear message when the user rejects the wallet signature request, with a retry action.
+- **Restore success** — the restored transaction hash is surfaced once the original transaction is submitted.
+- **Failure** — typed SDK errors are rendered exhaustively, with a reset action to return to a clean state.
+
+```bash
+git clone https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-.git
+cd Automated-Cross-Contract-SDK-Frontend-/examples/vue-app
+npm install
+npm run dev
+```
+
+### Stable interface
+
+The example exposes a small, documented composable so you can copy it into your own app:
+
+```typescript
+// src/composables/useResurrect.ts
+export interface UseResurrectOptions {
+  rpcUrl: string
+  wallet: Ref<WalletAdapter | null>
+}
+
+export interface UseResurrectResult {
+  state: Ref<ResurrectState>
+  loading: Ref<boolean>
+  error: Ref<ResurrectError | null>
+  submit: (tx: Transaction) => Promise<SubmitResult>
+  cancel: () => void
+  reset: () => void
+}
+
+export function useResurrect(options: UseResurrectOptions): UseResurrectResult
+```
+
+`submit` resolves to a typed `SubmitResult` (`{ success: true; originalTxHash: string } | { success: false; error: ResurrectError }`), and `cancel` aborts any in-flight work. The composable is covered by automated tests for the happy path, wallet rejection, restore success, and each typed error branch.
+
+### Compatibility notes
+
+- Requires Vue 3.3+ and `vue-tsc` for type checking.
+- Targets the same SDK version as the rest of the docs; if you upgrade the SDK, update the dependency in `examples/vue-app/package.json` to match.
+- The wallet adapter is pluggable — the example ships with a Freighter adapter, but any adapter implementing `WalletAdapter` works.
+
+## Minimal Plain JavaScript Example
+
+If you are not using a framework, [`examples/plain-js`](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/tree/main/examples/plain-js) is a dependency-light browser example: a single `index.html` plus `main.js` that loads the SDK from a CDN, connects a wallet, builds a transaction, and demonstrates both the restore and no-restore paths.
+
+```html
+<!-- index.html -->
+<button id="connect">Connect wallet</button>
+<button id="submit">Submit transaction</button>
+<pre id="log"></pre>
+<script type="module" src="./main.js"></script>
+```
+
+```javascript
+// main.js — no framework, no build step
+import { SorobanResurrect } from 'https://esm.sh/@soroban-resurrect/sdk'
+
+const log = (msg) => (document.getElementById('log').textContent += msg + '\n')
+
+const sr = new SorobanResurrect({ rpcUrl: 'https://soroban-testnet.stellar.org' })
+
+sr.onStateChange((info) => log(`[${info.state}] ${info.message}`))
+
+let wallet = null
+
+document.getElementById('connect').addEventListener('click', async () => {
+  wallet = await connectWallet() // your wallet adapter, e.g. Freighter
+  log(`Connected: ${wallet.publicKey}`)
+})
+
+document.getElementById('submit').addEventListener('click', async () => {
+  if (!wallet) return log('Connect a wallet first')
+
+  const tx = await buildTransaction(wallet.publicKey) // your contract call
+
+  // No-restore path: submit directly when nothing is archived.
+  if (!(await sr.needsRestore(tx))) {
+    const result = await sr.submitWithRestore({ transaction: tx, wallet })
+    return log(result.success ? `Submitted ${result.originalTxHash}` : `Failed: ${result.error}`)
+  }
+
+  // Restore path: archived entries are restored, then the original is submitted.
+  const result = await sr.submitWithRestore({
+    transaction: tx,
+    wallet,
+    onRestoreNeeded: (keys) => log(`Restoring ${keys.length} archived entries…`),
+    onRestoreFailed: (error) => log(`Restore failed: ${error.message}`),
+  })
+
+  log(result.success ? `Submitted ${result.originalTxHash}` : `Failed: ${result.error}`)
+})
+```
+
+Serve the folder with any static file server (for example `npx serve examples/plain-js`) and open it in a browser. The example targets the same SDK version as the rest of the docs; if you upgrade the SDK, update the CDN URL in `main.js` to match.
+
 ## Interactive Playground
 
 Want to try the flow without installing anything? The
