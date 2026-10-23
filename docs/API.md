@@ -3,118 +3,57 @@
 This document describes the public API surface of the SDK. For integration guides see
 [`docs/integrations/adapters-and-wallets.md`](./integrations/adapters-and-wallets.md).
 
-## Ledger lookup concurrency
+## Cached RPC reads: invalidation and freshness
 
-Ledger lookups that fan out into many parallel RPC requests are bounded by a configurable
-concurrency limit. This keeps large inputs from overwhelming the RPC endpoint while
-preserving the order of results.
+Read-only RPC helpers (account, contract data, and TTL lookups) are cached to reduce
+round-trips. Because ledger state is mutable, the cache exposes explicit controls so callers
+can avoid stale network and TTL information.
 
-### `LedgerLookupOptions`
+### `CachePolicy`
 
 ```ts
-type LedgerLookupOptions = {
-  /**
-   * Maximum number of parallel RPC requests issued for a ledger lookup.
-   * Defaults to `DEFAULT_LEDGER_LOOKUP_CONCURRENCY` when omitted.
-   * Must be a positive integer; values below 1 are rejected.
-   */
-  concurrency?: number;
+type CachePolicy = {
+  /** Maximum age (ms) a cached entry may be served before it is refetched. */
+  ttlMs?: number;
+  /** When true, bypass the cache and refetch, then store the fresh result. */
+  forceRefresh?: boolean;
 };
 ```
 
-### `DEFAULT_LEDGER_LOOKUP_CONCURRENCY`
+- `ttlMs` defaults to `DEFAULT_CACHE_TTL_MS`. Set it to `0` to disable caching for a call.
+- `forceRefresh` takes precedence over `ttlMs`: the entry is always refetched.
 
-The default concurrency limit applied when `concurrency` is not provided. It is a stable,
-exported constant so callers can reference the same value the SDK uses.
-
-### Behaviour
-
-- At most `concurrency` RPC requests are in flight at any time; the rest are queued.
-- Results are returned in the **same order** as the input keys, regardless of the order in
-  which individual requests complete.
-- No results are dropped: every input key produces exactly one result (or a recorded
-  failure), even for inputs far larger than the concurrency limit.
-- If a request fails, the failure is surfaced for that key without discarding the results
-  already collected for other keys.
-
-### Worked example
+### `invalidateCache`
 
 ```ts
-import {
-  getLedgerEntries,
-  DEFAULT_LEDGER_LOOKUP_CONCURRENCY,
-} from "@sdk/ledger";
-
-// Bound parallel RPC requests for a large set of keys.
-const entries = await getLedgerEntries(keys, {
-  concurrency: 8,
-});
-
-// Or rely on the documented default.
-const defaulted = await getLedgerEntries(keys, {
-  concurrency: DEFAULT_LEDGER_LOOKUP_CONCURRENCY,
-});
+function invalidateCache(keys?: CacheKey | CacheKey[]): void;
 ```
 
-### Compatibility and migration
+Drops cached entries. With no argument, the entire cache is cleared. Pass one or more
+`CacheKey`s to invalidate only those entries (e.g. after submitting a transaction that
+mutates a contract's data).
 
-`concurrency` is optional and additive. Existing callers that omit it keep working and
-receive the default limit; no migration is required. Callers that previously issued
-unbounded parallel requests can set `concurrency` to match their RPC endpoint's capacity.
-
-## Ledger read coalescing
-
-Concurrent identical ledger reads issued within the same request scope are coalesced into a
-single underlying read. This avoids redundant RPC round-trips when several parts of a request
-ask for the same ledger key at the same time.
-
-### `coalesceLedgerReads`
+### Passing a policy to a read
 
 ```ts
-function coalesceLedgerReads<T>(
-  scope: LedgerReadScope,
-  key: string,
-  read: () => Promise<T>,
-): Promise<T>;
+import { getContractData, invalidateCache } from "@sdk/rpc";
+
+// Serve from cache for up to 5s.
+const data = await getContractData(contractId, { cache: { ttlMs: 5_000 } });
+
+// After a mutation, drop the affected entry so the next read is fresh.
+invalidateCache({ kind: "contractData", contractId });
+
+// Or force a refetch for a single call without touching the cache policy.
+const fresh = await getContractData(contractId, { cache: { forceRefresh: true } });
 ```
 
-`coalesceLedgerReads` deduplicates in-flight reads by a stable `key` within a
-`LedgerReadScope`. The first call for a key starts the underlying `read`; concurrent calls for
-the same key in the same scope share its result instead of issuing another read.
+### Compatibility notes
 
-### `LedgerReadScope`
-
-A `LedgerReadScope` bounds the lifetime of coalesced reads. Create one per request (or per
-logical unit of work) so that sharing never leaks across unrelated requests:
-
-```ts
-import { createLedgerReadScope, coalesceLedgerReads } from "@sdk/ledger";
-
-const scope = createLedgerReadScope();
-
-// Both calls share a single underlying read.
-const [a, b] = await Promise.all([
-  coalesceLedgerReads(scope, ledgerKey, () => rpc.getLedgerEntries([ledgerKey])),
-  coalesceLedgerReads(scope, ledgerKey, () => rpc.getLedgerEntries([ledgerKey])),
-]);
-```
-
-### Behaviour
-
-- Identical in-flight reads (same `key`, same `scope`) share one underlying read.
-- Once a read settles, its entry is evicted from the scope, so later calls perform a fresh
-  read rather than returning a stale cached value.
-- **Failures do not poison later calls:** if the underlying read rejects, the in-flight entry
-  is evicted and the rejection is propagated to every caller sharing it. A subsequent call for
-  the same key starts a new read and can succeed.
-- Coalescing is scoped: reads in different scopes are never shared.
-
-### Compatibility and migration
-
-Coalescing is opt-in and additive. Existing direct ledger reads are unaffected; callers opt in
-by wrapping reads with `coalesceLedgerReads` inside a per-request `LedgerReadScope`. Because
-entries are evicted on settle, coalescing never changes read freshness semantics — it only
-collapses concurrent duplicates.
+- `cache` is optional; omitting it preserves the previous default caching behaviour.
+- `invalidateCache` is additive and safe to call at any time; it never throws for unknown keys.
+- TTL information returned by reads reflects the value at fetch time. Use `forceRefresh` when
+  you need the current TTL rather than a cached one.
 
 ## MultiSig restore
 
@@ -270,6 +209,75 @@ submitting a transaction**. They are read-only and safe to call from any client.
 
 ### `getExpiringEntriesForContract`
 
-Scans a contract's entries and returns the ones who
+Scans a contract's entries and returns the ones whose TTL is at or below the configured
+threshold.
 
-/* … truncated 2012 chars — edit only what you need near the top … */
+```ts
+type ContractScanOptions = {
+  /** Ledger offset below which an entry is considered "expiring soon". */
+  expiringSoonLedgers?: number;
+  /** Instance entry to scan, if any. */
+  instance?: LedgerKey;
+  /** Wasm code entry to scan, if any. */
+  wasmCode?: LedgerKey;
+  /** Storage keys to scan. */
+  storageKeys?: LedgerKey[];
+};
+
+type ContractScanResult = {
+  instance?: ClassicEntryStatus;
+  wasmCode?: ClassicEntryStatus;
+  storage: ClassicEntryStatus[];
+};
+
+type ClassicEntryStatus = {
+  key: LedgerKey;
+  liveUntilLedger: number;
+  expiringSoon: boolean;
+};
+
+function getExpiringEntriesForContract(
+  contractId: string,
+  options?: ContractScanOptions,
+): Promise<ContractScanResult>;
+```
+
+> **Important limitation:** a contract's storage keys **cannot be enumerated** from the
+> ledger. You must supply the storage keys you care about via `options.storageKeys`.
+> Only the instance and wasm code entries can be discovered automatically. If you omit
+> `storageKeys`, the result's `storage` array will be empty.
+
+`DEFAULT_EXPIRING_SOON_LEDGERS` is the default threshold used when `expiringSoonLedgers`
+is not provided.
+
+### `getExpiringEntriesForAccount`
+
+Scans an account's presence and trustline entries. This is a **presence scan**, not a TTL
+scan: it reports whether the account and its trustlines exist, separately from any TTL
+information.
+
+```ts
+type AccountScanOptions = {
+  /** Trustline asset keys to check for presence. */
+  trustlines?: LedgerKey[];
+};
+
+function getExpiringEntriesForAccount(
+  accountId: string,
+  options?: AccountScanOptions,
+): Promise<ContractScanResult>;
+```
+
+### Worked example: instance, wasm code, and storage keys
+
+```ts
+import {
+  getExpiringEntriesForContract,
+  getExpiringEntriesForAccount,
+  DEFAULT_EXPIRING_SOON_LEDGERS,
+} from "@sdk/scanning";
+
+// Contract scan: instance + wasm code are discovered automatically, but storage
+// keys
+
+/* … truncated 1239 chars — edit only what you need near the top … */

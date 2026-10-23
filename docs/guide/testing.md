@@ -127,47 +127,26 @@ separately: rejecting the restore signature must send neither transaction,
 while rejecting the rebuilt original signature may send the confirmed restore
 transaction but must never send the unsigned original transaction.
 
-## Request coalescing for ledger reads
+## Simulation serialization cache
 
-Identical in-flight ledger reads are coalesced within a safe request scope so
-concurrent callers share a single underlying `getLedgerEntries` call. This is
-exposed through a documented, stable helper in the SDK package:
+Simulation reuses a cached serialized transaction envelope when the inputs
+have not changed, avoiding repeated XDR serialization on the hot path. The
+cache is keyed on the transaction's serialized identity (envelope XDR plus
+network passphrase); any change to the transaction — new operations, updated
+sequence number, different fee, or a different network passphrase — produces a
+different key and therefore a fresh serialization. Tests should assert both
+directions:
 
-```typescript
-import { coalesceLedgerReads } from '@soroban-resurrect/sdk'
+- **Reuse:** simulating the same unchanged transaction twice serializes the
+  envelope once (the second simulate hits the cache).
+- **Invalidation:** mutating the transaction (e.g. bumping the sequence number
+  or adding an operation) or changing the network passphrase causes the next
+  simulate to re-serialize rather than reuse a stale representation.
 
-// Within one scope, identical keys share a single read.
-const scope = coalesceLedgerReads(mockClient)
-const [a, b] = await Promise.all([
-  scope.getLedgerEntries(keyA, keyB),
-  scope.getLedgerEntries(keyA, keyB),
-])
-// mockClient.getLedgerEntries was called exactly once
-```
-
-Coalescing is keyed on the canonical base64 of the requested ledger keys, so
-callers that pass the same keys in a different order still share the read.
-Scopes are explicit: create a new scope per logical request (e.g. per
-`submitWithRestore` call) rather than sharing one across unrelated requests.
-
-Failures do not poison later calls. If the underlying read rejects, the
-in-flight entry is evicted, so a subsequent call in the same scope retries the
-underlying read instead of replaying the earlier rejection:
-
-```typescript
-vi.mocked(mockClient.getLedgerEntries)
-  .mockRejectedValueOnce(new Error('network'))
-  .mockResolvedValueOnce(okResponse)
-
-const scope = coalesceLedgerReads(mockClient)
-await expect(scope.getLedgerEntries(keyA)).rejects.toThrow('network')
-await expect(scope.getLedgerEntries(keyA)).resolves.toEqual(okResponse)
-expect(mockClient.getLedgerEntries).toHaveBeenCalledTimes(2)
-```
-
-Tests should cover the shared-read path (one underlying call for concurrent
-identical reads), the key-order-insensitive dedupe, and the failure-eviction
-boundary above.
+Because the cache is keyed on the serialized envelope itself, a reused entry is
+byte-for-byte identical to a freshly serialized one — there is no behavioral
+difference, only fewer serialization calls. This is a transparent optimization
+with no API or wire-format change, so no migration is required.
 
 ## Free functions
 
@@ -218,11 +197,10 @@ Add it as a dev dependency of the workspace you are testing:
 { "devDependencies": { "@soroban-resurrect/testing": "0.0.0" } }
 ```
 
-## Archived-key detection benchmarks
+## Coverage gates
 
-`detectArchivedEntries` is the hot path for deciding whether a transaction
-needs a restore, so its cost must stay predictable as the number of ledger
-keys grows. The SDK ships a repeatable benchmark suite that measures both
-wall-clock time and heap allocati
+The SDK's test command enforces explicit branch and line-coverage floors for three critical restore
+modules. The current floors reflect the measured baseline and prevent regressions while coverage
+grows:
 
-/* … truncated 2238 chars — edit only what you need near the top … */
+| Behavior                         | Module                            |

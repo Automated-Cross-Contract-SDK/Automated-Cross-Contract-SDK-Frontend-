@@ -141,6 +141,49 @@ publish workflow for the remaining packages at the same version. Never bump
 versions to work around a partial publish — that leaves consumers with
 mismatched or unattributable artifacts.
 
+## Verifying provenance after release
+
+Publishing with `--provenance` is only half the story: the release workflow also
+runs an automated verification pass after every publish, so a package that
+landed without a valid registry signature or provenance attestation fails the
+release instead of shipping silently.
+
+### What gets checked
+
+For every package published at the release version, the verifier confirms:
+
+- the registry reports a signature for the published tarball, and
+- the tarball carries a provenance attestation whose source repository and
+  workflow match this repository.
+
+If any package is missing either, the verification step exits non-zero and the
+release workflow fails.
+
+### Running it locally
+
+You can run the same check against a published version before or after a
+release:
+
+```bash
+npm run verify:provenance -- --version 1.2.3
+```
+
+Pass `--package <name>` to check a single package, or omit it to verify every
+workspace package at that version. The command exits `0` when all packages
+verify and non-zero on the first mismatch, printing which package failed and
+why.
+
+### When verification fails
+
+A mismatch means the published artifact cannot be attributed to this
+repository's workflow. Do not bump the version to paper over it. Instead:
+
+1. Inspect the failing package with `npm view <pkg>@<version> dist` to see
+   whether a signature and attestation are present.
+2. If the artifact is genuinely unattributable, deprecate that version and
+   re-publish the same version through the workflow once the cause is fixed.
+3. Re-run the verification step to confirm the release is clean.
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |
@@ -152,6 +195,7 @@ mismatched or unattributable artifacts.
 | Vite does not reload the linked package | Linked packages sit outside the project root. Add `optimizeDeps: { exclude: ['@soroban-resurrect/sdk'] }` to the consumer's Vite config. |
 | A file is missing only under yalc | It is not covered by `files` in the package's `package.json`. It would be missing from the npm release too, so fix it there. |
 | A missing sibling resolves from the registry | The internal dependency is not pinned to an exact workspace version. Pin it and re-run the pre-publish check. |
+| Provenance verification fails after release | The published tarball lacks a registry signature or attestation. See "When verification fails" above; do not bump the version. |
 
 ## Do not commit link artifacts
 
