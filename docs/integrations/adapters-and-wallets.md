@@ -116,3 +116,44 @@ const wallet: WalletAdapter = {
 Set `hardware: true` for physical signing devices so the SDK can issue the
 hardware-signing warning. Only set `feeBump` or `signAuthEntry` when the
 adapter actually supports those envelope/signing modes.
+
+## Vue application example
+
+The `examples/vue` sample application wires the Vue composable to a wallet and
+demonstrates the connection lifecycle. It is a reference for the stable
+`useWallet` interface exposed by `@soroban-resurrect/vue`.
+
+```ts
+import { useWallet } from '@soroban-resurrect/vue'
+
+const {
+  status, // 'idle' | 'connecting' | 'connected' | 'rejected' | 'error'
+  publicKey,
+  error,
+  connect,
+  disconnect,
+} = useWallet({ adapter: 'freighter' })
+```
+
+The composable exposes a documented, stable interface:
+
+- `status` — reactive connection state (`idle`, `connecting`, `connected`,
+  `rejected`, `error`).
+- `publicKey` — the connected account, or `null` when not connected.
+- `error` — the last failure, or `null`.
+- `connect()` — starts the connection flow; resolves once the wallet responds.
+- `disconnect()` — clears the connection and resets `status` to `idle`.
+
+The example renders each state explicitly:
+
+- **Loading** — shown while `status === 'connecting'`.
+- **Rejection** — shown when the user declines in the wallet
+  (`status === 'rejected'`), with a retry action.
+- **Restore success** — shown when a previously connected session is restored
+  on mount (`status === 'connected'` with a restored `publicKey`).
+- **Failure** — shown when the adapter throws (`status === 'error'`), including
+  the `error` message and a retry action.
+
+Run the example with `npm install && npm run dev` inside `examples/vue`. The
+composable requires the same `@soroban-resurrect/adapter-*` package as the
+underlying adapter; see [Browser wallets](#browser-wallets).

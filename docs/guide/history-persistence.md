@@ -127,16 +127,79 @@ const serializer = {
 new SorobanResurrect({ rpcUrl, persistHistory: { storage, serializer } })
 ```
 
-## Disabling persistence
+## ADR: Rebuilding the original transaction after restoration
 
-Omit `persistHistory` entirely to keep history in memory only. Nothing is
-written to any storage adapter, so history is discarded when the SDK is
-disposed or the page reloads:
+### Status
 
-```ts
-const sdk = new SorobanResurrect({ rpcUrl })
-```
+Accepted.
 
-If you previously enabled persistence and want to stop writing while keeping
-the SDK configured, call `clearHistory()` once to purge existing entries and
-then construct the SDK without `persistHistory`.
+### Context
+
+When a restored (resurrected) ledger entry is submitted, the network needs a
+transaction that references the restored entry. The SDK keeps the original
+transaction envelope in history so it can be re-submitted, but a restored entry
+is only valid for a bounded window and the original envelope may have been
+built against a stale ledger state. Re-submitting the stored envelope verbatim
+is therefore unsafe: its sequence number may already be consumed, its
+simulation footprint may no longer match the restored entry, and its fee may be
+stale.
+
+### Decision
+
+After restoration, the SDK **rebuilds** the original transaction rather than
+reusing the restored envelope. The rebuilt transaction is derived from the
+original operation(s) plus fresh network data, and the caller is responsible
+for supplying the pieces the SDK cannot infer.
+
+### Rationale
+
+- **Sequence numbers.** A stored envelope carries the account sequence number
+  that was current when it was first built. Once that transaction (or any
+  later one) is submitted, the stored sequence is consumed and re-submitting it
+  fails with `txBAD_SEQ`. Rebuilding fetches the current account sequence and
+  applies it, so the rebuilt transaction is valid against the live ledger.
+- **Simulation data.** Soroban transactions embed a footprint and resource
+  limits produced by simulation. After a restore, the entry's TTL and the
+  ledger state differ from the original simulation, so the footprint and
+  resource limits must be re-simulated. Rebuilding re-runs simulation against
+  the restored state instead of trusting stale results.
+- **Fees.** Resource fees depend on the re-simulated resource usage; rebuilding
+  recomputes them so the transaction is not rejected for insufficient fees.
+- **Safety.** Rebuilding keeps the original intent (the operations) while
+  discarding stale, network-dependent fields, which is the only way to produce
+  a transaction the network will accept after restoration.
+
+### Mechanism
+
+1. The original operation(s) are read from the stored history entry
+   (`transactionXdr` in `'full'` mode).
+2. The current account sequence number is fetched from the network and applied
+   to the rebuilt transaction.
+3. The transaction is re-simulated against the restored ledger state to obtain
+   a fresh footprint and resource limits.
+4. Fees are recomputed from the re-simulated resource usage.
+5. The rebuilt envelope is signed and submitted.
+
+### Caller responsibilities
+
+- **Provide the source account and signer.** The SDK rebuilds the transaction
+  but cannot sign on the caller's behalf; the caller must supply a signer for
+  the source account.
+- **Persist in `'full'` mode to rebuild.** Rebuilding requires the original
+  operation(s), which are only stored in `'full'` mode. `'minimal'` records
+  keep only metadata and cannot be rebuilt; use `parseMinimalHistory()` to read
+  them for display.
+- **Handle sequence contention.** If the account submits other transactions
+  concurrently, the caller must serialize submissions or retry on
+  `txBAD_SEQ`, since the rebuilt sequence can be consumed between build and
+  submit.
+- **Re-simulate after state changes.** If ledger state changes between rebuild
+  and submit, the caller should rebuild again rather than reuse the previous
+  envelope.
+
+### Consequences
+
+Rebuilding adds a network round-trip (sequence fetch + simulation) per
+submission, but produces transactions that are valid against the live ledger.
+Callers that need to re-submit must use `'full'` persistence and provide a
+signer; `'minimal'` history remains display-only.

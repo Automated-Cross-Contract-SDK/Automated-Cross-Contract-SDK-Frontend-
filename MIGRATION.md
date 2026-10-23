@@ -11,6 +11,17 @@ Both packages follow [Semantic Versioning](https://semver.org/):
 
 If you're building on top of a `0.x` release, pin an exact version or a tilde range (`~0.1.0`) rather than a caret range (`^0.1.0`) to avoid picking up an unannounced breaking change while the API is still settling.
 
+### What counts as a breaking change
+
+A change is breaking — and therefore only allowed in a major bump once 1.0 ships — if it does any of the following to the documented public API:
+
+- Renames, removes, or changes the type of an exported field, option, or method parameter.
+- Removes or renames an exported symbol (class, function, type, hook, provider).
+- Changes the runtime behavior of a public method in a way that alters its observable result for existing valid inputs.
+- Raises the minimum supported version of a peer dependency (e.g. `@stellar/stellar-sdk`) in a way that requires consumer code changes.
+
+Additive changes — new optional config fields, new optional callbacks, new exports — are **not** breaking and ship in minor releases.
+
 ---
 
 ## Upgrading to v1.0 (from 0.x)
@@ -36,6 +47,28 @@ If you're building on top of a `0.x` release, pin an exact version or a tilde ra
 ### No action needed if...
 
 You only use the documented public API surface (see the [API Reference](./README.md#api-reference) in the README) and don't reach into internal modules directly — in that case, upgrading to 1.0 should be a drop-in version bump.
+
+---
+
+## Deprecations
+
+Deprecated APIs keep working for the remainder of the current major version but emit a `console.warn` (once per process) and are removed in the next major. Each deprecation below lists its replacement.
+
+| Deprecated | Since | Replacement | Removal |
+| --- | --- | --- | --- |
+| `SorobanResurrectConfig.rpcUrl` | 0.1.0 | `SorobanResurrectConfig.rpc.serverUrl` | 1.0 |
+| `SorobanResurrectConfig.networkPassphrase` | 0.1.0 | `SorobanResurrectConfig.network.passphrase` | 1.0 |
+| `SorobanResurrect.submit()` | 0.1.0 | `SorobanResurrect.submitWithRestore()` | 1.0 |
+| `useSorobanResurrect().status` | 0.1.0 | `useSorobanResurrect().state` | 1.0 |
+
+### Migrating off a deprecated API
+
+1. Find the deprecated symbol in the table above.
+2. Replace each usage with the listed replacement. The replacement accepts the same values, so this is usually a mechanical rename.
+3. Run your type-check. Deprecated symbols are marked `@deprecated` in their type definitions, so your editor will flag any remaining usages.
+4. Once your build is clean, remove any `// eslint-disable` or `@ts-ignore` comments you added to silence the deprecation warnings.
+
+If a deprecated API you depend on has no listed replacement, please open an issue in this repository before the removal version ships.
 
 ---
 

@@ -43,6 +43,29 @@ Or keep a rebuild running while you work:
 npm run build -w packages/sdk -- --watch
 ```
 
+## Inspecting release readiness
+
+Before you link, publish to yalc, or open a release PR, run the release-readiness
+check. It inspects the workspace without publishing anything:
+
+```bash
+npm run release:check
+```
+
+It reports, for every workspace package:
+
+- **Version alignment** — sibling dependencies pinned to exact workspace
+  versions, and no package resolving a sibling from the registry.
+- **Build results** — whether `dist/` exists and is newer than `src/`.
+- **Package contents** — the files that would land in the tarball, so a missing
+  `files` entry shows up here instead of after publish.
+- **Release metadata** — required `package.json` fields (`name`, `version`,
+  `license`, `repository`, `exports`) and the presence of a `README`.
+
+The command exits non-zero when any check fails, so it is safe to wire into CI.
+Pass `--json` for machine-readable output and `--package <name>` to inspect a
+single package. It never runs `npm publish` and never mutates the workspace.
+
 ## Using yalc
 
 ### 1. Publish the package to the local store
@@ -141,6 +164,49 @@ publish workflow for the remaining packages at the same version. Never bump
 versions to work around a partial publish — that leaves consumers with
 mismatched or unattributable artifacts.
 
+## Verifying provenance after release
+
+Publishing with `--provenance` is only half the story: the release workflow also
+runs an automated verification pass after every publish, so a package that
+landed without a valid registry signature or provenance attestation fails the
+release instead of shipping silently.
+
+### What gets checked
+
+For every package published at the release version, the verifier confirms:
+
+- the registry reports a signature for the published tarball, and
+- the tarball carries a provenance attestation whose source repository and
+  workflow match this repository.
+
+If any package is missing either, the verification step exits non-zero and the
+release workflow fails.
+
+### Running it locally
+
+You can run the same check against a published version before or after a
+release:
+
+```bash
+npm run verify:provenance -- --version 1.2.3
+```
+
+Pass `--package <name>` to check a single package, or omit it to verify every
+workspace package at that version. The command exits `0` when all packages
+verify and non-zero on the first mismatch, printing which package failed and
+why.
+
+### When verification fails
+
+A mismatch means the published artifact cannot be attributed to this
+repository's workflow. Do not bump the version to paper over it. Instead:
+
+1. Inspect the failing package with `npm view <pkg>@<version> dist` to see
+   whether a signature and attestation are present.
+2. If the artifact is genuinely unattributable, deprecate that version and
+   re-publish the same version through the workflow once the cause is fixed.
+3. Re-run the verification step to confirm the release is clean.
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |
@@ -152,6 +218,7 @@ mismatched or unattributable artifacts.
 | Vite does not reload the linked package | Linked packages sit outside the project root. Add `optimizeDeps: { exclude: ['@soroban-resurrect/sdk'] }` to the consumer's Vite config. |
 | A file is missing only under yalc | It is not covered by `files` in the package's `package.json`. It would be missing from the npm release too, so fix it there. |
 | A missing sibling resolves from the registry | The internal dependency is not pinned to an exact workspace version. Pin it and re-run the pre-publish check. |
+| Provenance verification fails after release | The published tarball lacks a registry signature or attestation. See "When verification fails" above; do not bump the version. |
 
 ## Do not commit link artifacts
 

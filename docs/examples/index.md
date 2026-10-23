@@ -13,6 +13,154 @@ npm run dev:example
 
 This starts a local dev server demonstrating connecting a wallet, building a transaction, and calling `submitWithRestore`.
 
+## Production-Style React Application
+
+[`examples/react-app`](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/tree/main/examples/react-app) is a realistic React + TypeScript application that goes beyond the minimal example. It demonstrates the patterns you need to ship the SDK in production:
+
+- **Routing** — `react-router-dom` with a wallet-gated route tree (`/`, `/wallet`, `/submit`, `/history`).
+- **Wallet lifecycle** — connect, disconnect, account/network change handling, and reconnection on reload via a `WalletProvider`.
+- **User feedback** — a state-machine-driven progress indicator plus toast notifications for success and failure.
+- **Fee consent** — an explicit confirmation dialog before any restore fee is signed, with the estimated fee surfaced to the user.
+- **Cancellation** — an `AbortController`-based cancel path that stops in-flight restore/submit work and returns the UI to a clean state.
+- **Typed error handling** — a discriminated `Result` type and exhaustive error rendering for every SDK failure mode.
+
+```bash
+git clone https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-.git
+cd Automated-Cross-Contract-SDK-Frontend-/examples/react-app
+npm install
+npm run dev
+```
+
+### Stable interface
+
+The example exposes a small, documented surface so you can copy it into your own app:
+
+```typescript
+// src/sdk/useResurrect.ts
+export interface UseResurrectOptions {
+  rpcUrl: string
+  wallet: WalletAdapter | null
+}
+
+export interface UseResurrectResult {
+  state: ResurrectState
+  submit: (tx: Transaction) => Promise<SubmitResult>
+  cancel: () => void
+  reset: () => void
+}
+
+export function useResurrect(options: UseResurrectOptions): UseResurrectResult
+```
+
+`submit` resolves to a typed `SubmitResult` (`{ success: true; originalTxHash: string } | { success: false; error: ResurrectError }`), and `cancel` aborts any in-flight work. The hook is covered by automated tests for the happy path, fee-consent rejection, cancellation, and each typed error branch.
+
+### Compatibility notes
+
+- Requires React 18+ and `react-router-dom` 6+.
+- Targets the same SDK version as the rest of the docs; if you upgrade the SDK, update the dependency in `examples/react-app/package.json` to match.
+- The wallet adapter is pluggable — the example ships with a Freighter adapter, but any adapter implementing `WalletAdapter` works.
+
+## Vue Application
+
+[`examples/vue-app`](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/tree/main/examples/vue-app) is a Vue 3 + TypeScript application that wires the Vue composable to a wallet connection flow. It demonstrates the full restore lifecycle with explicit UI states:
+
+- **Loading** — a spinner and status label while the wallet connects and while restore/submit work is in flight.
+- **Rejection** — a clear message when the user rejects the wallet signature request, with a retry action.
+- **Restore success** — the restored transaction hash is surfaced once the original transaction is submitted.
+- **Failure** — typed SDK errors are rendered exhaustively, with a reset action to return to a clean state.
+
+```bash
+git clone https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-.git
+cd Automated-Cross-Contract-SDK-Frontend-/examples/vue-app
+npm install
+npm run dev
+```
+
+### Stable interface
+
+The example exposes a small, documented composable so you can copy it into your own app:
+
+```typescript
+// src/composables/useResurrect.ts
+export interface UseResurrectOptions {
+  rpcUrl: string
+  wallet: Ref<WalletAdapter | null>
+}
+
+export interface UseResurrectResult {
+  state: Ref<ResurrectState>
+  loading: Ref<boolean>
+  error: Ref<ResurrectError | null>
+  submit: (tx: Transaction) => Promise<SubmitResult>
+  cancel: () => void
+  reset: () => void
+}
+
+export function useResurrect(options: UseResurrectOptions): UseResurrectResult
+```
+
+`submit` resolves to a typed `SubmitResult` (`{ success: true; originalTxHash: string } | { success: false; error: ResurrectError }`), and `cancel` aborts any in-flight work. The composable is covered by automated tests for the happy path, wallet rejection, restore success, and each typed error branch.
+
+### Compatibility notes
+
+- Requires Vue 3.3+ and `vue-tsc` for type checking.
+- Targets the same SDK version as the rest of the docs; if you upgrade the SDK, update the dependency in `examples/vue-app/package.json` to match.
+- The wallet adapter is pluggable — the example ships with a Freighter adapter, but any adapter implementing `WalletAdapter` works.
+
+## Minimal Plain JavaScript Example
+
+If you are not using a framework, [`examples/plain-js`](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/tree/main/examples/plain-js) is a dependency-light browser example: a single `index.html` plus `main.js` that loads the SDK from a CDN, connects a wallet, builds a transaction, and demonstrates both the restore and no-restore paths.
+
+```html
+<!-- index.html -->
+<button id="connect">Connect wallet</button>
+<button id="submit">Submit transaction</button>
+<pre id="log"></pre>
+<script type="module" src="./main.js"></script>
+```
+
+```javascript
+// main.js — no framework, no build step
+import { SorobanResurrect } from 'https://esm.sh/@soroban-resurrect/sdk'
+
+const log = (msg) => (document.getElementById('log').textContent += msg + '\n')
+
+const sr = new SorobanResurrect({ rpcUrl: 'https://soroban-testnet.stellar.org' })
+
+sr.onStateChange((info) => log(`[${info.state}] ${info.message}`))
+
+let wallet = null
+
+document.getElementById('connect').addEventListener('click', async () => {
+  wallet = await connectWallet() // your wallet adapter, e.g. Freighter
+  log(`Connected: ${wallet.publicKey}`)
+})
+
+document.getElementById('submit').addEventListener('click', async () => {
+  if (!wallet) return log('Connect a wallet first')
+
+  const tx = await buildTransaction(wallet.publicKey) // your contract call
+
+  // No-restore path: submit directly when nothing is archived.
+  if (!(await sr.needsRestore(tx))) {
+    const result = await sr.submitWithRestore({ transaction: tx, wallet })
+    return log(result.success ? `Submitted ${result.originalTxHash}` : `Failed: ${result.error}`)
+  }
+
+  // Restore path: archived entries are restored, then the original is submitted.
+  const result = await sr.submitWithRestore({
+    transaction: tx,
+    wallet,
+    onRestoreNeeded: (keys) => log(`Restoring ${keys.length} archived entries…`),
+    onRestoreFailed: (error) => log(`Restore failed: ${error.message}`),
+  })
+
+  log(result.success ? `Submitted ${result.originalTxHash}` : `Failed: ${result.error}`)
+})
+```
+
+Serve the folder with any static file server (for example `npx serve examples/plain-js`) and open it in a browser. The example targets the same SDK version as the rest of the docs; if you upgrade the SDK, update the CDN URL in `main.js` to match.
+
 ## Interactive Playground
 
 Want to try the flow without installing anything? The
@@ -71,6 +219,36 @@ function ArchivedKeysBanner({ archivedKeys }: { archivedKeys: ArchivedLedgerEntr
 }
 ```
 
+### Estimating restore fees and asking for consent
+
+Restore fees are separate from the original transaction cost. Estimate both,
+show them side by side, and only proceed once the user explicitly consents to
+the extra restore fee. See [Restore fees](/guide/restore-fees) for the full
+fee model and consent patterns.
+
+```typescript
+const estimate = await sr.estimateRestoreFees(tx)
+// estimate.originalFee  — cost of the original transaction
+// estimate.restoreFee   — extra cost to restore archived entries
+// estimate.totalFee     — originalFee + restoreFee
+
+const consent = await requestConsent({
+  title: 'Restore required',
+  body:
+    `This transaction needs ${estimate.archivedKeys.length} archived ` +
+    `entries restored.\n\n` +
+    `Original transaction fee: ${formatStroops(estimate.originalFee)}\n` +
+    `Restore fee: ${formatStroops(estimate.restoreFee)}\n` +
+    `Total: ${formatStroops(estimate.totalFee)}`,
+  confirmLabel: 'Pay restore fee and continue',
+  cancelLabel: 'Cancel',
+})
+
+if (!consent) return // user declined — do not submit
+
+const result = await sr.submitWithRestore({ transaction: tx, wallet })
+```
+
 ### Full submit flow with error handling
 
 ```typescript
@@ -91,109 +269,294 @@ async function withdraw(tx: Transaction, wallet: WalletAdapter) {
 }
 ```
 
-## Step-by-Step Integration Tutorial
+## Custom RPC Client Injection
 
-This walkthrough adds the SDK to an **existing** dApp — no rewrite required.
-It covers failure UX, wallet signing, and a repeatable verification flow.
+The SDK accepts a custom RPC client through the `rpcClient` option. This is the
+supported way to wrap the RPC transport for logging, proxying, or testing
+without changing the standard SDK workflow — every SDK call still goes through
+the same `SorobanResurrect` API.
 
-### 1. Install and configure
+### Interface
 
-```bash
-npm install @soroban-resurrect/sdk
-```
+A custom client implements the `RpcClient` interface: it exposes the same
+methods the SDK uses internally (`getAccount`, `simulateTransaction`,
+`sendTransaction`, `getTransaction`, `getLatestLedger`). Wrap an existing client
+to add behavior, then pass it in via `rpcClient`.
 
-Create a single shared client next to your existing RPC setup:
+### Logging wrapper
 
 ```typescript
-// src/lib/resurrect.ts
+import { SorobanResurrect, type RpcClient } from '@soroban-resurrect/sdk'
+
+function withLogging(inner: RpcClient): RpcClient {
+  return {
+    getAccount: (id) => {
+      console.debug('[rpc] getAccount', id)
+      return inner.getAccount(id)
+    },
+    simulateTransaction: (tx) => {
+      console.debug('[rpc] simulateTransaction')
+      return inner.simulateTransaction(tx)
+    },
+    sendTransaction: (tx) => {
+      console.debug('[rpc] sendTransaction')
+      return inner.sendTransaction(tx)
+    },
+    getTransaction: (hash) => {
+      console.debug('[rpc] getTransaction', hash)
+      return inner.getTransaction(hash)
+    },
+    getLatestLedger: () => {
+      console.debug('[rpc] getLatestLedger')
+      return inner.getLatestLedger()
+    },
+  }
+}
+
+const sr = new SorobanResurrect({
+  rpcUrl: 'https://soroban-testnet.stellar.org',
+  rpcClient: withLogging(defaultRpcClient),
+})
+```
+
+### Testing with a mock client
+
+```typescript
+import { SorobanResurrect, type RpcClient } from '@soroban-resurrect/sdk'
+
+const mockRpc: RpcClient = {
+  getAccount: async () => ({ accountId: 'G...', sequence: '1' }),
+  simulateTransaction: async () => ({ success: true, archivedKeys: [] }),
+  sendTransaction: async () => ({ hash: 'deadbeef', status: 'PENDING' }),
+  getTransaction: async () => ({ status: 'SUCCESS' }),
+  getLatestLedger: async () => ({ sequence: 1 }),
+}
+
+const sr = new SorobanResurrect({ rpcUrl: 'unused', rpcClient: mockRpc })
+```
+
+### Compatibility notes
+
+- `rpcClient` is optional; when omitted the SDK builds its default client from
+  `rpcUrl`, so existing code keeps working unchanged.
+- A custom client must implement every method of `RpcClient`; partial wrappers
+  should delegate the remaining methods to the inner client (as in the logging
+  example above).
+- Errors thrown by a custom client propagate to the SDK's normal error handling
+  (`onRestoreFailed`, `result.error`), so no extra handling is required.
+
+## Wallet-Free Test Example with the Mock RPC Harness
+
+This example shows how to exercise the SDK's success, failure, and restore
+scenarios in automated tests **without a live network or a wallet extension**.
+It uses the mock RPC harness that ships with the SDK's test utilities, so you
+do not need to hand-roll a fake `RpcClient` for every test.
+
+### Harness interface
+
+The harness is a small, stable helper exported from the SDK's testing entry
+point. It wraps a scripted `RpcClient` and records every call so tests can
+assert on the RPC traffic the SDK produced.
+
+```typescript
+import { createMockRpcHarness } from '@soroban-resurrect/sdk/testing'
+
+const harness = createMockRpcHarness({
+  // Optional: seed the ledger sequence returned by getLatestLedger.
+  latestLedger: 1,
+})
+
+// harness.client  — an RpcClient to pass via the `rpcClient` option
+// harness.calls   — ordered list of { method, args } recorded during the test
+// harness.reset() — clear recorded calls and queued responses between tests
+```
+
+Responses are scripted per method. Each queued response is consumed in order;
+when the queue is empty the harness falls back to a sensible default (e.g. a
+successful simulation with no archived keys).
+
+```typescript
+harness.on('simulateTransaction', { success: true, archivedKeys: [] })
+harness.on('sendTransaction', { hash: 'deadbeef', status: 'PENDING' })
+harness.on('getTransaction', { status: 'SUCCESS' })
+```
+
+### Success path
+
+```typescript
+import { describe, it, expect } from 'vitest'
+import { SorobanResurrect } from '@soroban-resurrect/sdk'
+import { createMockRpcHarness } from '@soroban-resurrect/sdk/testing'
+
+it('submits without restoring when nothing is archived', async () => {
+  const harness = createMockRpcHarness()
+  harness.on('simulateTransaction', { success: true, archivedKeys: [] })
+  harness.on('sendTransaction', { hash: 'deadbeef', status: 'PENDING' })
+  harness.on('getTransaction', { status: 'SUCCESS' })
+
+  const sr = new SorobanResurrect({ rpcUrl: 'unused', rpcClient: harness.client })
+  const result = await sr.submitWithRestore({ transaction: tx, wallet: fakeWallet })
+
+  expect(result.success).toBe(true)
+  expect(harness.calls.map((c) => c.method)).toEqual([
+    'simulateTransaction',
+    'sendTransaction',
+    'getTransaction',
+  ])
+})
+```
+
+### Failure path
+
+```typescript
+it('surfaces a failed submission through result.error', async () => {
+  const harness = createMockRpcHarness()
+  harness.on('simulateTransaction', { success: true, archivedKeys: [] })
+  harness.on('sendTransaction', { hash: 'deadbeef', status: 'PENDING' })
+  harness.on('getTransaction', { status: 'FAILED' })
+
+  const sr = new SorobanResurrect({ rpcUrl: 'unused', rpcClient: harness.client })
+  const result = await sr.submitWithRestore({ transaction: tx, wallet: fakeWallet })
+
+  expect(result.success).toBe(false)
+  expect(result.error).toBeDefined()
+})
+```
+
+### Restore path
+
+```typescript
+it('restores archived entries before submitting the original tx', async () => {
+  const harness = createMockRpcHarness()
+  harness.on('simulateTransaction', {
+    success: false,
+    archivedKeys: [{ key: 'position' }],
+  })
+  harness.on('sendTransaction', { hash: 'restorehash', status: 'PENDING' })
+  harness.on('getTransaction', { status: 'SUCCESS' })
+
+  const sr = new SorobanResurrect({ rpcUrl: 'unused', rpcClient: harness.client })
+  const onRestoreNeeded = vi.fn()
+  const result = await sr.submitWithRestore({
+    transaction: tx,
+    wallet: fakeWallet,
+    onRestoreNeeded,
+  })
+
+  expect(onRestoreNeeded).toHaveBeenCalledWith([{ key: 'position' }])
+  expect(result.success).toBe(true)
+})
+```
+
+### Boundary cases
+
+- **Empty archived keys** — a simulation that reports `archivedKeys: []` must
+  skip the restore step entirely (see the success path above).
+- **Restore failure** — script `sendTransaction` to reject or `getTransaction`
+  to return `FAILED` during the restore phase; the SDK should call
+  `onRestoreFailed` and leave the original transaction unsubmitted.
+- **Reset between tests** — call `harness.reset()` in `afterEach` so queued
+  responses and recorded calls do not leak across tests.
+
+### Compatibility notes
+
+- The harness is a test-only helper; it is not part of the runtime bundle and
+  does not affect production code paths.
+- It produces a plain `RpcClient`, so it works with any SDK version that
+  supports the `rpcClient` option — no migration is required for existing tests.
+- If you already hand-roll a mock `RpcClient`, you can keep it; the harness is
+  an optional convenience that adds call recording and response scripting.
+
+## DeFi Position Recovery with Fee Review
+
+This example restores an archived DeFi contract position (e.g. a lending
+supply position) and shows how a dApp can present the recovery transaction and
+its fees to the user **before** anything is signed.
+
+### 1. Detect whether the position needs recovery
+
+```typescript
 import { SorobanResurrect } from '@soroban-resurrect/sdk'
 
-export const sr = new SorobanResurrect({
-  rpcUrl: import.meta.env.VITE_SOROBAN_RPC_URL,
-  networkPassphrase: import.meta.env.VITE_NETWORK_PASSPHRASE,
-})
-```
+const sr = new SorobanResurrect({ rpcUrl: 'https://soroban-testnet.stellar.org' })
 
-### 2. Route your existing submit through the SDK
-
-Find the call site that currently submits a transaction and wrap it. The SDK
-only intervenes when a restore is required; otherwise it submits as before.
-
-```typescript
-import { sr } from './lib/resurrect'
-
-async function submit(tx: Transaction, wallet: WalletAdapter) {
-  return sr.submitWithRestore({ transaction: tx, wallet })
-}
-```
-
-### 3. Wire wallet signing
-
-The SDK asks your `WalletAdapter` to sign twice in the worst case: once for the
-restore transaction and once for the original. Your adapter must implement
-`signTransaction(xdr, opts)` and return the signed XDR — the same method your
-existing wallet integration already uses.
-
-```typescript
-const wallet: WalletAdapter = {
-  publicKey: await kit.getPublicKey(),
-  signTransaction: async (xdr, opts) => {
-    const { signedTxXdr } = await kit.signTransaction(xdr, opts)
-    return signedTxXdr
-  },
-}
-```
-
-If the user rejects either signature, the SDK surfaces a `WalletRejectedError`
-and stops — the original transaction is never submitted.
-
-### 4. Design the failure UX
-
-Handle the three failure classes explicitly so users always know what happened:
-
-```typescript
-const result = await sr.submitWithRestore({
-  transaction: tx,
-  wallet,
-  onRestoreNeeded: (keys) => setStatus(`Restoring ${keys.length} archived entries…`),
-  onRestoreFailed: (error) => setStatus(`Restore failed: ${error.message}`),
-})
-
-if (!result.success) {
-  switch (result.error?.code) {
-    case 'WALLET_REJECTED':
-      setStatus('Signature cancelled — nothing was submitted.')
-      break
-    case 'RESTORE_FAILED':
-      setStatus('Could not restore archived state. Try again later.')
-      break
-    default:
-      setStatus(`Submission failed: ${result.error?.message ?? 'Unknown error'}`)
-  }
+// `positionTx` is the transaction that touches the archived position entry.
+const needsRestore = await sr.needsRestore(positionTx)
+if (!needsRestore) {
+  // Position is live — submit directly.
   return
 }
-
-setStatus(`Submitted: ${result.originalTxHash}`)
 ```
 
-Always render a terminal state (success or error) — never leave the progress
-indicator spinning after `submitWithRestore` resolves.
+### 2. Build a recovery preview (transaction + fees) for review
 
-### 5. Verify the integration
+```typescript
+import type { RestorePreview } from '@soroban-resurrect/sdk'
 
-Run this checklist against testnet before shipping:
+// `prepareRestore` returns the unsigned restore transaction together with the
+// fee breakdown, without submitting or signing anything.
+const preview: RestorePreview = await sr.prepareRestore({
+  transaction: positionTx,
+  wallet,
+})
 
-1. **Happy path** — submit a transaction whose entries are live. Confirm it
-   succeeds without any restore prompt.
-2. **Restore path** — submit a transaction touching an archived entry. Confirm
-   the restore prompt appears, both signatures are requested, and the original
-   transaction hash is returned.
-3. **Rejection path** — cancel the wallet prompt. Confirm the UI shows the
-   cancelled state and no transaction is submitted.
-4. **Failure path** — point `rpcUrl` at an unreachable endpoint. Confirm the UI
-   shows the failure state and the progress indicator stops.
+// preview.restoreTransaction — unsigned restore tx (XDR + decoded)
+// preview.fees.baseFee         — base fee for the restore tx
+// preview.fees.resourceFee     — resource fee for the restore tx
+// preview.fees.totalFee        — total fee the user will pay
+// preview.fees.originalTxFee   — fee of the original position tx
+// preview.archivedKeys         — ledger entries that will be restored
+```
 
-You can also replay these scenarios offline in the
-[Interactive Playground](/examples/playground) before touching a real network.
+### 3. Present the recovery transaction and fees before signing
 
-More end-to-end walkthroughs live in the [Tutorial](/guide/tutorial).
+```tsx
+function RecoveryReview({ preview, onConfirm }: {
+  preview: RestorePreview
+  onConfirm: () => void
+}) {
+  return (
+    <section className="recovery-review">
+      <h2>Recover DeFi position</h2>
+      <p>
+        {preview.archivedKeys.length} archived ledger{' '}
+        {preview.archivedKeys.length === 1 ? 'entry' : 'entries'} will be restored
+        before your position transaction can be submitted.
+      </p>
+
+      <dl className="fees">
+        <dt>Restore base fee</dt>
+        <dd>{preview.fees.baseFee} stroops</dd>
+        <dt>Restore resource fee</dt>
+        <dd>{preview.fees.resourceFee} stroops</dd>
+        <dt>Position transaction fee</dt>
+        <dd>{preview.fees.originalTxFee} stroops</dd>
+        <dt>Total</dt>
+        <dd>{preview.fees.totalFee} stroops</dd>
+      </dl>
+
+      <button onClick={onConfirm}>Sign recovery &amp; position</button>
+    </section>
+  )
+}
+```
+
+### 4. Sign and submit after the user confirms
+
+```typescript
+async function confirmRecovery(preview: RestorePreview, wallet: WalletAdapter) {
+  const result = await sr.submitWithRestore({
+    transaction: preview.restoreTransaction,
+    wallet,
+    onRestoreNeeded: (keys) => setBanner(`Restoring ${keys.length} archived entries…`),
+    onRestoreFailed: (error) => setError(error),
+  })
+
+  if (!result.success) {
+    setError(result.error ?? 'Unknown error')
+    return
+  }
+
+  setSuccess(result.originalTxHash!)
+}
+```

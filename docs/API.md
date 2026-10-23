@@ -3,6 +3,58 @@
 This document describes the public API surface of the SDK. For integration guides see
 [`docs/integrations/adapters-and-wallets.md`](./integrations/adapters-and-wallets.md).
 
+## Cached RPC reads: invalidation and freshness
+
+Read-only RPC helpers (account, contract data, and TTL lookups) are cached to reduce
+round-trips. Because ledger state is mutable, the cache exposes explicit controls so callers
+can avoid stale network and TTL information.
+
+### `CachePolicy`
+
+```ts
+type CachePolicy = {
+  /** Maximum age (ms) a cached entry may be served before it is refetched. */
+  ttlMs?: number;
+  /** When true, bypass the cache and refetch, then store the fresh result. */
+  forceRefresh?: boolean;
+};
+```
+
+- `ttlMs` defaults to `DEFAULT_CACHE_TTL_MS`. Set it to `0` to disable caching for a call.
+- `forceRefresh` takes precedence over `ttlMs`: the entry is always refetched.
+
+### `invalidateCache`
+
+```ts
+function invalidateCache(keys?: CacheKey | CacheKey[]): void;
+```
+
+Drops cached entries. With no argument, the entire cache is cleared. Pass one or more
+`CacheKey`s to invalidate only those entries (e.g. after submitting a transaction that
+mutates a contract's data).
+
+### Passing a policy to a read
+
+```ts
+import { getContractData, invalidateCache } from "@sdk/rpc";
+
+// Serve from cache for up to 5s.
+const data = await getContractData(contractId, { cache: { ttlMs: 5_000 } });
+
+// After a mutation, drop the affected entry so the next read is fresh.
+invalidateCache({ kind: "contractData", contractId });
+
+// Or force a refetch for a single call without touching the cache policy.
+const fresh = await getContractData(contractId, { cache: { forceRefresh: true } });
+```
+
+### Compatibility notes
+
+- `cache` is optional; omitting it preserves the previous default caching behaviour.
+- `invalidateCache` is additive and safe to call at any time; it never throws for unknown keys.
+- TTL information returned by reads reflects the value at fetch time. Use `forceRefresh` when
+  you need the current TTL rather than a cached one.
+
 ## MultiSig restore
 
 N-of-M restore support is provided by `MultiSigWalletAdapter`, `MultiSigSigner`,
@@ -82,8 +134,9 @@ const receipt = await adapter.submitWithRestore(result);
 If a signer refuses (throws or returns an error), `collectSignatures` records the failure in
 the returned `SignatureCollectionResult` rather than aborting the whole flow. As long as the
 number of successful signatures still meets `config.threshold`, the result can be passed to
-`submitWithRestore`. If the threshold is not met, `submitWithRestore` rejects and the partial
-result can be retained to collect the remaining signatures later.
+`submitWithRestore`. If the threshold is not met, `submitWithRestore` rejects with a
+`THRESHOLD` category error and the partial result can be retained to collect the remaining
+signatures later.
 
 ### Types
 
@@ -254,6 +307,58 @@ await submit(signed);
 
 See the [fee-model guide](./guide/fees.md) and the [TTL guides](./guide/ttl.md) for how restore
 fees fit into the overall fee model and TTL management.
+
+## Large footprint processing
+
+Footprint processing (e.g. scanning a transaction's footprint for archived keys) can be
+expensive for large footprints. To avoid blocking the UI thread, the SDK exposes a chunked,
+yielding processor alongside the existing synchronous behaviour. Output ordering and results
+are **deterministic** and identical to the synchronous path — chunking only affects *when*
+work runs, not *what* it produces.
+
+```ts
+type FootprintChunkOptions = {
+  /** Number of footprint keys processed per chunk. Defaults to `DEFAULT_FOOTPRINT_CHUNK_SIZE`. */
+  chunkSize?: number;
+  /**
+   * Yields control back to the event loop between chunks. Defaults to a macrotask
+   * (`setTimeout(…, 0)`) so the UI thread can paint. Pass a custom scheduler to
+   * integrate with your own runtime (e.g. `requestIdleCallback`).
+   */
+  yieldTo?: () => Promise<void>;
+};
+
+function processFootprintChunked<T, R>(
+  items: readonly T[],
+  process: (item: T, index: number) => R,
+  options?: FootprintChunkOptions,
+): Promise<R[]>;
+```
+
+- Results are returned in the same order as the input `items`, regardless of `chunkSize`.
+- An empty `items` array resolves immediately with `[]` without yielding.
+- A `chunkSize` of `0` or a negative value is rejected with a `RangeError`.
+- Errors thrown by `process` reject the returned promise; already-processed chunks are
+  discarded (no partial result is returned).
+- `DEFAULT_FOOTPRINT_CHUNK_SIZE` is the default chunk size used when `chunkSize` is omitted.
+
+### Worked example: chunked footprint scan
+
+```ts
+import { processFootprintChunked } from "@sdk/restore";
+
+// `footprintKeys` may be very large; process it in chunks so the UI stays responsive.
+const archived = await processFootprintChunked(
+  footprintKeys,
+  (key) => isArchived(key),
+  { chunkSize: 256 },
+);
+```
+
+> **Compatibility note:** the synchronous processing path is unchanged and remains the
+default for small footprints. Adopt `processFootprintChunked` when footprints may be large
+or when running on a UI thread. Because output is deterministic, switching between the sync
+and chunked paths does not change results.
 
 ## Contract and account scanning
 

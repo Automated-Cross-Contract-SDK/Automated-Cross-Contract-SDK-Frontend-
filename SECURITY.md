@@ -67,3 +67,84 @@ advisories currently accepted:
 
 Runtime dependency pins that exist purely for security are declared in the root
 `package.json` `overrides` block (currently `undici`, `nanoid`).
+
+## Release Rollback & Incident-Response Runbook
+
+This runbook is the stable, referenced procedure for handling a broken or
+vulnerable release. It applies to every `@soroban-resurrect/*` package and to
+security incidents reported under this policy. Follow it in order; do not skip
+straight to a rollback without confirming impact.
+
+### 1. Detect and confirm
+
+A release is considered *broken* when any of the following is true:
+
+- A published version fails to install, build, or run for a supported consumer.
+- A regression is reported against the latest release (via issue, advisory, or
+  the canary/health checks in `.github/workflows/publish.yml`).
+- A security advisory affects a shipped runtime dependency or package code.
+
+Confirm the report by reproducing against the exact published version
+(`npm view <pkg>@<version>` and a clean install), and record the affected
+package(s), version(s), and commit SHA.
+
+### 2. Assess impact and severity
+
+| Severity | Criteria                                                        | Response target |
+| -------- | --------------------------------------------------------------- | --------------- |
+| Critical | Security vulnerability, data loss, or total breakage for all consumers | Immediate; rollback or emergency patch within hours |
+| High     | Major functionality broken for most consumers                   | Same day        |
+| Medium   | Partial breakage or a workaround exists                         | Within 3 business days |
+| Low      | Cosmetic or edge-case issue                                     | Next scheduled release |
+
+### 3. Decide: rollback vs. forward-fix
+
+- **Rollback** when the broken version is the latest and a known-good prior
+  version exists, and the fix is not trivial. Deprecate the broken version and
+  re-point `latest` to the last good release (see step 5).
+- **Forward-fix** when the defect is small, isolated, and a patch can ship
+  quickly, or when rolling back would itself break consumers who already
+  adopted the new version. Cut a patch release through the normal
+  release-please flow.
+
+When in doubt for Critical/High incidents, prefer rollback first to stop the
+bleeding, then forward-fix.
+
+### 4. Communicate
+
+- Open a GitHub issue titled `[incident] <package>@<version> — <summary>` and
+  pin it.
+- For security incidents, coordinate disclosure per the triage section above;
+  publish a GitHub Security Advisory once a fix ships.
+- Post a short status update covering: affected versions, impact, current
+  action (rollback/fix), and the safe version to use. Update it as the incident
+  progresses and when it is resolved.
+
+### 5. Roll back or publish a fix
+
+- **Rollback:** `npm deprecate <pkg>@<broken-version> "Broken release — use <safe-version>"`
+  and, if `latest` points at the broken version, publish/re-tag the last good
+  version as `latest`. Never unpublish a version consumers may already depend
+  on; deprecate instead.
+- **Forward-fix:** land the fix on `main`, let release-please cut the patch
+  release, and verify the published artifact (install + smoke test) before
+  announcing.
+
+### 6. Direct consumers to a safe version
+
+State the safe version explicitly in the incident issue and advisory, e.g.:
+
+```sh
+npm install @soroban-resurrect/sdk@<safe-version>
+```
+
+Consumers can pin to a known-good version in `package.json` (exact version or
+`~`/`^` range) until a fixed release is available. Deprecated versions remain
+installable but emit a warning pointing at the safe version.
+
+### 7. Post-incident follow-up
+
+- Add a regression test that would have caught the issue.
+- Record a short post-mortem in the incident issue: timeline, root cause,
+  impact, and follow-up actions with owners.
+- Update this runbook or the release workflows if the process itself failed.

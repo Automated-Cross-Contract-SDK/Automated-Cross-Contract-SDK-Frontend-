@@ -62,6 +62,70 @@ unnecessary restore. Missing entries from a successful response are reported
 as `archived`. Existing callers can continue using `isArchived`; it is false
 for both `healthy`, `near-expiry`, and `unknown` entries.
 
+## Cache invalidation and freshness
+
+`queryLedgerTTL` results are cached so repeated polls do not hammer the RPC.
+Because TTLs are mutable, the cache is bounded by a freshness policy rather
+than trusted indefinitely. Two controls let you avoid stale network and TTL
+data:
+
+- `maxAgeMs` — the maximum age (in milliseconds) a cached read may have before
+  it is considered stale and re-fetched. Defaults to **5000 ms**.
+- `bypassCache` — when `true`, the read skips the cache entirely, fetches fresh
+  data from the RPC, and refreshes the cache with the result.
+
+```typescript
+// Accept cached data only if it is at most 2 seconds old.
+const fresh = await sr.queryLedgerTTL(keys, { maxAgeMs: 2000 })
+
+// Force a fresh read, e.g. right before submitting an extend transaction.
+const forced = await sr.queryLedgerTTL(keys, { bypassCache: true })
+```
+
+### Invalidating cached reads
+
+When you know the underlying state changed (for example, after you submit an
+extend or restore transaction), invalidate the affected keys so the next read
+is guaranteed fresh. `invalidateTTLCache` accepts the same keys you queried;
+pass no argument to clear the entire TTL cache:
+
+```typescript
+// Invalidate specific keys after an extend/restore.
+await sr.extendLedgerTTL(keys, { wallet, extendTo: 200_000, confirmFee })
+sr.invalidateTTLCache(keys)
+
+// Or drop everything (e.g. after switching networks).
+sr.invalidateTTLCache()
+```
+
+`watchTTL` uses the same cache and freshness policy. Pass `maxAgeMs` and
+`bypassCache` through the watch options to control how fresh each poll is; the
+watcher also invalidates a key's cache entry automatically after it applies an
+extension, so the next poll observes the new TTL instead of a stale value.
+
+```typescript
+const handle = sr.watchTTL({
+  keys,
+  thresholdLedgers: 2000,
+  maxAgeMs: 1000, // treat cached TTLs older than 1s as stale
+  autoExtend: true,
+  sourcePublicKey: keypair.publicKey(),
+  signTransaction: async (tx) => {
+    tx.sign(keypair)
+    return tx
+  },
+})
+```
+
+### Compatibility notes
+
+- `maxAgeMs` and `bypassCache` are optional; existing calls to
+  `queryLedgerTTL` and `watchTTL` keep their previous behavior, with the cache
+  now bounded by the default 5s freshness window.
+- `invalidateTTLCache` is additive and safe to call at any time; it never
+  throws for unknown keys.
+- Setting `maxAgeMs: 0` is equivalent to `bypassCache: true` for that read.
+
 ## Choosing `thresholdLedgers`
 
 `thresholdLedgers` is the number of ledgers remaining before the watcher
