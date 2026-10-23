@@ -171,38 +171,48 @@ publish workflow for the remaining packages at the same version. Never bump
 versions to work around a partial publish — that leaves consumers with
 mismatched or unattributable artifacts.
 
-## Validating dependency updates
+## Verifying provenance after release
 
-Automated dependency bumps (Dependabot, Renovate, or a manual `npm update`) can
-break the workspace even when the lockfile resolves cleanly. The
-`dependency-validation` workflow (`.github/workflows/dependency-validation.yml`)
-re-runs the full workspace build and test suite plus the package fixtures so a
-bad bump is caught before it merges.
+Publishing with `--provenance` is only half the story: the release workflow also
+runs an automated verification pass after every publish, so a package that
+landed without a valid registry signature or provenance attestation fails the
+release instead of shipping silently.
 
-### When it runs
+### What gets checked
 
-- **Scheduled**: nightly via cron, so drift in transitive dependencies surfaces
-  even without an open PR.
-- **On dependency PRs**: pull requests that touch `package.json`,
-  `package-lock.json`, or any workspace `package.json` trigger the same checks.
-- **Manually**: `workflow_dispatch` lets you run it on demand from the Actions
-  tab or with `gh workflow run dependency-validation.yml`.
+For every package published at the release version, the verifier confirms:
 
-### What it validates
+- the registry reports a signature for the published tarball, and
+- the tarball carries a provenance attestation whose source repository and
+  workflow match this repository.
 
-1. Installs from the lockfile with `npm ci` across the workspace.
-2. Builds every package (`npm run build`).
-3. Runs the workspace test suite (`npm test`).
-4. Exercises the package fixtures to confirm the packed output still works for
-   real consumers.
+If any package is missing either, the verification step exits non-zero and the
+release workflow fails.
 
-### Interpreting failures
+### Running it locally
 
-A red run means the dependency set no longer builds or passes tests. Reproduce
-locally with `npm ci && npm run build && npm test`, then either pin the offending
-package back to a working version or fix the incompatibility. Do not merge a
-dependency PR while this workflow is failing — the scheduled run will keep
-flagging the same breakage on `main`.
+You can run the same check against a published version before or after a
+release:
+
+```bash
+npm run verify:provenance -- --version 1.2.3
+```
+
+Pass `--package <name>` to check a single package, or omit it to verify every
+workspace package at that version. The command exits `0` when all packages
+verify and non-zero on the first mismatch, printing which package failed and
+why.
+
+### When verification fails
+
+A mismatch means the published artifact cannot be attributed to this
+repository's workflow. Do not bump the version to paper over it. Instead:
+
+1. Inspect the failing package with `npm view <pkg>@<version> dist` to see
+   whether a signature and attestation are present.
+2. If the artifact is genuinely unattributable, deprecate that version and
+   re-publish the same version through the workflow once the cause is fixed.
+3. Re-run the verification step to confirm the release is clean.
 
 ## Troubleshooting
 
@@ -215,8 +225,7 @@ flagging the same breakage on `main`.
 | Vite does not reload the linked package | Linked packages sit outside the project root. Add `optimizeDeps: { exclude: ['@soroban-resurrect/sdk'] }` to the consumer's Vite config. |
 | A file is missing only under yalc | It is not covered by `files` in the package's `package.json`. It would be missing from the npm release too, so fix it there. |
 | A missing sibling resolves from the registry | The internal dependency is not pinned to an exact workspace version. Pin it and re-run the pre-publish check. |
-| Publish fails on tarball inspection | A packed file matched a credential pattern or is an unexpected file. Remove the secret from source, rotate it if committed, and exclude the file via `files` / `.npmignore`. |
-| `dependency-validation` fails after a bump | The new dependency set does not build or pass tests. Reproduce with `npm ci && npm run build && npm test`, then pin back or fix the incompatibility. |
+| Provenance verification fails after release | The published tarball lacks a registry signature or attestation. See "When verification fails" above; do not bump the version. |
 
 ## Do not commit link artifacts
 

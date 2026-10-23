@@ -18,6 +18,28 @@ dev container starts ready to build:
   container and the RPC is reachable at `http://localhost:8000/soroban/rpc`. If your
   environment disallows nested Docker, run the compose network on the host instead.
 
+## Repository health report
+
+Before opening a pull request, run the read-only health report. It never writes
+to the working tree — it only inspects the repo and prints actionable results:
+
+```bash
+npm run health
+```
+
+Each check reports `PASS`, `WARN`, or `FAIL` with a hint on how to fix it:
+
+| Check | What it verifies |
+|-------|------------------|
+| `formatting` | Prettier config is present and `format:check` is wired up. |
+| `scripts` | Required npm scripts (`build`, `test`, `lint`, `format:check`, `verify`) exist. |
+| `tests` | Each workspace package ships at least one test file. |
+| `exports` | Package `exports`/`main`/`types` entries point at files that exist. |
+| `docs` | Relative links in `docs/` resolve to real files. |
+
+The command exits non-zero when any check `FAIL`s, so it can gate CI. Pass
+`--json` for machine-readable output and `--strict` to treat warnings as failures.
+
 ## Prerequisites
 
 | Tool | Minimum version |
@@ -122,3 +144,10 @@ Omitting `-v` keeps the ledger between restarts.
 ```bash
 docker compose down
 ```
+
+## Handling a broken release
+
+If a published release turns out to be broken, follow the
+[release rollback and incident-response runbook](./release-runbook.md). It covers
+confirming the problem, assessing impact, communicating with consumers, choosing
+between rollback and forward-fix, and directing consumers to a safe version.
