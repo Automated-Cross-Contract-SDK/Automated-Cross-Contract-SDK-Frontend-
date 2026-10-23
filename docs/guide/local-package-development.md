@@ -43,6 +43,29 @@ Or keep a rebuild running while you work:
 npm run build -w packages/sdk -- --watch
 ```
 
+## Inspecting release readiness
+
+Before you link, publish to yalc, or open a release PR, run the release-readiness
+check. It inspects the workspace without publishing anything:
+
+```bash
+npm run release:check
+```
+
+It reports, for every workspace package:
+
+- **Version alignment** — sibling dependencies pinned to exact workspace
+  versions, and no package resolving a sibling from the registry.
+- **Build results** — whether `dist/` exists and is newer than `src/`.
+- **Package contents** — the files that would land in the tarball, so a missing
+  `files` entry shows up here instead of after publish.
+- **Release metadata** — required `package.json` fields (`name`, `version`,
+  `license`, `repository`, `exports`) and the presence of a `README`.
+
+The command exits non-zero when any check fails, so it is safe to wire into CI.
+Pass `--json` for machine-readable output and `--package <name>` to inspect a
+single package. It never runs `npm publish` and never mutates the workspace.
+
 ## Using yalc
 
 ### 1. Publish the package to the local store

@@ -197,10 +197,10 @@ Add it as a dev dependency of the workspace you are testing:
 { "devDependencies": { "@soroban-resurrect/testing": "0.0.0" } }
 ```
 
-## Coverage gates
+## Mock wallet adapter
 
-The SDK's test command enforces explicit branch and line-coverage floors for three critical restore
-modules. The current floors reflect the measured baseline and prevent regressions while coverage
-grows:
+Integration tests that exercise the signing steps need a wallet, not just an
+RPC client. `@soroban-resurrect/testing` also exports a reusable mock wallet
+adapter so you don't have to hand-roll one per suite.
 
 | Behavior                         | Module                            |

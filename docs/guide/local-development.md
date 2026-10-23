@@ -77,6 +77,55 @@ curl -s -X POST http://localhost:8000/soroban/rpc \
 
 A healthy node responds with `{"jsonrpc":"2.0","id":1,"result":{"status":"healthy"}}`.
 
+## Verifying endpoint readiness
+
+Rather than eyeballing `curl` output, use the bundled readiness helper. It polls
+the RPC endpoint until it reports healthy, then exits `0`; on timeout or a
+malformed response it exits non-zero with a diagnostic. Run it before examples
+or in CI to fail fast when the local node is not up yet.
+
+```bash
+# Defaults to http://localhost:8000/soroban/rpc
+npm run rpc:check
+
+# Or point it at any endpoint
+npm run rpc:check -- --url http://localhost:8000/soroban/rpc --timeout 60000
+```
+
+Stable interface:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--url <url>` | `http://localhost:8000/soroban/rpc` | Soroban RPC endpoint to probe. |
+| `--timeout <ms>` | `30000` | Total time to keep retrying before failing. |
+| `--interval <ms>` | `1000` | Delay between retries. |
+
+Exit codes: `0` healthy, `1` timed out / unreachable, `2` malformed response.
+
+## Inspecting package release readiness
+
+Before cutting a release, run the release-readiness inspector. It summarizes
+workspace version alignment, build results, package contents, and required
+release metadata, then exits non-zero if anything is not ready. It is
+inspection-only: it never publishes or mutates artifacts.
+
+```bash
+# Inspect the whole workspace
+npm run release:check
+
+# Or scope it to a single package
+npm run release:check -- --package @soroban-resurrect/sdk
+```
+
+Stable interface:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--package <name>` | all workspace packages | Limit the report to a single package by name. |
+| `--json` | off | Emit the report as machine-readable JSON instead of a table. |
+
+Exit codes: `0` ready, `1` one or more checks failed, `2` invalid arguments.
+
 ## Endpoints
 
 | Service | URL |
@@ -138,6 +187,9 @@ Omitting `-v` keeps the ledger between restarts.
 | Healthcheck never passes | The node needs up to a minute on first boot. Check `docker compose logs soroban-rpc` for a Core error before restarting. |
 | `Transaction simulation failed` on every call | Usually a passphrase mismatch. The local network is Testnet-passphrased, not Standalone-passphrased. |
 | Requests hang from a browser app | The RPC server allows cross-origin requests, but a mixed-content page served over HTTPS cannot call `http://localhost`. Serve the dev app over HTTP. |
+| `rpc:check` exits `1` | The node is not up yet or the URL is wrong. Confirm with `docker compose ps` and the `curl` probe above. |
+| `rpc:check` exits `2` | The endpoint answered but not with a valid `getHealth` result. Check the URL points at `/soroban/rpc`, not Horizon. |
+| `release:check` exits `1` | One or more readiness checks failed. Re-run with `--json` to see which package and check failed. |
 
 ## Stopping the network
 
