@@ -10,7 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@ledgerhq/hw-app-str": "^7.0.0",
+    "@ledgerhq/hw-app-str": "^7.8.0",
     "@ledgerhq/hw-transport-webusb": "^6.29.0",
     "@soroban-resurrect/sdk": "^0.1.0",
     "@soroban-resurrect/testing": "0.0.0",
