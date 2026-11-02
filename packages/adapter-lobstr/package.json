@@ -37,7 +37,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@lobstrco/signer-extension-api": "^2.0.0"
+    "@lobstrco/signer-extension-api": "^3.0.0"
   },
   "peerDependencies": {
     "@soroban-resurrect/sdk": "^0.1.0"
