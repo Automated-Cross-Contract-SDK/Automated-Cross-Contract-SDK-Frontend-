@@ -23,8 +23,8 @@
   "devDependencies": {
     "@babel/core": "^8.0.7",
     "@babel/preset-env": "^8.0.7",
-    "@react-native/babel-preset": "0.88.0",
-    "@react-native/typescript-config": "0.88.0",
+    "@react-native/babel-preset": "0.88.1",
+    "@react-native/typescript-config": "0.88.1",
     "@types/react": "^18.3.0",
     "typescript": "~6.0.3"
   }
