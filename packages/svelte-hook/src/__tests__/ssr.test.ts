@@ -5,13 +5,16 @@ import { get, readable } from 'svelte/store'
 const mockOnStateChange = vi.fn()
 
 vi.mock('@soroban-resurrect/sdk', () => ({
-  SorobanResurrect: vi.fn().mockImplementation(() => ({
-    onStateChange: mockOnStateChange,
-    reset: vi.fn(),
-    detectArchivedKeys: vi.fn(),
-    submitWithRestore: vi.fn(),
-    dispose: vi.fn(),
-  })),
+  // A regular function (not an arrow) so it can be called with `new`.
+  SorobanResurrect: vi.fn().mockImplementation(function () {
+    return {
+      onStateChange: mockOnStateChange,
+      reset: vi.fn(),
+      detectArchivedKeys: vi.fn(),
+      submitWithRestore: vi.fn(),
+      dispose: vi.fn(),
+    }
+  }),
   isProcessingState: (s: string) =>
     [
       'simulating',

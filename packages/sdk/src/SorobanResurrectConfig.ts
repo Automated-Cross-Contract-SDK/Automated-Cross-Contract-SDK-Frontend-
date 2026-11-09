@@ -276,6 +276,17 @@ export function validateConfigShape(config: SorobanResurrectConfig): void {
     validateBoolean('ttlWatchAutoExtend', config.ttlWatchAutoExtend)
   }
 
+  if (config.maxRestoreTxSizeBytes !== undefined) {
+    validateInteger('maxRestoreTxSizeBytes', config.maxRestoreTxSizeBytes, 1)
+  }
+
+  if (config.restoreSizeWarnRatio !== undefined) {
+    const ratio = config.restoreSizeWarnRatio
+    if (typeof ratio !== 'number' || !Number.isFinite(ratio) || ratio <= 0 || ratio > 1) {
+      throw new Error('Invalid config.restoreSizeWarnRatio: must be a number greater than 0 and at most 1')
+    }
+  }
+
   if (config.runtime !== undefined) {
     const methods = ['now', 'random', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] as const
     for (const method of methods) {
