@@ -62,10 +62,10 @@ export type {
   TrezorAdapterConfig,
   // Error types
   ResurrectErrorCode,
-  ResurrectFailure,
   ResurrectSuccess,
+  ResurrectFailedResult,
 } from './types.js'
-export type { RestorePlan, DryRunResult } from './RestorePlan.js'
+export type { RestorePlan } from './RestorePlan.js'
 export type { WalletErrorCode } from './types.js'
 export { WalletError } from './types.js'
 export { ResurrectError, RestoreFeeExceededError } from './errors.js'

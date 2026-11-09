@@ -267,7 +267,7 @@ export async function checkRpcHealth(
 
   let requiredResults: RpcMethodCheckResult[] = [];
   let optionalResults: RpcMethodCheckResult[] = [];
-  let healthy = endpointCheck.reachable;
+  let healthy = false;
 
   if (endpointCheck.reachable) {
     requiredResults = await Promise.all(
@@ -282,8 +282,6 @@ export async function checkRpcHealth(
 
     const allRequiredAvailable = requiredResults.every((r) => r.available);
     healthy = allRequiredAvailable;
-  } else {
-    healthy = false;
   }
 
   const recommendations: string[] = [];

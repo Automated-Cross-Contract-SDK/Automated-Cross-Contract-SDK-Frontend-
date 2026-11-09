@@ -1,4 +1,4 @@
-import { SorobanResurrectConfig } from '../SorobanResurrectConfig';
+import type { SorobanResurrectConfig } from '../types.js';
 import defaults from './defaults.json';
 import { validateRestoreMemoConfig } from '../memoValidation.js';
 

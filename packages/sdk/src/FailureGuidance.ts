@@ -69,6 +69,56 @@ const guidance: Record<ResurrectErrorCode, Guidance> = {
     retryable: false,
     nextStep: 'Provide at least one valid ledger key to restore.',
   },
+  CONFIRMATION_TIMEOUT: {
+    stage: 'confirmation',
+    retryable: true,
+    nextStep: 'Check the transaction hash on-chain; it may still confirm before you retry.',
+  },
+  INCOMPLETE_FOOTPRINT: {
+    stage: 'simulation',
+    retryable: false,
+    nextStep: 'Re-simulate the transaction; the RPC returned an unusable restore footprint.',
+  },
+  INVALID_RESTORE_MEMO: {
+    stage: 'restore',
+    retryable: false,
+    nextStep: 'Fix the configured restore memo, then retry.',
+  },
+  BATCH_SIZE_EXCEEDED: {
+    stage: 'restore',
+    retryable: false,
+    nextStep: 'Split the request into smaller batches and retry.',
+  },
+  UNEXPECTED_FEE_BUMP_ENVELOPE: {
+    stage: 'signing',
+    retryable: false,
+    nextStep: 'Make sure the wallet returns a plain signed transaction, not a fee-bump envelope.',
+  },
+  SIGNED_TRANSACTION_MISMATCH: {
+    stage: 'signing',
+    retryable: false,
+    nextStep: 'The wallet changed the transaction while signing; review it and sign again.',
+  },
+  ARCHIVE_DETECTION_BATCH_FAILED: {
+    stage: 'simulation',
+    retryable: true,
+    nextStep: 'Check RPC availability and retry archive detection.',
+  },
+  RPC_TIMEOUT: {
+    stage: 'unknown',
+    retryable: true,
+    nextStep: 'The RPC endpoint was slow to respond; retry or use a different RPC endpoint.',
+  },
+  NETWORK_ERROR: {
+    stage: 'unknown',
+    retryable: true,
+    nextStep: 'Check network connectivity and RPC availability, then retry.',
+  },
+  ABORTED: {
+    stage: 'unknown',
+    retryable: true,
+    nextStep: 'Check any submitted transaction hash before starting the workflow again.',
+  },
 }
 
 /** Returns stable, safe recovery guidance for a public SDK error code. */

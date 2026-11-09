@@ -13,6 +13,7 @@ import type {
   SubmitWithRestoreOptions,
   RestoreKeysOptions,
   SorobanResurrectEvents,
+  Logger,
 } from './types.js'
 import { resolveConfig } from './SorobanResurrectConfig.js'
 import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
@@ -40,6 +41,8 @@ import {
 } from './TTLWatch.js'
 import type { SorobanNetworkName } from './constants.js'
 import type { AbortSignalOptions } from './AbortUtils.js'
+import { resolveLogger,createRequestId } from './Logger.js'
+import { SorobanNetworkCapabilityReport,checkNetworkCapabilities } from './NetworkCapabilities.js'
 
 /**
  * Main facade for the Soroban-Resurrect SDK.
@@ -70,15 +73,16 @@ import type { AbortSignalOptions } from './AbortUtils.js'
 export class SorobanResurrect {
   readonly ready: Promise<void>
   private _server: ISorobanRpcClient
-  private _config: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & {
-    rpcClient: ISorobanRpcClient
-  }
+  private _config: ResolvedSorobanResurrectConfig
+  private readonly logger: Logger
+  private _requestId: string | undefined
+  private _activeOperations = 0
+  private readonly _submitControllers = new Set<AbortController>()
 
   private readonly _stateMgr: SorobanResurrectStateManager
   private readonly _simulator: SorobanResurrectSimulator
   private readonly _executor: SorobanResurrectExecutor
   private readonly _ttlWatches = new Set<TTLWatchHandle>()
-  readonly ready: Promise<void>
 
   // Last set of archived keys from a standalone detectArchivedKeys() call.
   // The FSM context already stores archivedKeys for the full submit workflow;
@@ -148,64 +152,8 @@ export class SorobanResurrect {
     this._executor.rebind(server, this._config)
   }
 
-  private buildConfigView(
-    config: SorobanResurrectConfig,
-  ): Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & { rpcClient: ISorobanRpcClient } {
-    const view = {} as Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & {
-      rpcClient: ISorobanRpcClient
-    }
-    const keys: Array<keyof SorobanResurrectConfig> = [
-      'rpcUrl',
-      'networkPassphrase',
-      'rpcClient',
-      'logger',
-      'pollIntervalMs',
-      'pollTimeoutMs',
-      'restoreFeeMultiplier',
-      'rpcTimeoutMs',
-      'rpcRetryCount',
-      'rpcRetryBackoffMs',
-      'rpcCircuitBreakerThreshold',
-      'rpcCircuitBreakerCooldownMs',
-      'ttlWatchIntervalMs',
-      'ttlWatchThresholdLedgers',
-      'archiveDetectionMethod',
-      'archiveDetectionChunkSize',
-      'archiveDetectionConcurrency',
-      'useSSE',
-      'enableSimulationCache',
-      'simulationCacheTtlMs',
-      'simulationCacheMaxSize',
-      'persistHistory',
-      'maxRestoreFeeStroops',
-      'maxRestoreTxSizeBytes',
-      'restoreSizeWarnRatio',
-      'throwOnRestoreSizeLimit',
-      'restoreTxMemo',
-      'restoreTxMemoText',
-      'ttlWatchAutoExtend',
-      'maxSequenceRetries',
-    ]
-
-    for (const key of keys) {
-      const provided = Object.prototype.hasOwnProperty.call(config, key)
-      Object.defineProperty(view, key, {
-        enumerable: provided,
-        configurable: true,
-        get: () => this._config[key as keyof typeof this._config],
-        set: (value) => {
-          ;(this._config as Record<string, unknown>)[key as string] = value
-        },
-      })
-    }
-
-    return view
-  }
-
   /** Resolved configuration with defaults applied. Re-bound in place by {@link switchNetwork}. */
-  get config(): Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & {
-    rpcClient: ISorobanRpcClient
-  } {
+  get config(): ResolvedSorobanResurrectConfig {
     return this._config
   }
 
@@ -314,7 +262,6 @@ export class SorobanResurrect {
     for (const handle of [...this._ttlWatches]) handle.stop()
     this._server = resolved.server
     this._config = resolved.config
-    this._configView = this.buildConfigView(overrideConfig)
     this._simulator.rebind(resolved.server, resolved.config, resolved.simulationCache)
     this._executor.rebind(resolved.server, resolved.config)
     this._stateMgr.reset()
@@ -545,54 +492,13 @@ export class SorobanResurrect {
   ): Promise<RestoreCostEstimate> {
     const response = await this._simulator.simulate(transaction, options)
 
-          const response = await this._server.simulateTransaction(simulationTx)
-          if (isErrorResponse(response)) {
-            throw new Error(`Transaction simulation failed: ${response.error}`)
-          }
-          if (!isRestoreResponse(response) && !isSuccessResponse(response)) {
-            throw new Error('Transaction simulation returned an unrecognized response')
-          }
+    if (isRestoreResponse(response)) {
+      const archivedKeys = extractArchivedKeys(response)
+      const minResourceFee = parseInt(response.minResourceFee, 10)
+      return buildRestoreCostEstimate(minResourceFee, archivedKeys.length, this._config)
+    }
 
-          let archivedKeys: string[] = []
-          let minResourceFee = 0
-          if (isRestoreResponse(response)) {
-            if (!response._parsed) {
-              throw new Error('Transaction simulation returned an unparsed restore plan')
-            }
-            archivedKeys = response.transactionData
-              .getFootprint()
-              .readWrite()
-              .map((key) => key.toXDR('base64'))
-            minResourceFee = Number.parseInt(response.minResourceFee, 10)
-            if (!Number.isSafeInteger(minResourceFee) || minResourceFee < 0) {
-              throw new Error(`Invalid minimum restore resource fee: ${response.minResourceFee}`)
-            }
-          }
-
-          const estimate = buildRestoreCostEstimate(minResourceFee, archivedKeys.length, this._config)
-          return {
-            transaction: {
-              xdr: transactionXdr,
-              sourceAccount: transaction.source,
-              sequence: transaction.sequence,
-              fee: transaction.fee,
-              operationCount: transaction.operations.length,
-            },
-            network: {
-              rpcUrl: this._config.rpcUrl,
-              networkPassphrase: this._config.networkPassphrase,
-            },
-            wouldNeedRestore: estimate.wouldNeedRestore,
-            archivedKeys,
-            minResourceFee: estimate.minResourceFee,
-            feeMultiplier: estimate.multiplier,
-            estimatedRestoreFee: estimate.estimatedFee,
-          }
-        })
-      }
-
-      return buildRestoreCostEstimate(0, 0, this._config)
-    })
+    return buildRestoreCostEstimate(0, 0, this._config)
   }
 
   /**
@@ -709,10 +615,18 @@ export class SorobanResurrect {
   async submitWithRestore(
     options: SubmitWithRestoreOptions & AbortSignalOptions,
   ): Promise<ResurrectResult> {
+    const controller = new AbortController()
+    const externalSignal = options.signal
+    const abortFromCaller = () => controller.abort()
+    if (externalSignal?.aborted) controller.abort()
+    else externalSignal?.addEventListener('abort', abortFromCaller, { once: true })
+    this._submitControllers.add(controller)
     this._requestId = createRequestId()
     this.logger.info('submitWithRestore: start', { requestId: this._requestId })
     try {
-      const result = await this._executor.submitWithRestore(options)
+      const result = await this._trackOperation(() =>
+        this._executor.submitWithRestore({ ...options, signal: controller.signal }),
+      )
       this.logger[result.success ? 'info' : 'error']('submitWithRestore: finished', {
         requestId: this._requestId,
         success: result.success,
@@ -724,7 +638,27 @@ export class SorobanResurrect {
       return result
     } finally {
       this._requestId = undefined
+      this._submitControllers.delete(controller)
+      externalSignal?.removeEventListener('abort', abortFromCaller)
     }
+  }
+
+  /**
+   * Cancels active `submitWithRestore` workflows. Transactions already
+   * submitted to the network cannot be retracted; cancellation prevents
+   * subsequent signing/submission steps and stops confirmation polling.
+   *
+   * @returns `true` if at least one active workflow was cancelled.
+   */
+  cancel(): boolean {
+    let cancelled = false
+    for (const controller of this._submitControllers) {
+      if (!controller.signal.aborted) {
+        controller.abort()
+        cancelled = true
+      }
+    }
+    return cancelled
   }
 
   /**

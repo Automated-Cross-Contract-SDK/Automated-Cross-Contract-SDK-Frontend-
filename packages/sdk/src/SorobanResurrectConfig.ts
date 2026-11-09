@@ -21,13 +21,11 @@ import {
   resolveNetworkPassphrase,
   TTL_WATCH_INTERVAL_MS,
   TTL_WATCH_THRESHOLD,
-  ARCHIVE_DETECTION_CHUNK_SIZE,
-  ARCHIVE_DETECTION_CONCURRENCY,
   MAX_BATCH_SIZE,
 } from './constants.js'
 import { SimulationCache } from './SimulationCache.js'
+import { SYSTEM_RUNTIME } from './runtime.js'
 import { validateRestoreMemoConfig } from './memoValidation.js'
-import { NOOP_LOGGER } from './Logger.js'
 
 /**
  * Result of initialising the SDK configuration.
@@ -53,7 +51,7 @@ export interface ResolvedConfig {
 }
 
 /** Configuration settings after defaults and validation, without an RPC client. */
-export type EffectiveSorobanResurrectConfig = Required<Omit<SorobanResurrectConfig, 'rpcClient'>>
+export type EffectiveSorobanResurrectConfig = Omit<ResolvedSorobanResurrectConfig, 'rpcClient'>
 
 const ARCHIVE_DETECTION_METHODS = ['simulation', 'direct'] as const
 
@@ -67,7 +65,7 @@ function validateNumber(field: string, value: unknown, minimum: number, exclusiv
     (exclusive ? value > minimum : value >= minimum)
   if (!valid) {
     const comparison = exclusive ? 'greater than 0' : 'greater than or equal to 1'
-    throw new Error(`config.${field} must be a finite number ${comparison}`)
+    throw new Error(`Invalid config.${field}: must be a finite number ${comparison}`)
   }
 }
 
@@ -83,7 +81,9 @@ function validateFeeCap(value: unknown): void {
 }
 
 function validateInteger(field: string, value: unknown, minimum: number): void {
-  validateNumber(field, value, minimum, false, true)
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < minimum) {
+    throw new Error(`Invalid config.${field}: must be an integer greater than or equal to ${minimum}`)
+  }
 }
 
 /**
@@ -115,13 +115,16 @@ export const SIMULATION_CACHE_MAX_SIZE = 50
  */
 export function validateConfigShape(config: SorobanResurrectConfig): void {
   if (typeof config.rpcUrl !== 'string' || config.rpcUrl.length === 0) {
-    throw new Error('config.rpcUrl must be a non-empty string')
+    throw new Error('Invalid config.rpcUrl: config.rpcUrl must be a non-empty string')
   }
   let rpcUrl: URL
   try {
     rpcUrl = new URL(config.rpcUrl)
   } catch {
-    throw new Error('config.rpcUrl must be a valid URL')
+    throw new Error(`Invalid config.rpcUrl: config.rpcUrl must be a valid URL (received "${config.rpcUrl}")`)
+  }
+  if (rpcUrl.protocol !== 'http:' && rpcUrl.protocol !== 'https:') {
+    throw new Error(`Invalid config.rpcUrl: expected an http(s) URL, received "${rpcUrl.protocol}"`)
   }
 
   if (config.pollIntervalMs !== undefined) {
@@ -277,7 +280,7 @@ export function validateConfigShape(config: SorobanResurrectConfig): void {
     const methods = ['now', 'random', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] as const
     for (const method of methods) {
       if (typeof config.runtime?.[method] !== 'function') {
-        throw new InvalidInputError(`config.runtime.${method} must be a function`)
+        throw new Error(`config.runtime.${method} must be a function`)
       }
     }
   }
@@ -318,10 +321,10 @@ export function validateConfigShape(config: SorobanResurrectConfig): void {
  * ```
  */
 export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
-  validateConfigShape(config)
+  const effectiveConfig = resolveEffectiveSettings(config)
 
   const baseServer = config.rpcClient ?? new SorobanRpcClient(config.rpcUrl)
-  const server = withRpcLogging(baseServer, config.logger)
+  const server = withRpcLogging(baseServer, effectiveConfig.logger)
 
   // A fresh cache is built on every resolve, so switchNetwork() never reuses
   // stale entries. Keep the TTL short relative to the ledger close time
@@ -332,10 +335,14 @@ export function resolveConfig(config: SorobanResurrectConfig): ResolvedConfig {
     ? new SimulationCache({
         ttlMs: effectiveConfig.simulationCacheTtlMs,
         maxSize: effectiveConfig.simulationCacheMaxSize,
+        runtime: effectiveConfig.runtime,
       })
     : undefined
 
-  const resolved = Object.freeze({ ...effectiveConfig, rpcClient: server })
+  const resolved: ResolvedSorobanResurrectConfig = Object.freeze({
+    ...effectiveConfig,
+    rpcClient: server,
+  })
 
   return { server, config: resolved, simulationCache }
 }
@@ -363,27 +370,14 @@ function resolveEffectiveSettings(config: SorobanResurrectConfig): EffectiveSoro
     const knownNetworks = KNOWN_NETWORK_PASSPHRASES.map((p) => `"${p}"`).join(', ')
     throw new Error(
       `Invalid config.networkPassphrase: "${networkPassphrase}". ` +
-        `Must be one of: ${knownNetworks}. ` +
+        `Invalid network passphrase — must be one of: ${knownNetworks}. ` +
         `A typo in the passphrase will cause cryptic transaction failures.`,
     )
   }
 
-  // A fresh cache is built on every resolve, so switchNetwork() never reuses
-  // stale entries. Keep the TTL short relative to the ledger close time
-  // (~5s): a replayed cached restore response can report "restore needed"
-  // after the entry was already restored (or miss a newly archived entry),
-  // which at worst causes a redundant restore or a failed submission.
-  const simulationCache = config.enableSimulationCache
-    ? new SimulationCache({
-        ttlMs: config.simulationCacheTtlMs ?? SIMULATION_CACHE_TTL_MS,
-        maxSize: config.simulationCacheMaxSize ?? SIMULATION_CACHE_MAX_SIZE,
-        runtime,
-      })
-    : undefined
-
-  const resolved: Required<Omit<SorobanResurrectConfig, 'rpcClient'>> & {
-    rpcClient: ISorobanRpcClient
-  } = {
+  const { rpcClient: _rpcClient, ...rest } = config
+  return {
+    ...rest,
     rpcUrl: config.rpcUrl,
     networkPassphrase,
     logger: config.logger ?? NOOP_LOGGER,
@@ -394,7 +388,7 @@ function resolveEffectiveSettings(config: SorobanResurrectConfig): EffectiveSoro
     restoreConfirmationTimeoutMs: config.restoreConfirmationTimeoutMs ?? POLL_TIMEOUT_MS,
     originalSubmissionTimeoutMs: config.originalSubmissionTimeoutMs ?? RPC_TIMEOUT_MS,
     restoreFeeMultiplier: config.restoreFeeMultiplier ?? RESTORE_FEE_MULTIPLIER,
-    maxRestoreFeeStroops: config.maxRestoreFeeStroops ?? MAX_RESTORE_FEE_STROOPS,
+    maxRestoreFeeStroops: config.maxRestoreFeeStroops ?? String(MAX_RESTORE_FEE_STROOPS),
     maxSequenceRetries: config.maxSequenceRetries ?? MAX_SEQUENCE_RETRIES,
     archiveDetectionChunkSize: config.archiveDetectionChunkSize ?? ARCHIVE_DETECTION_CHUNK_SIZE,
     archiveDetectionConcurrency: config.archiveDetectionConcurrency ?? ARCHIVE_DETECTION_CONCURRENCY,
@@ -409,18 +403,15 @@ function resolveEffectiveSettings(config: SorobanResurrectConfig): EffectiveSoro
     ttlWatchIntervalMs: config.ttlWatchIntervalMs ?? TTL_WATCH_INTERVAL_MS,
     ttlWatchThreshold: config.ttlWatchThreshold ?? TTL_WATCH_THRESHOLD,
     ttlWatchThresholdLedgers: config.ttlWatchThresholdLedgers ?? TTL_WATCH_THRESHOLD,
+    ttlWatchAutoExtend: config.ttlWatchAutoExtend ?? TTL_WATCH_AUTO_EXTEND,
     archiveDetectionMethod: config.archiveDetectionMethod ?? 'simulation',
     useSSE: config.useSSE ?? false,
     enableSimulationCache: config.enableSimulationCache ?? false,
     simulationCacheTtlMs: config.simulationCacheTtlMs ?? SIMULATION_CACHE_TTL_MS,
     simulationCacheMaxSize: config.simulationCacheMaxSize ?? SIMULATION_CACHE_MAX_SIZE,
-    archiveDetectionChunkSize: config.archiveDetectionChunkSize ?? ARCHIVE_DETECTION_CHUNK_SIZE,
-    archiveDetectionConcurrency:
-      config.archiveDetectionConcurrency ?? ARCHIVE_DETECTION_CONCURRENCY,
     maxBatchSize: config.maxBatchSize ?? MAX_BATCH_SIZE,
     restoreTxMemo: config.restoreTxMemo,
-    restoreTxMemoText: config.restoreTxMemoText ?? '',
-    logger: config.logger ?? NOOP_LOGGER,
-    rpcClient: server,
+    restoreTxMemoText: config.restoreTxMemoText,
+    runtime: config.runtime ?? SYSTEM_RUNTIME,
   }
 }

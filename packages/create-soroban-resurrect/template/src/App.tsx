@@ -28,7 +28,7 @@ export function App() {
   useEffect(() => {
     if (!contract) return
     sr.queryLedgerEntryTTL(contract.getFootprint())
-      .then((info) => setTtlLedgers(info.ttlLedgers))
+      .then((info) => setTtlLedgers(info.ttlLedgers ?? null))
       .catch(() => setTtlLedgers(null))
   }, [sr, contract])
 

@@ -6,10 +6,12 @@ const mockConnect = vi.fn()
 const mockSign = vi.fn()
 
 vi.mock('@creit.tech/xbull-wallet-connect', () => ({
-  XBullWalletConnect: vi.fn().mockImplementation(() => ({
-    connect: mockConnect,
-    sign: mockSign,
-  })),
+  xBullWalletConnect: vi.fn().mockImplementation(function () {
+    return {
+      connect: mockConnect,
+      sign: mockSign,
+    }
+  }),
 }))
 
 const PUBKEY = 'GABC000000000000000000000000000000000000000000000000000XBULL'

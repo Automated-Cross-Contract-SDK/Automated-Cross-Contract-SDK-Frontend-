@@ -1,6 +1,6 @@
 import { Transaction, rpc } from '@stellar/stellar-sdk'
 import { ArchivedLedgerEntry } from './types.js'
-import type { ResolvedSorobanResurrectConfig } from './types.js'
+import type { ResolvedSorobanResurrectConfig, SorobanResurrectConfig } from './types.js'
 import { SimulationCache } from './SimulationCache.js'
 import {
   isRestoreResponse,
@@ -11,6 +11,7 @@ import {
 import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
 import type { ISorobanRpcClient } from './RpcClient.js'
 import { runWithSignal, throwIfAborted, type AbortSignalOptions } from './AbortUtils.js'
+import { IncompleteFootprintError,readSimulationFootprint } from './SimulationFootprint.js'
 
 /**
  * Handles transaction simulation and archived-entry detection for a single
@@ -63,7 +64,7 @@ export class SorobanResurrectSimulator {
    */
   rebind(
     server: ISorobanRpcClient,
-    config: Required<SorobanResurrectConfig>,
+    config: ResolvedSorobanResurrectConfig,
     cache: SimulationCache | undefined,
   ): void {
     this._server = server
@@ -88,7 +89,7 @@ export class SorobanResurrectSimulator {
    */
   async simulate(
     transaction: Transaction,
-    options: AbortSignalOptions = {},
+    options: AbortSignalOptions & { updateState?: boolean } = {},
   ): Promise<rpc.Api.SimulateTransactionResponse> {
     const { signal } = options
     throwIfAborted(signal)
@@ -106,7 +107,7 @@ export class SorobanResurrectSimulator {
       signal,
     )
 
-    cache?.set(transaction, response)
+    this._cache?.set(transaction, response)
 
     return response
   }
@@ -146,7 +147,7 @@ export class SorobanResurrectSimulator {
     if (method === 'direct') {
       return this._detectViaDirect(transaction)
     }
-    return this._detectViaSimulation(transaction)
+    return this._detectViaSimulation(transaction, {})
   }
 
   /**

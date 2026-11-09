@@ -1,4 +1,4 @@
-import { XBullWalletConnect } from '@creit.tech/xbull-wallet-connect'
+import { xBullWalletConnect } from '@creit.tech/xbull-wallet-connect'
 import { WalletError, type WalletAdapter, type WalletCapabilities } from '@soroban-resurrect/sdk'
 import { asStellarPublicKey, asXdrBase64 } from '@soroban-resurrect/sdk'
 
@@ -18,7 +18,7 @@ export class XBullAdapter implements WalletAdapter {
     hardware: false,
   }
 
-  private readonly connector = new XBullWalletConnect()
+  private readonly connector = new xBullWalletConnect()
   private publicKey: string | undefined
 
   async isConnected(): Promise<boolean> {

@@ -8,16 +8,19 @@ import {
   xdr,
 } from '@stellar/stellar-sdk'
 import type { ISorobanRpcClient } from './RpcClient.js'
-import type {
-  SorobanResurrectConfig,
-  WalletAdapter,
-  FeeBumpConfig,
-  ArchivedLedgerEntry,
-  ResurrectResult,
-  DryRunResult,
-  SubmitLifecycleEvent,
-  ConfirmationPolicy,
-  ConfirmationTimeoutBehavior,
+import {
+  type SorobanResurrectConfig,
+  type WalletAdapter,
+  type FeeBumpConfig,
+  type ArchivedLedgerEntry,
+  type ResurrectResult,
+  type DryRunResult,
+  type SubmitLifecycleEvent,
+  type ConfirmationPolicy,
+  type ConfirmationTimeoutBehavior,
+  WalletError,
+  RebuildTimeBounds,
+  ExpiredTransactionInfo,
 } from './types.js'
 import type { ResurrectErrorCode } from './errors.js'
 import { IncompleteFootprintError } from './SimulationFootprint.js'
@@ -52,9 +55,13 @@ import {
   MAX_SEQUENCE_RETRIES,
 } from './constants.js'
 import { asTxHash, asXdrBase64, type TxHash, type XdrBase64 } from './branded-types.js'
-import { parseTransactionFailure } fycle-safety
-import { createFailureGuidrom './TransactionFailure.js'
+import { parseTransactionFailure } from './TransactionFailure.js'
+import { createFailureGuidance } from './FailureGuidance.js'
 import { runWithSignal, throwIfAborted, type AbortSignalOptions } from './AbortUtils.js'
+import { assertBatchSize } from './batchLimits.js'
+import type { SdkRuntime } from './types.js'
+import { SYSTEM_RUNTIME } from './runtime.js'
+import { assertWalletCapability } from './walletCapabilities.js'
 
 /** Parameters for the full restore-and-submit execution flow. */
 export interface ExecuteParams extends AbortSignalOptions {
@@ -100,6 +107,12 @@ export interface ExecuteParams extends AbortSignalOptions {
   confirmationTimeoutMs?: number
   /** Behavior when confirmation polling reaches its timeout. */
   confirmationTimeoutBehavior?: ConfirmationTimeoutBehavior
+  /** Replacement time bounds for the rebuilt original transaction. */
+  rebuildTimeBounds?: RebuildTimeBounds
+  /** Called when the original transaction expired during restore; return new bounds to approve a rebuild. */
+  approveExpiredRebuild?: (
+    expiredTransaction: ExpiredTransactionInfo,
+  ) => RebuildTimeBounds | undefined | Promise<RebuildTimeBounds | undefined>
 }
 
 async function validateWalletNetwork(
@@ -167,7 +180,6 @@ async function signAndMaybeFeeBump(params: {
   onSigning?: () => void
   onSigningFeeBump?: () => void
   onSubmitting?: () => void
-  signal?: AbortSignal
 }): Promise<{ hash: TxHash }> {
   const {
     tx,
@@ -180,10 +192,9 @@ async function signAndMaybeFeeBump(params: {
     onSigning,
     onSigningFeeBump,
     onSubmitting,
-    signal,
   } = params
 
-  throwIfCancelled(signal)
+  throwIfAborted(signal)
 
   // Fail fast when a fee-bump is requested but the wallet has opted out of it,
   // rather than prompting the user only to reject the envelope later.
@@ -321,18 +332,26 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
     wallet,
     config,
     signal,
+    onSigningRestore,
+    onSubmittingRestore,
     onRestoreNeeded,
     onRestoreSubmitted,
     onRestoreConfirmed,
     onOriginalSubmitted,
     onRestoreFailed,
     onSigningFeeBump,
-    signal,
+    onLifecycleEvent,
+    requestId,
+    feeBumpConfig,
+    simulationCache,
   } = params
+  const effectiveConfirmationPolicy: ConfirmationPolicy =
+    params.confirmationPolicy ?? 'wait-for-finality'
 
   const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
 
   const onSigningOriginal = params.onSigningOriginal
+  const pollInterval = config.pollIntervalMs ?? POLL_INTERVAL_MS
   const pollTimeout = config.pollTimeoutMs ?? POLL_TIMEOUT_MS
   let archivedKeysDetected = 0
   let restoreTxHash: TxHash | undefined
@@ -388,8 +407,10 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
             sourcePublicKey: publicKey,
             transactionData: simResponse.transactionData.build(),
             minResourceFee: parseInt(simResponse.minResourceFee, 10),
+            latestLedger: simResponse.latestLedger,
             config,
             account,
+            signal,
           }),
         signal,
       )
@@ -418,6 +439,8 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
           failure: createFailureGuidance('RESTORE_TX_PARSE_FAILED'),
         }
       }
+
+      await assertRestoreTransactionFresh(server, signedRestoreTx, restoreTx)
 
       throwIfAborted(signal)
       onSubmittingRestore?.()
@@ -462,7 +485,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
           return {
             success: false,
             archivedKeysDetected: archivedKeys.length,
-            restoreTxHash: restoreHash,
+            restoreTxHash,
             error: message,
             errorCode: 'UNKNOWN_ERROR',
             failure: createFailureGuidance('UNKNOWN_ERROR', 'rebuild'),
@@ -473,7 +496,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
           const result = expiredRebuildResult(
             originallyExpired,
             archivedKeys.length,
-            restoreHash,
+            restoreTxHash,
           )
           onRestoreFailed?.(result.error ?? 'Original transaction time bounds have expired')
           return result
@@ -494,11 +517,10 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
               networkPassphrase,
               originalTx.fee,
               signal,
+              approvedRebuildTimeBounds,
             ),
           signal,
         )
-        throwIfCancelled(signal)
-
         throwIfAborted(signal)
         onSigningOriginal?.()
         const originalWalletOptions = signal
@@ -553,11 +575,40 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       originalTxHash = asTxHash(originalResult!.hash)
       onOriginalSubmitted?.(originalTxHash)
 
-      const result: ResurrectResult = {
+      if (effectiveConfirmationPolicy === 'return-on-submission') {
+        return {
+          success: true,
+          originalTxHash,
+          restoreTxHash,
+          archivedKeysDetected: archivedKeys.length,
+          sequenceRetries,
+          confirmationStatus: 'submitted',
+        }
+      }
+
+      const originalStatus = await waitForTx(server, originalTxHash, config, signal)
+      if (originalStatus.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
+        const err = 'Original transaction failed to confirm'
+        onRestoreFailed?.(err)
+        return {
+          success: false,
+          archivedKeysDetected: archivedKeys.length,
+          restoreTxHash,
+          originalTxHash,
+          error: err,
+          errorCode: 'ORIGINAL_TX_FAILED',
+          failure: createFailureGuidance('ORIGINAL_TX_FAILED', 'confirmation'),
+          onchainError: parseTransactionFailure(originalStatus),
+          sequenceRetries,
+        }
+      }
+
+      return {
         success: true,
         originalTxHash,
         restoreTxHash,
         archivedKeysDetected: archivedKeys.length,
+        sequenceRetries,
       }
     }
 
@@ -586,8 +637,6 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
         networkPassphrase,
         config,
         server,
-        signingTimeoutMs: signingTimeout,
-        submissionTimeoutMs: originalSubmissionTimeout,
         onSigning: onSigningOriginal,
         onSigningFeeBump,
         signal,
@@ -634,7 +683,6 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
         success: true,
         originalTxHash: hash,
         archivedKeysDetected: 0,
-        confirmationStatus: 'confirmed',
       }
     }
 
@@ -652,6 +700,17 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
   } catch (err) {
     const message = signal?.aborted ? 'Operation cancelled' : walletErrorMessage(err)
     onRestoreFailed?.(message)
+    if (!signal?.aborted && err instanceof ResurrectError) {
+      return {
+        success: false,
+        archivedKeysDetected,
+        restoreTxHash,
+        originalTxHash,
+        error: message,
+        errorCode: err.code,
+        failure: createFailureGuidance(err.code),
+      }
+    }
     return {
       success: false,
       archivedKeysDetected,
@@ -765,7 +824,7 @@ async function waitForTransactionWithCallbacks(
     await new Promise<void>((resolve) => runtime.setTimeout(resolve, jitter))
   }
 
-  throw new ResurrectTimeoutError(`Transaction ${hash} did not complete within ${pollTimeoutMs}ms`)
+  throw new ResurrectError('CONFIRMATION_TIMEOUT', `Transaction ${hash} did not complete within ${pollTimeoutMs}ms`)
 }
 
 /** Parameters for {@link restoreKeys}. */
@@ -882,8 +941,10 @@ export async function restoreKeys(params: RestoreKeysParams): Promise<ResurrectR
           sourcePublicKey: publicKey,
           transactionData,
           minResourceFee,
+          latestLedger: simResponse.latestLedger,
           config,
           account,
+          signal,
         }),
       signal,
     )

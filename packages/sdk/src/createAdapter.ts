@@ -172,6 +172,7 @@ export async function createAdapter(
     throw new Error(
       `createAdapter: failed to load "${entry.pkg}" for wallet "${key}". ` +
         `Install it as a dependency (npm i ${entry.pkg}). Original error: ${reason}`,
+      { cause: err },
     )
   }
 

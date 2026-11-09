@@ -291,7 +291,8 @@ export function createSorobanResurrect(
   const estimate = async (transaction: Transaction): Promise<FeeEstimate> => {
     const instance = getResurrect()
     const archivedKeysDetected = await instance.detectArchivedKeys(transaction)
-    const minResourceFee = await instance.estimateRestoreFee(transaction)
+    const cost = await instance.estimateRestoreCost(transaction)
+    const minResourceFee = String(cost.minResourceFee)
     const estimatedRestoreFee = (BigInt(minResourceFee) * BigInt(RESTORE_FEE_MULTIPLIER)).toString()
     const estimateResult: FeeEstimate = {
       archivedKeysDetected: archivedKeysDetected.length,

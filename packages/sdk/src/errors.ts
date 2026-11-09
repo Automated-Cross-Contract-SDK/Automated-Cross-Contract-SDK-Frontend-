@@ -124,6 +124,12 @@ export type ResurrectErrorCode =
    * An unexpected JavaScript exception was thrown during the workflow.
    * Check `result.error` for the exception message.
    */
+  /** An RPC call exceeded its configured timeout. */
+  | 'RPC_TIMEOUT'
+
+  /** An RPC call failed at the transport level, or the circuit breaker is open. */
+  | 'NETWORK_ERROR'
+
   | 'UNKNOWN_ERROR'
   | 'RESTORE_FEE_CAP_EXCEEDED'
 

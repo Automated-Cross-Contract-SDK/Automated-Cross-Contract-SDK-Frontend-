@@ -1,8 +1,14 @@
 import { rpc, xdr } from '@stellar/stellar-sdk'
 
 import { asXdrBase64 } from './branded-types.js'
-import type { ArchivedLedgerEntry } from './types.js'
+import type {
+  ArchivedLedgerEntry,
+  ResurrectResult,
+  ResurrectSuccess,
+  ResurrectFailedResult,
+} from './types.js'
 import { getLedgerKeyEntryType } from './TTLHelpers.js'
+import { readSimulationFootprint } from './SimulationFootprint.js'
 
 export type Result<T, E = Error> = Ok<T, E> | Err<T, E>
 export type Option<T> = Some<T> | None<T>
@@ -184,11 +190,11 @@ export function isNone<T>(option: Option<T>): option is None<T> {
 
 /** Narrow a restore workflow result to its successful outcome. */
 export function isResurrectSuccess(result: ResurrectResult): result is ResurrectSuccess {
-  return result.success
+  return result.success === true
 }
 
 /** Narrow a restore workflow result to its typed failure outcome. */
-export function isResurrectFailure(result: ResurrectResult): result is ResurrectFailure {
+export function isResurrectFailure(result: ResurrectResult): result is ResurrectFailedResult {
   return !result.success
 }
 
@@ -197,10 +203,12 @@ export function matchResurrectResult<T>(
   result: ResurrectResult,
   handlers: {
     success: (result: ResurrectSuccess) => T
-    failure: (result: ResurrectFailure) => T
+    failure: (result: ResurrectFailedResult) => T
   },
 ): T {
-  return result.success ? handlers.success(result) : handlers.failure(result)
+  return isResurrectSuccess(result)
+    ? handlers.success(result)
+    : handlers.failure(result as ResurrectFailedResult)
 }
 
 export function toError(value: unknown): Error {

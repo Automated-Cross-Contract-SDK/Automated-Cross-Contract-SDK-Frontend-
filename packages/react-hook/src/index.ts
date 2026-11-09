@@ -12,7 +12,7 @@ export { useSorobanResurrectSubmit } from './useSorobanResurrectSubmit.js'
 
 export { useRestoreWatcher } from './useRestoreWatcher.js'
 
-export { useRestoreEstimate } from './useRestoreEstimate.js'
+export { useRestoreEstimate } from './hooks/useRestoreEstimate.js'
 
 export { useSorobanResurrectNetwork } from './useSorobanResurrectNetwork.js'
 
@@ -41,8 +41,8 @@ export type {
 
 export type {
   UseRestoreEstimateOptions,
-  UseRestoreEstimateReturn,
-} from './useRestoreEstimate.js'
+  UseRestoreEstimateResult,
+} from './hooks/useRestoreEstimate.js'
 
 export type {
   UseSorobanResurrectNetworkOptions,

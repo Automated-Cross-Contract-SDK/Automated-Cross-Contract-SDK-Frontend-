@@ -1,4 +1,3 @@
-import { rpc, Account, Keypair, SorobanDataBuilder, BASE_FEE, Memo } from '@stellar/stellar-sdk'
 import {
   rpc,
   Account,
@@ -11,7 +10,7 @@ import {
   xdr,
   FeeBumpTransaction,
 } from '@stellar/stellar-sdk'
-import {
+import type {
   SorobanResurrectConfig,
   FeeBumpSponsor,
   ArchivedLedgerEntry,
@@ -28,13 +27,19 @@ import {
   RESTORE_TX_SIZE_WARN_RATIO,
 } from './constants.js'
 import { calculateRestoreFee } from './feeCalculation.js'
-import { ISorobanRpcClient } from './RpcClient.js'
 import {
   delayWithSignal,
   runWithSignal,
   throwIfAborted,
   type AbortSignalOptions,
 } from './AbortUtils.js'
+import { isRestoreResponse,extractArchivedKeys } from './Archiver.js'
+import { RestoreFeeExceededError,ResurrectError,OriginalTransactionExpiredError } from './errors.js'
+import { evaluateRestoreFootprint,restoreSizeGuidance } from './footprintGuard.js'
+import { validateRestoreMemoConfig } from './memoValidation.js'
+
+/** Number of ledgers after simulation for which a restore preamble remains valid. */
+export const RESTORE_TX_LEDGER_BOUNDS_WINDOW = 30
 
 /** Parameters for building a restore transaction. */
 export interface BuildRestoreTxParams {
@@ -190,7 +195,6 @@ export async function buildRestoreTransaction(params: BuildRestoreTxParams): Pro
     }
   }
 
-  const memo = resolveRestoreMemo(explicitMemo, config)
   const builder = new TransactionBuilder(account, {
     fee: restoreFee,
     networkPassphrase,
@@ -354,7 +358,7 @@ export async function buildRestoreTransactionFromKeys(
   const sorobanData = new SorobanDataBuilder().setReadWrite(keys).build()
 
   const draftTx = new TransactionBuilder(account, {
-    fee: BASE_FEE,
+    fee: String(BASE_FEE),
     networkPassphrase,
   })
     .addOperation(Operation.restoreFootprint({}))
@@ -375,6 +379,7 @@ export async function buildRestoreTransactionFromKeys(
         sourcePublicKey,
         transactionData: sim.transactionData.build(),
         minResourceFee: parseInt(sim.minResourceFee, 10),
+        latestLedger: sim.latestLedger,
         config,
         account: new Account(sourcePublicKey, initialSequence),
         signal,
@@ -437,7 +442,7 @@ export async function waitForTransaction(
     await delayWithSignal(jitter, signal)
   }
 
-  throw new ResurrectTimeoutError(`Transaction ${hash} did not complete within ${pollTimeoutMs}ms`)
+  throw new ResurrectError('CONFIRMATION_TIMEOUT', `Transaction ${hash} did not complete within ${pollTimeoutMs}ms`)
 }
 
 function createAbortError(): Error {
@@ -549,7 +554,7 @@ async function streamTransactionViaEvents(
   if (!isSSEEnvironmentSupported()) {
     return null
   }
-  throwIfCancelled(signal)
+  throwIfAborted(signal)
 
   // Determine the latest ledger as a starting point for SSE streaming.
   // We try getLatestLedger first, then fall back to the transaction's latestLedger.
@@ -613,7 +618,7 @@ async function streamTransactionViaEvents(
       }),
       signal: controller.signal,
     })
-    throwIfCancelled(signal)
+    throwIfAborted(signal)
 
     if (!response.ok || !response.body || typeof response.body.getReader !== 'function') {
       // A `fetch` implementation that resolves but returns a body without a
@@ -630,7 +635,7 @@ async function streamTransactionViaEvents(
 
     while (true) {
       const { done, value } = await reader.read()
-      throwIfCancelled(signal)
+      throwIfAborted(signal)
       if (done) break
 
       buffer += decoder.decode(value, { stream: true })
@@ -686,7 +691,7 @@ async function pollTransactionAdaptive(
   signal?: AbortSignal,
 ): Promise<rpc.Api.GetTransactionResponse> {
   let attempt = 0
-  const startTime = runtime.now()
+  const startTime = Date.now()
 
   while (Date.now() - startTime < timeoutMs) {
     throwIfAborted(signal)
@@ -699,7 +704,7 @@ async function pollTransactionAdaptive(
     await delayWithSignal(delay, signal)
   }
 
-  throw new ResurrectTimeoutError(`Transaction ${hash} did not complete within ${timeoutMs}ms`)
+  throw new ResurrectError('CONFIRMATION_TIMEOUT', `Transaction ${hash} did not complete within ${timeoutMs}ms`)
 }
 
 /**
@@ -801,8 +806,8 @@ export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
     } else if (innerType.name === 'envelopeTypeTx') {
       const innerV1 = innerEnvelope.value() as xdr.TransactionV1Envelope
       operations = innerV1.tx().operations()
-      parsedXdrOperationsCache.set(tx, operations)
-      return operations
+    } else {
+      throw new Error(`Unsupported inner transaction envelope type: ${innerType.name}`)
     }
 
     return cacheOperations(tx, operations)
@@ -894,6 +899,7 @@ export async function buildOriginalAfterRestore(
   networkPassphrase: string,
   fee: string,
   signal?: AbortSignal,
+  rebuildTimeBounds?: RebuildTimeBounds,
 ): Promise<Transaction> {
   const now = Math.floor(Date.now() / 1000)
   const bounds = rebuildTimeBounds ?? originalTx.timeBounds
@@ -1021,9 +1027,9 @@ export async function buildFeeBumpTransaction(
     throw new Error('Failed to build fee-bump transaction')
   }
 
-  const signedFeeBumpXdr = await wrapSigningError(() =>
-    sponsor.signFeeBump(asXdrBase64(feeBumpTx.toXDR()), { networkPassphrase }),
-  )
+  const signedFeeBumpXdr = await sponsor.signFeeBump(asXdrBase64(feeBumpTx.toXDR()), {
+    networkPassphrase,
+  })
 
   return asXdrBase64(signedFeeBumpXdr)
 }

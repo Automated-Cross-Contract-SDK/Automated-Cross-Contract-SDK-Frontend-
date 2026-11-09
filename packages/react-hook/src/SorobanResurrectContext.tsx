@@ -146,6 +146,7 @@ export function SorobanResurrectProvider({ config, children }: SorobanResurrectP
     for (const subscription of eventSubscriptionsRef.current) subscription.attach(r)
 
     return () => {
+      mounted = false
       for (const subscription of eventSubscriptionsRef.current) subscription.detach()
       unsubscribe()
       r.dispose()
