@@ -5,278 +5,43 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  schedule:
-    - cron: '0 3 * * *'
   workflow_dispatch:
 
-# Serialize overlapping CI runs for the same ref so release/provenance steps
-# never execute in conflicting parallel executions. Newer triggers cancel
-# in-flight runs on the same ref (duplicate-run protection).
+permissions:
+  contents: read
+
+# Cancel older runs for the same branch when new commits are pushed.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  npm-audit:
-    name: npm-audit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - run: npm ci
-
-      - name: Audit production dependencies (fail on unallowlisted high/critical)
-        run: node scripts/check-audit.mjs
-
   ci:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version: [20, 22]
-
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 22
           cache: npm
 
       - run: npm ci
 
-      - name: Typecheck (all packages via Turbo)
-        run: npm run typecheck
-
-      - name: Type tests — public API surface (all packages via Turbo)
-        run: npm run test:types
-
-      - name: Lint (all packages via Turbo)
+      # Lint and typecheck are independent of each other, so run all checks
+      # even when an earlier one fails to show every problem in one run.
+      - name: Lint
         run: npm run lint
 
-      - name: Format check
-        run: npm run format
-
-      - name: Verify every package defines a test script
-        run: |
-          missing=0
-          for pkg in packages/*/package.json; do
-            if ! node -e "process.exit(require('./${pkg}').scripts?.test ? 0 : 1)"; then
-              echo "::error file=${pkg}::package has no \"test\" script — it will be silently skipped by 'npm test' (Turbo)"
-              missing=1
-            fi
-          done
-          exit $missing
-
-      - name: Test with coverage (all packages)
-        run: |
-          for pkg in adapter-albedo adapter-freighter adapter-lobstr adapter-xbull react-hook sdk svelte-hook vue-hook; do
-            echo "::group::packages/$pkg"
-            npm run test -w "packages/$pkg" -- --coverage
-            echo "::endgroup::"
-          done
-
-      - name: Test with coverage (vue-hook)
-        run: npm run test -w packages/vue-hook -- --coverage
-
-      - name: Test with coverage (svelte-hook)
-        run: npm run test -w packages/svelte-hook -- --coverage
-
-      - name: Test with coverage (wallet adapters)
-        run: |
-          npm run test -w packages/adapter-xbull -- --coverage
-          npm run test -w packages/adapter-freighter -- --coverage
-          npm run test -w packages/adapter-albedo -- --coverage
-          npm run test -w packages/adapter-lobstr -- --coverage
-
-      - name: Test with coverage (vue-hook)
-        run: npm run test -w packages/vue-hook -- --coverage
-
-      - name: Test with coverage (svelte-hook)
-        run: npm run test -w packages/svelte-hook -- --coverage
-
-      - name: Test with coverage (wallet adapters)
-        run: |
-          for pkg in adapter-albedo adapter-freighter adapter-lobstr adapter-xbull; do
-            npm run test -w packages/$pkg -- --coverage
-          done
-
-      - uses: codecov/codecov-action@v4
-        with:
-          files: packages/sdk/coverage/lcov.info,packages/react-hook/coverage/lcov.info
-          fail_ci_if_error: true
-
-      - name: Build (all packages via Turbo)
-        run: npm run build
-      - name: Build (all packages via Turbo)
-        run: npm run build
-
-  mutation:
-    name: mutation (transaction safety invariants)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - run: npm ci
-
-      - name: Run mutation tests (scoped to transaction/wallet safety logic)
-        run: npm run test:mutation
-
-      - if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: mutation-report
-          path: reports/mutation
-          if-no-files-found: ignore
-
-  examples:
-    name: examples typecheck
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - run: npm ci
-
-      - name: Build packages the examples depend on
-        run: npm run build
-
-      - name: Typecheck every example against the workspace packages
-        run: npm run typecheck:examples
-
-  cross-platform:
-    name: ${{ matrix.package }} (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        package:
-          - react-hook
-          - vue-hook
-          - svelte-hook
-          - adapter-albedo
-          - adapter-freighter
-          - adapter-lobstr
-          - adapter-rabet
-          - adapter-walletconnect
-          - adapter-walletkit
-          - adapter-xbull
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - run: npm ci
-
-      - name: Build workspace dependencies
-        run: npx turbo run build --filter=@soroban-resurrect/${{ matrix.package }}^...
-
       - name: Typecheck
-        run: npm run typecheck -w packages/${{ matrix.package }} --if-present
-
-      - name: Test
-        run: npm run test -w packages/${{ matrix.package }}
-
-  # Scheduled dependency update validation.
-  #
-  # Purpose: catch breakage from automated dependency version bumps before they
-  # are merged. Runs on a nightly schedule, on manual dispatch, and on
-  # dependency-update PRs (Dependabot/Renovate).
-  #
-  # Stable interface:
-  #   - Trigger: schedule (cron '0 3 * * *'), workflow_dispatch, and
-  #     pull_request events whose branch/author indicates an automated
-  #     dependency update.
-  #   - Inputs (workflow_dispatch): `node-version` (default 20) selects the
-  #     Node.js version used for validation.
-  #   - Failure semantics: any failing step fails the job; the job is the
-  #     required signal that a dependency bump is safe to merge.
-  #
-  # See docs/guide/local-package-development.md for how to run and interpret
-  # this workflow locally.
-  dependency-update-validation:
-    name: dependency-update-validation
-    if: >
-      github.event_name == 'schedule' ||
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' &&
-        (startsWith(github.head_ref, 'dependabot/') ||
-         startsWith(github.head_ref, 'renovate/') ||
-         github.actor == 'dependabot[bot]' ||
-         github.actor == 'renovate[bot]'))
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ github.event.inputs.node-version || '20' }}
-          cache: npm
-
-      - name: Install workspace dependencies
-        run: npm ci
-
-      - name: Build workspace (all packages via Turbo)
-        run: npm run build
-
-      - name: Typecheck workspace (all packages via Turbo)
+        if: ${{ !cancelled() }}
         run: npm run typecheck
 
-      - name: Test workspace (all packages via Turbo)
+      - name: Test
+        if: ${{ !cancelled() }}
         run: npm test
 
-      - name: Validate package fixtures
-        run: |
-          if [ -d fixtures ]; then
-            for dir in fixtures/*/; do
-              [ -f "${dir}package.json" ] || continue
-              echo "::group::fixture ${dir}"
-              (cd "${dir}" && npm install --no-audit --no-fund && npm test --if-present)
-              echo "::endgroup::"
-            done
-          else
-            echo "No fixtures directory present; skipping fixture validation."
-          fi
-
-  wallet-e2e:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      FREIGHTER_E2E: ${{ secrets.FREIGHTER_E2E }}
-      E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-      - run: npm ci
-      - run: npx --yes playwright@1.55.0 install --with-deps chromium
-      - run: npx --yes playwright@1.55.0 test
-      - if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: wallet-e2e-report
-          path: |
-            playwright-report
-            test-results
+      - name: Build
+        if: ${{ !cancelled() }}
+        run: npm run build

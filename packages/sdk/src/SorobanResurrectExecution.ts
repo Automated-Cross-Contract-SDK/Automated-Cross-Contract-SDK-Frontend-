@@ -9,10 +9,13 @@ import type {
   SubmitLifecycleEvent,
   SubmitWithRestoreOptions,
   WalletAdapter,
+  TxHash,
+  HistoryPersistenceOptions,
+  HistoryEntryId,
 } from './types.js'
 import type { SubmitWithRestoreRequestOptions } from './RequestConfigOverrides.js'
 import { resolveSubmitConfig } from './RequestConfigOverrides.js'
-import type { ISorobanRpcClient } from './RpcClient.js'
+import { RetryingRpcClient, type ISorobanRpcClient } from './RpcClient.js'
 import { executeWithRestore, sendTransaction as _sendTransaction } from './Executor.js'
 import {
   buildRestoreTransaction,
@@ -23,6 +26,8 @@ import {
   waitForTransaction,
   extractXdrOperations,
   getExpiredTransactionInfo,
+  waitForTransactionSSE,
+  assertRestoreTransactionFresh,
 } from './Restorer.js'
 import {
   isRestoreResponse,
@@ -34,9 +39,15 @@ import { TransactionHistory, TransactionHistoryEntry } from './TransactionHistor
 import { attachHistoryPersistence, type HistoryPersistenceHandle } from './HistoryPersistence.js'
 import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
 import { SorobanResurrectSimulator } from './SorobanResurrectSimulation.js'
-import { asTxHash, asHistoryEntryId } from './branded-types.js'
+import { asTxHash, asHistoryEntryId, asXdrBase64, asFeeStroops } from './branded-types.js'
 import type { AbortSignalOptions } from './AbortUtils.js'
-import { runWithSignal } from './AbortUtils.js'
+import { runWithSignal, throwIfAborted } from './AbortUtils.js'
+import { createFailureGuidance } from './FailureGuidance.js'
+import { assertBatchSize } from './batchLimits.js'
+import { DEFAULT_NETWORK_PASSPHRASE,MAX_BATCH_SIZE,POLL_INTERVAL_MS,POLL_TIMEOUT_MS } from './constants.js'
+import { ResurrectError,OriginalTransactionExpiredError } from './errors.js'
+import { calculateRestoreFee } from './feeCalculation.js'
+import { configForWalletRestore,validateRestoreMemoConfig } from './memoValidation.js'
 
 /**
  * Handles all transaction execution concerns for a `SorobanResurrect` instance:
@@ -269,7 +280,7 @@ export class SorobanResurrectExecutor {
     wallet: WalletAdapter,
     opts: RestoreKeysOptions & AbortSignalOptions = {},
   ): Promise<ResurrectResult> {
-    assertBatchSize(keys.length, this._config.maxBatchSize, 'restoreKeys')
+    assertBatchSize(keys.length, this._config.maxBatchSize ?? MAX_BATCH_SIZE, 'restoreKeys')
     const stateMgr = this._stateMgr
     const emitter = stateMgr.emitter
     const { signal } = opts
@@ -347,7 +358,7 @@ export class SorobanResurrectExecutor {
           )
 
       if (status.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
-        throw new RestoreError('Restore transaction failed')
+        throw new ResurrectError('RESTORE_TX_FAILED', 'Restore transaction failed')
       }
 
       emitter.emit('restoreConfirmed', restoreHash)
@@ -479,10 +490,6 @@ export class SorobanResurrectExecutor {
 
     const restoreConfig = configForWalletRestore(effectiveConfig, wallet)
     validateRestoreMemoConfig(restoreConfig)
-
-    const historyId = this._history.add(transaction)
-    const stateMgr = this._stateMgr
-    const emitter = stateMgr.emitter
 
     const result = await executeWithRestore({
       server: options.retry ? new RetryingRpcClient(this._server, options.retry) : this._server,
@@ -721,7 +728,6 @@ export class SorobanResurrectExecutor {
     if (
       items.some(
         (item) =>
-          item.configOverrides !== undefined ||
           item.restoreTxMemo !== undefined ||
           item.restoreTxMemoText !== undefined,
       )
@@ -840,7 +846,7 @@ export class SorobanResurrectExecutor {
         { signal: sharedSignal },
       )
       if (status.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
-        throw new RestoreError('Batch restore transaction failed')
+        throw new ResurrectError('RESTORE_TX_FAILED', 'Batch restore transaction failed')
       }
       emitter.emit('restoreConfirmed', restoreHash)
       stateMgr.setState(
@@ -853,7 +859,7 @@ export class SorobanResurrectExecutor {
       emitter.emit('error', message)
       return items.map((_, i) => ({
         success: false,
-        restoreTxHash,
+        restoreTxHash: restoreHash,
         archivedKeysDetected: archivedKeysByTx[i]?.length ?? 0,
         error: message,
         errorCode: sharedSignal?.aborted ? 'ABORTED' : 'UNKNOWN_ERROR',
@@ -863,6 +869,7 @@ export class SorobanResurrectExecutor {
     const results: ResurrectResult[] = []
     for (let i = 0; i < items.length; i++) {
       const item = items[i]
+      const archivedKeysDetected = archivedKeysByTx[i]?.length ?? 0
       const { signal } = options
       try {
         const preparedTx = await runWithSignal(

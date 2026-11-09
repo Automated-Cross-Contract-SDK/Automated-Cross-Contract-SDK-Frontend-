@@ -5,7 +5,8 @@ import { renderToString } from 'react-dom/server'
 import { SorobanResurrect } from '@soroban-resurrect/sdk'
 
 // The SDK is mocked so this test isolates the hook package's own module scope.
-vi.mock('@soroban-resurrect/sdk', () => ({
+vi.mock('@soroban-resurrect/sdk', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@soroban-resurrect/sdk')>()),
   SorobanResurrect: vi.fn(),
   isProcessingState: vi.fn(() => false),
 }))

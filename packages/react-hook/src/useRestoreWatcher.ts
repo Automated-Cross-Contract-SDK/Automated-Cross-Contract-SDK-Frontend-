@@ -216,7 +216,6 @@ export function useRestoreWatcher(
       }
       cancel()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [start, autoStart, cancel])
 
   return {

@@ -75,7 +75,8 @@ const archivedLedgerKey = { toXDR: () => 'archived-key-base64' }
 function makeRestoreSimResponse() {
   return {
     id: 'sim-1',
-    latestLedger: 1000,
+    // Must match getLatestLedger() below so the restore preamble is fresh.
+    latestLedger: 100,
     events: [],
     _parsed: true,
     transactionData: {

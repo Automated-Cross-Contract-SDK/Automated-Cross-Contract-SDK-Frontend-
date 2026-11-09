@@ -70,6 +70,7 @@ import {
   RPC_CIRCUIT_BREAKER_COOLDOWN_MS,
 } from './constants.js'
 import type { SubmitRetryOptions } from './types.js'
+import { ResurrectError, type ResurrectErrorCode } from './errors.js'
 
 // ---------------------------------------------------------------------------
 // Interface
@@ -208,29 +209,29 @@ export class SorobanRpcClient implements ISorobanRpcClient {
   }
 
   simulateTransaction(transaction: Transaction): Promise<rpc.Api.SimulateTransactionResponse> {
-    return withNetworkError(this.ensureServer().simulateTransaction(transaction))
+    return this.ensureServer().simulateTransaction(transaction)
   }
 
   sendTransaction(
     transaction: Transaction | import('@stellar/stellar-sdk').FeeBumpTransaction,
   ): Promise<rpc.Api.SendTransactionResponse> {
-    return withNetworkError(this.ensureServer().sendTransaction(transaction))
+    return this.ensureServer().sendTransaction(transaction)
   }
 
   getTransaction(hash: string): Promise<rpc.Api.GetTransactionResponse> {
-    return withNetworkError(this.ensureServer().getTransaction(hash))
+    return this.ensureServer().getTransaction(hash)
   }
 
   getAccount(publicKey: string): Promise<Account> {
-    return withNetworkError(this.ensureServer().getAccount(publicKey))
+    return this.ensureServer().getAccount(publicKey)
   }
 
   getLedgerEntries(...keys: xdr.LedgerKey[]): Promise<rpc.Api.GetLedgerEntriesResponse> {
-    return withNetworkError(this.ensureServer().getLedgerEntries(...keys))
+    return this.ensureServer().getLedgerEntries(...keys)
   }
 
   getLatestLedger(): Promise<rpc.Api.GetLatestLedgerResponse> {
-    return withNetworkError(this.ensureServer().getLatestLedger())
+    return this.ensureServer().getLatestLedger()
   }
 
   getNetwork(): Promise<unknown> {
@@ -301,7 +302,7 @@ const DEFAULT_RESILIENCE: ResolvedRpcResilienceOptions = {
 
 /** Thrown when an RPC call exceeds its configured `timeoutMs`. */
 export class RpcTimeoutError extends Error {
-  readonly code = ResurrectErrorCode.RPC_TIMEOUT
+  readonly code: ResurrectErrorCode = 'RPC_TIMEOUT'
 
   constructor(timeoutMs: number) {
     super(`RPC call timed out after ${timeoutMs}ms`)
@@ -313,7 +314,7 @@ export class RpcTimeoutError extends Error {
 export class RpcCircuitOpenError extends ResurrectError {
   constructor(retryAfterMs: number) {
     super(
-      ResurrectErrorCode.NETWORK_ERROR,
+      'NETWORK_ERROR',
       `RPC circuit breaker is open; retry after ${retryAfterMs}ms`,
     )
     this.name = 'RpcCircuitOpenError'

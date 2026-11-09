@@ -50,7 +50,6 @@ export function useResolvedResurrect(options: ResolvedResurrectOptions): Soroban
     if (!explicit && !ctx?.resurrect && config) {
       forceRender((n) => n + 1)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [configKey])
 
   const instance = explicit ?? ctx?.resurrect ?? ownRef.current

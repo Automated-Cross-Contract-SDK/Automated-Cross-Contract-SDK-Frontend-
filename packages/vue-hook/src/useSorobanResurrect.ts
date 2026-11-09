@@ -84,6 +84,12 @@ export function useSorobanResurrect(
   const state = ref<RestoreStateInfo>({ state: 'idle', message: '' })
   const lastResult = ref<ResurrectResult | null>(null)
   const eventUnsubscribers = new Set<() => void>()
+  const activeSubmissions = new Set<AbortController>()
+
+  /** Aborts every in-flight submitWithRestore call started by this composable. */
+  const cancel = (): void => {
+    for (const controller of activeSubmissions) controller.abort()
+  }
 
   // Watch config changes and reinitialize the SDK
   watch(
@@ -98,6 +104,7 @@ export function useSorobanResurrect(
         state.value = info
       })
       onCleanup(() => {
+        cancel()
         unsubscribeState()
         for (const unsubscribe of eventUnsubscribers) unsubscribe()
         eventUnsubscribers.clear()
@@ -121,7 +128,7 @@ export function useSorobanResurrect(
     const info = state.value as RestoreStateInfo & {
       archivedKeys?: ArchivedLedgerEntry[]
     }
-    if (info.state === 'idle' || info.state === 'detecting') return []
+    if (info.state === 'idle') return []
     return info.archivedKeys ?? []
   })
 

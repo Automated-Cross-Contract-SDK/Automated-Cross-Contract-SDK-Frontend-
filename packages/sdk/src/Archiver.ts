@@ -4,6 +4,7 @@ import { ArchivedLedgerEntry, SimulateResponse } from './types.js'
 import { getLedgerKeyEntryType } from './TTLHelpers.js'
 import {
   asContractIdHex,
+  asXdrBase64,
   type ContractIdHex,
   type HexString,
 } from './branded-types.js'
@@ -15,6 +16,15 @@ import { LEDGER_ENTRY_CHUNK_SIZE, LEDGER_ENTRY_CONCURRENCY } from './constants.j
 import { IncompleteFootprintError, readSimulationFootprint } from './SimulationFootprint.js'
 
 const debug = createDebugger('archiver')
+
+/** Best-effort entry type; `undefined` when the key cannot be inspected. */
+function tryGetLedgerKeyEntryType(key: xdr.LedgerKey): ArchivedLedgerEntry['entryType'] {
+  try {
+    return getLedgerKeyEntryType(key)
+  } catch {
+    return undefined
+  }
+}
 
 function compareArchivedEntries(
   a: ArchivedLedgerEntry,
@@ -101,21 +111,22 @@ export function extractArchivedKeys(
   response: rpc.Api.SimulateTransactionRestoreResponse,
 ): ArchivedLedgerEntry[] {
   const { readWrite } = readSimulationFootprint(response, { requireReadWrite: true })
+  const keys: ArchivedLedgerEntry[] = []
   try {
-    const footprint = response.transactionData.getFootprint()
-    const readWrite = footprint.readWrite()
-
     for (const ledgerKey of readWrite) {
-      const keyBase64 = serializeLedgerKey(ledgerKey)
-      keys.push({
+      const entry: ArchivedLedgerEntry = {
         key: ledgerKey,
-        keyBase64,
-        entryType: getLedgerKeyEntryType(ledgerKey),
-      })
+        keyBase64: serializeLedgerKey(ledgerKey),
+      }
+      const entryType = tryGetLedgerKeyEntryType(ledgerKey)
+      if (entryType) entry.entryType = entryType
+      keys.push(entry)
     }
-  } catch (err) {
-    debug('extractArchivedKeys: failed to read footprint', err)
-    return keys
+  } catch (error) {
+    throw new IncompleteFootprintError(
+      'invalid-footprint',
+      `a read-write ledger key could not be serialized: ${error instanceof Error ? error.message : String(error)}.`,
+    )
   }
 
   keys.sort(compareArchivedEntries)
@@ -186,7 +197,6 @@ async function detectArchivedChunk(
     const knownKeys = new Set<string>()
     if (result.entries) {
       for (const entry of result.entries) {
-          key,
         knownKeys.add(entry.key.toXDR('base64'))
       }
     }

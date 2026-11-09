@@ -27,7 +27,7 @@ export interface QueryLedgerTTLOptions {
 
 const latestLedgerCache = new WeakMap<
   ISorobanRpcClient,
-  { at: number; sequence: Promise<number> }
+  { at: number; sequence: Promise<number>; runtime: SdkRuntime }
 >()
 
 /**
@@ -93,8 +93,13 @@ export interface LedgerEntryTTLInfo {
   ttlLedgers?: number
   /** Whether the entry is already archived (expired TTL or not found on-chain). */
   isArchived: boolean
-  /** `live` when a usable TTL was returned; otherwise `unavailable`. */
-  status: 'live' | 'unavailable'
+  /**
+   * `live` when a usable TTL was returned, `unavailable` when none exists, or
+   * `unknown` when the RPC lookup for this key failed (see `error`).
+   */
+  status: 'live' | 'unavailable' | 'unknown'
+  /** Lookup error for this key when `status` is `unknown`. */
+  error?: unknown
   /** Reason no current live TTL is available. */
   unavailableReason?: TTLUnavailableReason
   /** Rough estimate of seconds remaining until expiry, based on ~5 s per ledger. */
@@ -187,7 +192,6 @@ function makeLiveInfo(
   return {
     keyBase64,
     entryType,
-    status: isArchived ? 'archived' : ttlLedgers <= warningWindowLedgers ? 'near-expiry' : 'healthy',
     liveUntilLedger,
     currentLedger,
     ttlLedgers,
@@ -224,7 +228,8 @@ export async function queryLedgerTTL(
   keys: xdr.LedgerKey[],
   opts: QueryLedgerTTLOptions = {},
 ): Promise<TTLQueryResult> {
-  const queriedAt = Date.now()
+  const runtime = opts.runtime ?? SYSTEM_RUNTIME
+  const queriedAt = runtime.now()
   const warningWindowLedgers = opts.warningWindowLedgers ?? DEFAULT_TTL_WARNING_WINDOW_LEDGERS
   if (!Number.isInteger(warningWindowLedgers) || warningWindowLedgers < 0) {
     throw new Error('warningWindowLedgers must be a non-negative integer')
@@ -233,7 +238,6 @@ export async function queryLedgerTTL(
   const currentLedger =
     opts.currentLedger ?? (await getCachedLatestLedger(server, opts.latestLedgerCacheMs, runtime))
 
-  const failedChunks: TTLQueryResult['failedChunks'] = []
   const infoMap = new Map<string, LedgerEntryTTLInfo>()
   const failedChunks: TTLQueryResult['failedChunks'] = []
   const errorsByKey = new Map<string, unknown>()
@@ -290,6 +294,7 @@ export async function queryLedgerTTL(
         entry.liveUntilLedgerSeq,
         currentLedger,
         getLedgerKeyEntryType(entry.key),
+        warningWindowLedgers,
       ),
     )
   }

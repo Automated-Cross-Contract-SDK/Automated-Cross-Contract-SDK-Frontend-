@@ -39,7 +39,6 @@ export class AlbedoAdapter implements WalletAdapter {
       const result = await albedo.tx({
         xdr: tx,
         network: opts?.network ?? 'testnet',
-        networkPassphrase: opts?.networkPassphrase,
         submit: false,
       })
       return asXdrBase64(result.signed_envelope_xdr)

@@ -1,15 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import { SorobanResurrectProvider } from '../SorobanResurrectProvider';
-import { useRestoreEstimate } from '../useRestoreEstimate';
-import type { RestoreCostEstimate } from '@soroban-resurrect/core';
+import { SorobanResurrectProvider } from '../SorobanResurrectContext.js';
+import { useRestoreEstimate } from '../hooks/useRestoreEstimate.js';
+import type { RestoreCostEstimate } from '@soroban-resurrect/sdk';
 
 const estimateRestoreCost = vi.fn();
 
-vi.mock('@soroban-resurrect/core', async () => {
-  const actual = await vi.importActual<typeof import('@soroban-resurrect/core')>(
-    '@soroban-resurrect/core',
+vi.mock('@soroban-resurrect/sdk', async () => {
+  const actual = await vi.importActual<typeof import('@soroban-resurrect/sdk')>(
+    '@soroban-resurrect/sdk',
   );
   return {
     ...actual,

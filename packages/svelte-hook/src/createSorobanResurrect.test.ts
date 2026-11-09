@@ -22,7 +22,7 @@ vi.mock('@soroban-resurrect/sdk', () => ({
     },
     reset: mockReset,
     detectArchivedKeys: mockDetectArchivedKeys,
-    estimateRestoreFee: vi.fn().mockResolvedValue('100'),
+    estimateRestoreCost: vi.fn().mockResolvedValue({ minResourceFee: 100 }),
     submitWithRestore: mockSubmitWithRestore,
     dispose: mockDispose,
     simulate: mockSimulate,

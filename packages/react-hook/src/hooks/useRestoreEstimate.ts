@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
-import type { RestoreCostEstimate } from '@soroban-resurrect/core';
-import { useResolvedResurrect } from './useResolvedResurrect';
+import type { RestoreCostEstimate } from '@soroban-resurrect/sdk';
+import { useResolvedResurrect } from './useResolvedResurrect.js';
 
 export interface UseRestoreEstimateOptions {
   /**

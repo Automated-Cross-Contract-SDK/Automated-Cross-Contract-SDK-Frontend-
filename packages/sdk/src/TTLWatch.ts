@@ -12,6 +12,7 @@ import type {
   ResolvedSorobanResurrectConfig,
   WalletAdapter,
   SorobanResurrectEvents,
+  SorobanResurrectConfig,
 } from './types.js'
 import type { SdkRuntime } from './types.js'
 import { SYSTEM_RUNTIME } from './runtime.js'
@@ -20,10 +21,12 @@ import { getExpiringSoonEntries, type LedgerEntryTTLInfo } from './TTLHelpers.js
 import { calculateRestoreFee } from './feeCalculation.js'
 import { isErrorResponse } from './Archiver.js'
 import { DEFAULT_NETWORK_PASSPHRASE } from './constants.js'
-import { asTxHash } from './branded-types.js'
+import { asTxHash, asXdrBase64 } from './branded-types.js'
 import { signAndVerifyTransaction } from './signedTransaction.js'
 import { configForWalletRestore } from './memoValidation.js'
-import { resolveRestoreMemo } from './Restorer.js'
+import { assertRestoreTransactionFresh, resolveRestoreMemo } from './Restorer.js'
+import { RESTORE_TX_LEDGER_BOUNDS_WINDOW } from './index.js'
+import { withPhaseTimeout } from './phaseTimeout.js'
 
 /** Options for {@link watchTTL}. */
 export interface TTLWatchOptions {
@@ -111,7 +114,7 @@ function buildTTLExtensionTransaction(
  */
 export async function extendLedgerTTL(
   server: ISorobanRpcClient,
-  config: Required<SorobanResurrectConfig>,
+  config: ResolvedSorobanResurrectConfig,
   keys: xdr.LedgerKey[],
   options: ExtendLedgerTTLOptions,
 ): Promise<ExtendLedgerTTLResult> {
@@ -209,7 +212,13 @@ export async function extendLedgerTTL(
   )
   const hash = asTxHash(sent.hash)
   const status = await withPhaseTimeout(
-    waitForTerminalStatus(server, hash, config.pollIntervalMs, config.restoreConfirmationTimeoutMs),
+    waitForTerminalStatus(
+      server,
+      hash,
+      config.pollIntervalMs,
+      config.restoreConfirmationTimeoutMs ?? config.pollTimeoutMs,
+      config.runtime,
+    ),
     config.restoreConfirmationTimeoutMs,
     'TTL extension confirmation',
   )
@@ -281,7 +290,6 @@ async function buildRestoreTxForKeys(
     .addOperation(Operation.restoreFootprint({}))
     .setSorobanData(draftData)
     .setTimeout(30)
-    .setLedgerbounds(sim.latestLedger, sim.latestLedger + RESTORE_TX_LEDGER_BOUNDS_WINDOW)
     .build()
 
   const sim = await server.simulateTransaction(draftTx)
@@ -298,6 +306,7 @@ async function buildRestoreTxForKeys(
     .addOperation(Operation.restoreFootprint({}))
     .setSorobanData(sim.transactionData.build())
     .setTimeout(30)
+    .setLedgerbounds(sim.latestLedger, sim.latestLedger + RESTORE_TX_LEDGER_BOUNDS_WINDOW)
 
   const memo = resolveRestoreMemo(undefined, config)
   if (memo) builder.addMemo(memo)
@@ -336,7 +345,8 @@ export function watchTTL(
   opts: TTLWatchOptions = {},
 ): TTLWatchHandle {
   const intervalMs = opts.intervalMs ?? config.ttlWatchIntervalMs
-  const thresholdLedgers = opts.thresholdLedgers ?? config.ttlWatchThresholdLedgers
+  const thresholdLedgers =
+    opts.thresholdLedgers ?? config.ttlWatchThresholdLedgers ?? config.ttlWatchThreshold
   const autoExtend = opts.autoExtend ?? config.ttlWatchAutoExtend
   const runtime = config.runtime ?? SYSTEM_RUNTIME
 
@@ -379,7 +389,10 @@ export function watchTTL(
       const publicKey = await wallet.getPublicKey()
       if (stopped) return
 
-      const restoreConfig = configForWalletRestore(config, wallet)
+      const restoreConfig = {
+        ...config,
+        ...configForWalletRestore(config, wallet),
+      } as ResolvedSorobanResurrectConfig
       const restoreTx = await buildRestoreTxForKeys(
         server,
         publicKey,

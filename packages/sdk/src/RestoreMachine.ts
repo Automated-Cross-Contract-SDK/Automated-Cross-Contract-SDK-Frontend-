@@ -271,13 +271,13 @@ export const restoreMachine = createMachine<
     // and testability. The machine config describes *what* transitions happen;
     // these implementations describe *how* context is updated on each.
     actions: {
-      enterSimulating: assign({
+      enterSimulating: assign<RestoreMachineContext, RestoreMachineEvent>({
         message: () => 'Simulating transaction...',
         archivedKeys: () => [],
         error: () => undefined,
       }),
 
-      enterRestoreNeeded: assign({
+      enterRestoreNeeded: assign<RestoreMachineContext, RestoreMachineEvent>({
         message: (_ctx: RestoreMachineContext, event: RestoreMachineEvent) =>
           event.type === 'RESTORE_NEEDED'
             ? `Detected ${event.keys.length} archived ledger entries`
@@ -286,58 +286,58 @@ export const restoreMachine = createMachine<
           event.type === 'RESTORE_NEEDED' ? event.keys : [],
       }),
 
-      enterSigningOriginalDirect: assign({
+      enterSigningOriginalDirect: assign<RestoreMachineContext, RestoreMachineEvent>({
         message: () => 'Signing original transaction...',
       }),
 
-      enterSigningRestore: assign({
+      enterSigningRestore: assign<RestoreMachineContext, RestoreMachineEvent>({
         message: () => 'Awaiting wallet signature for restore transaction...',
       }),
 
-      enterSubmittingRestore: assign({
+      enterSubmittingRestore: assign<RestoreMachineContext, RestoreMachineEvent>({
         message: () => 'Submitting restore transaction...',
       }),
 
-      enterConfirmingRestore: assign({
+      enterConfirmingRestore: assign<RestoreMachineContext, RestoreMachineEvent>({
         message: () => 'Waiting for restore confirmation...',
       }),
 
-      enterSigningOriginalAfterRestore: assign({
+      enterSigningOriginalAfterRestore: assign<RestoreMachineContext, RestoreMachineEvent>({
         message: () => 'Restore confirmed. Preparing original transaction...',
       }),
 
-      enterSubmittingOriginal: assign({
+      enterSubmittingOriginal: assign<RestoreMachineContext, RestoreMachineEvent>({
         message: () => 'Submitting original transaction...',
       }),
 
-      enterEstimating: assign({
+      enterEstimating: assign<RestoreMachineContext, RestoreMachineEvent>({
         message: () => 'Estimating restore fee and resources...',
         error: () => undefined,
       }),
 
-      enterWatchingTtl: assign({
+      enterWatchingTtl: assign<RestoreMachineContext, RestoreMachineEvent>({
         message: () => 'Watching ledger entry TTLs...',
         error: () => undefined,
       }),
 
-      enterExtendingTtl: assign({
+      enterExtendingTtl: assign<RestoreMachineContext, RestoreMachineEvent>({
         message: () => 'Extending ledger entry TTL...',
         error: () => undefined,
       }),
 
-      enterSuccess: assign({
+      enterSuccess: assign<RestoreMachineContext, RestoreMachineEvent>({
         message: () => 'Original transaction submitted successfully',
         error: () => undefined,
       }),
 
-      applyError: assign({
+      applyError: assign<RestoreMachineContext, RestoreMachineEvent>({
         error: (_ctx: RestoreMachineContext, event: RestoreMachineEvent) =>
           event.type === 'FAIL' ? event.error : undefined,
         message: (_ctx: RestoreMachineContext, event: RestoreMachineEvent) =>
           event.type === 'FAIL' ? event.error : '',
       }),
 
-      resetContext: assign({
+      resetContext: assign<RestoreMachineContext, RestoreMachineEvent>({
         message: () => '',
         archivedKeys: () => [],
         error: () => undefined,
