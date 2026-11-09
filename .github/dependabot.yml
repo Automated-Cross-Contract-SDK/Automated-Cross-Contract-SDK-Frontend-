@@ -9,6 +9,10 @@ updates:
     labels:
       - "dependencies"
       - "npm"
+    ignore:
+      # typescript-eslint does not support TypeScript 7 yet (peer: <6.1.0).
+      - dependency-name: "typescript"
+        versions: [">=6.1.0"]
     groups:
       # Stellar SDK + workspace packages: reviewed together, merged manually.
       stellar:
@@ -16,8 +20,8 @@ updates:
           - "@stellar/*"
           - "@soroban-resurrect/*"
           - "soroban-resurrect"
-      # All other devDependencies in a single weekly PR; auto-merged when CI
-      # passes (see .github/workflows/dependabot-auto-merge.yml).
+      # All other devDependencies in a single weekly PR, reviewed and merged
+      # manually.
       dev-dependencies:
         dependency-type: "development"
         exclude-patterns:

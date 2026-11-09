@@ -9,6 +9,9 @@ on:
     # Weekly, Monday 06:00 UTC
     - cron: '0 6 * * 1'
 
+permissions:
+  contents: read
+
 jobs:
   audit:
     runs-on: ubuntu-latest
