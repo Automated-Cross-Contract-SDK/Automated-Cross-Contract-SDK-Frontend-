@@ -35,22 +35,12 @@ async function build(configExtra: Record<string, unknown>, memo?: Memo): Promise
 }
 
 describe('restore transaction memo (#245)', () => {
-  it('attaches config.restoreTxMemo to the built restore tx', async () => {
-    const tx = await build({ restoreTxMemo: Memo.text('archive restore') })
-    expect(tx.memo.type).toBe('text')
-    expect(tx.memo.value?.toString()).toBe('archive restore')
-  })
-
-  it('attaches config.restoreTxMemoText as a text memo', async () => {
-    const tx = await build({ restoreTxMemoText: 'why am I signing this' })
-    expect(tx.memo.type).toBe('text')
-    expect(tx.memo.value?.toString()).toBe('why am I signing this')
-  })
-
-  it('lets an explicit memo param win over config', async () => {
-    const tx = await build({ restoreTxMemoText: 'from config' }, Memo.id('42'))
-    expect(tx.memo.type).toBe('id')
-    expect(tx.memo.value).toBe('42')
+  it.each([
+    ['config.restoreTxMemo', { restoreTxMemo: Memo.text('archive restore') }, undefined],
+    ['config.restoreTxMemoText', { restoreTxMemoText: 'why am I signing this' }, undefined],
+    ['an explicit memo param', {}, Memo.id('42')],
+  ])('rejects %s because the network refuses Soroban memos', async (_name, config, memo) => {
+    await expect(build(config, memo)).rejects.toMatchObject({ code: 'INVALID_RESTORE_MEMO' })
   })
 
   it('defaults to no memo (no behaviour change for existing users)', async () => {
@@ -65,19 +55,11 @@ describe('restore transaction memo (#245)', () => {
 })
 
 describe('resolveRestoreMemo', () => {
-  it('precedence: explicit > restoreTxMemo > restoreTxMemoText > undefined', () => {
-    const explicit = Memo.text('explicit')
-    const configMemo = Memo.text('config-memo')
-
-    expect(
-      resolveRestoreMemo(explicit, { restoreTxMemo: configMemo, restoreTxMemoText: 'txt' }),
-    ).toBe(explicit)
-    expect(
-      resolveRestoreMemo(undefined, { restoreTxMemo: configMemo, restoreTxMemoText: 'txt' }),
-    ).toBe(configMemo)
-    expect(resolveRestoreMemo(undefined, { restoreTxMemoText: 'txt' })?.value?.toString()).toBe(
-      'txt',
-    )
+  it('accepts only an absent or none memo', () => {
     expect(resolveRestoreMemo(undefined, {})).toBeUndefined()
+    expect(resolveRestoreMemo(Memo.none(), {})?.type).toBe('none')
+    expect(() => resolveRestoreMemo(undefined, { restoreTxMemoText: 'txt' })).toThrow(
+      /cannot carry a memo/,
+    )
   })
 })

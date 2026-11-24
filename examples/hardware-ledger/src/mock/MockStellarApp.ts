@@ -29,7 +29,7 @@ export default class MockStellarApp {
   async signHash(path: string, hash: Uint8Array) {
     window.dispatchEvent(new CustomEvent('ledger-mock:confirm', { detail: path }))
     await new Promise((r) => setTimeout(r, CONFIRM_DELAY_MS))
-    return { signature: new Uint8Array(keyFor(path).sign(hash as Buffer)) }
+    return { signature: keyFor(path).sign(hash) }
   }
 }
 

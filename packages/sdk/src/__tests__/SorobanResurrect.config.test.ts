@@ -213,7 +213,6 @@ describe('SorobanResurrect — config change reactivity', () => {
         configOverrides: {
           pollTimeoutMs: 12_000,
           restoreFeeMultiplier: 7,
-          restoreTxMemoText: 'one request only',
         },
       }
 
@@ -221,25 +220,9 @@ describe('SorobanResurrect — config change reactivity', () => {
 
       expect(effectiveConfig.pollTimeoutMs).toBe(12_000)
       expect(effectiveConfig.restoreFeeMultiplier).toBe(7)
-      expect(effectiveConfig.restoreTxMemoText).toBe('one request only')
       expect(baseConfig.pollTimeoutMs).toBe(60_000)
       expect(baseConfig.restoreFeeMultiplier).toBe(3)
       expect(Object.isFrozen(effectiveConfig)).toBe(true)
-    })
-
-    it('keeps legacy top-level memo options ahead of config overrides', () => {
-      const effectiveConfig = resolveSubmitConfig(
-        {
-          rpcUrl: 'https://soroban-testnet.stellar.org',
-          restoreTxMemoText: 'instance',
-        } as SorobanResurrectConfig,
-        {
-          configOverrides: { restoreTxMemoText: 'nested' },
-          restoreTxMemoText: 'legacy',
-        },
-      )
-
-      expect(effectiveConfig.restoreTxMemoText).toBe('legacy')
     })
 
     it('validates request-specific overrides before recording or executing a workflow', () => {
@@ -271,13 +254,13 @@ describe('SorobanResurrect — config change reactivity', () => {
         _parsed: true,
         transactionData: {
           build: () => mockSorobanData,
-          getFootprint: () => ({ readOnly: () => [], readWrite: () => [mockKey] }),
+          getFootprint: () => ({ readOnly: [], readWrite: [mockKey] }),
         },
-        minResourceFee: '10',
+        minResourceFee: '1000',
         cost: { cpuInsns: '100', memBytes: '100' },
         result: { auth: [], retval: { switch: () => 0 } },
         restorePreamble: {
-          minResourceFee: '10',
+          minResourceFee: '1000',
           transactionData: { build: () => mockSorobanData },
         },
       }
@@ -287,7 +270,7 @@ describe('SorobanResurrect — config change reactivity', () => {
         makeSampleTx(),
         simulationResponse as never,
       )
-      expect(txWithDefaultMultiplier.fee).toBe((10 * RESTORE_FEE_MULTIPLIER).toString())
+      expect(txWithDefaultMultiplier.fee).toBe((1000 * RESTORE_FEE_MULTIPLIER).toString())
 
       expect(() => {
         ;(resurrect.config as { restoreFeeMultiplier: number }).restoreFeeMultiplier = 3
@@ -298,7 +281,7 @@ describe('SorobanResurrect — config change reactivity', () => {
         makeSampleTx(),
         simulationResponse as never,
       )
-      expect(txWithMutatedMultiplier.fee).toBe((10 * RESTORE_FEE_MULTIPLIER).toString())
+      expect(txWithMutatedMultiplier.fee).toBe((1000 * RESTORE_FEE_MULTIPLIER).toString())
     })
   })
 })

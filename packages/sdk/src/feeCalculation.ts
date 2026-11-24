@@ -1,4 +1,6 @@
 import type { SorobanResurrectConfig } from './types.js'
+import { BASE_FEE, type xdr } from '@stellar/stellar-sdk'
+import { RestoreFeeExceededError } from './errors.js'
 import { RESTORE_FEE_MULTIPLIER } from './constants.js'
 
 /**
@@ -40,6 +42,30 @@ export function calculateRestoreFee(
 ): string {
   const multiplier = resolveRestoreFeeMultiplier(config)
   return (minResourceFee * multiplier).toString()
+}
+
+/**
+ * Converts a total transaction fee into the per-operation fee to hand to
+ * `TransactionBuilder`, which adds the Soroban resource fee on top in `build()`.
+ * Passing the total directly would charge the resource fee twice.
+ *
+ * The inclusion fee never drops below the network minimum; if that pushes the
+ * transaction above `maxRestoreFeeStroops`, this throws instead.
+ */
+export function toBuilderFee(
+  totalFee: string,
+  sorobanData: xdr.SorobanTransactionData,
+  config: Pick<SorobanResurrectConfig, 'maxRestoreFeeStroops'>,
+): string {
+  const resourceFee = sorobanData.resourceFee
+  const remainder = BigInt(Math.trunc(Number(totalFee))) - resourceFee
+  const minimum = BigInt(BASE_FEE)
+  const inclusionFee = remainder > minimum ? remainder : minimum
+  const cap = config.maxRestoreFeeStroops
+  if (cap !== undefined && inclusionFee + resourceFee > BigInt(cap)) {
+    throw new RestoreFeeExceededError(Number(inclusionFee + resourceFee), Number(cap))
+  }
+  return inclusionFee.toString()
 }
 
 /** Structured estimate of the cost (and need) of restoring a transaction's archived entries. */

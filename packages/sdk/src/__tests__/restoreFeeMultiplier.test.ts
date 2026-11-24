@@ -67,34 +67,45 @@ describe('buildRestoreTransaction — RESTORE_FEE_MULTIPLIER application', () =>
   })
 
   describe('edge cases with very large and very small fees', () => {
-    it('handles a minResourceFee of 0', async () => {
-      const fee = await buildFee(0, baseConfig)
-      expect(fee).toBe('0')
-    })
-
-    it('handles a minResourceFee of 1 with the default multiplier', async () => {
-      const fee = await buildFee(1, baseConfig)
-      expect(fee).toBe('3')
+    it.each([0, 1])('never drops below the network base fee (minResourceFee %i)', async (min) => {
+      expect(await buildFee(min, baseConfig)).toBe('100')
     })
 
     it('handles a very large minResourceFee without losing precision', async () => {
-      const largeFee = 1_000_000_000
-      const fee = await buildFee(largeFee, baseConfig)
-      expect(fee).toBe((largeFee * RESTORE_FEE_MULTIPLIER).toString())
-      expect(fee).toBe('3000000000')
-      expect(Number(fee)).toBeLessThan(Number.MAX_SAFE_INTEGER)
+      expect(await buildFee(1_000_000_000, baseConfig)).toBe('3000000000')
     })
 
-    it('handles a very large minResourceFee combined with a large custom multiplier', async () => {
-      const fee = await buildFee(1_000_000, { ...baseConfig, restoreFeeMultiplier: 10_000 })
-      expect(fee).toBe('10000000000')
+    it('rejects a fee above the protocol uint32 maximum', async () => {
+      await expect(
+        buildFee(1_000_000, { ...baseConfig, restoreFeeMultiplier: 10_000 }),
+      ).rejects.toThrow(/maximum uint32/)
     })
 
-    it('truncates a fractional result the same way Number.prototype.toString does', async () => {
-      // minResourceFee * a fractional multiplier can yield a non-integer;
-      // buildRestoreTransaction does not round, it just stringifies the product.
-      const fee = await buildFee(3, { ...baseConfig, restoreFeeMultiplier: 1.5 })
-      expect(fee).toBe('4.5')
+    it('truncates a fractional fee to whole stroops', async () => {
+      expect(await buildFee(333, { ...baseConfig, restoreFeeMultiplier: 1.5 })).toBe('499')
+    })
+  })
+
+  describe('Soroban resource fee', () => {
+    const withResourceFee = (resourceFee: string, config: SorobanResurrectConfig) =>
+      buildRestoreTransaction({
+        server: makeMockServer(),
+        sourcePublicKey: Keypair.random().publicKey(),
+        transactionData: new SorobanDataBuilder().setResourceFee(resourceFee).build(),
+        minResourceFee: 1000,
+        latestLedger: 100,
+        config,
+        account: new Account(Keypair.random().publicKey(), '1'),
+      })
+
+    it('is included in the quoted fee, not charged on top of it', async () => {
+      const tx = await withResourceFee('1000', baseConfig)
+      expect(tx.fee).toBe('3000')
+    })
+
+    it('never lets the built transaction exceed maxRestoreFeeStroops', async () => {
+      const capped = { ...baseConfig, restoreFeeMultiplier: 1, maxRestoreFeeStroops: 1050 }
+      await expect(withResourceFee('1000', capped)).rejects.toThrow()
     })
   })
 })

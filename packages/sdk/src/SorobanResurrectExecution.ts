@@ -52,7 +52,8 @@ import {
 } from './constants.js'
 import { ResurrectError, OriginalTransactionExpiredError } from './errors.js'
 import { calculateRestoreFee } from './feeCalculation.js'
-import { configForWalletRestore, validateRestoreMemoConfig } from './memoValidation.js'
+import { assertSubmitted } from './submission.js'
+import { validateRestoreMemoConfig } from './memoValidation.js'
 
 /**
  * Handles all transaction execution concerns for a `SorobanResurrect` instance:
@@ -122,7 +123,7 @@ export class SorobanResurrectExecutor {
    */
   async previewRestore(transaction: Transaction): Promise<DryRunResult> {
     const intendedOperations = extractXdrOperations(transaction).map(
-      (operation) => operation.body().switch().name,
+      (operation) => operation.body.type,
     )
 
     let response: rpc.Api.SimulateTransactionResponse
@@ -337,6 +338,7 @@ export class SorobanResurrectExecutor {
       stateMgr.setState('submitting_restore', 'Submitting restore transaction...')
       opts?.onSubmittingRestore?.()
       const sendResult = await runWithSignal(() => this._server.sendTransaction(signedTx), signal)
+      assertSubmitted(sendResult, 'RESTORE_TX_FAILED', 'Restore transaction')
       restoreHash = asTxHash(sendResult.hash)
       emitter.emit('restoreSubmitted', restoreHash)
       opts?.onRestoreSubmitted?.(restoreHash)
@@ -451,6 +453,13 @@ export class SorobanResurrectExecutor {
       onRestoreFailed,
     } = options
 
+    if (!transaction) {
+      throw new TypeError('submitWithRestore options.transaction must be a Stellar Transaction')
+    }
+    if (!wallet) {
+      throw new TypeError('submitWithRestore options.wallet must be a WalletAdapter')
+    }
+
     if (options.dryRun) {
       const dryRunResult = await this.previewRestore(transaction)
       const simulationError = dryRunResult.simulationError
@@ -489,7 +498,7 @@ export class SorobanResurrectExecutor {
         : {}),
     }
 
-    const restoreConfig = configForWalletRestore(effectiveConfig, wallet)
+    const restoreConfig = effectiveConfig
     validateRestoreMemoConfig(restoreConfig)
 
     const result = await executeWithRestore({
@@ -833,6 +842,7 @@ export class SorobanResurrectExecutor {
 
       stateMgr.setState('submitting_restore', 'Submitting batch restore transaction...')
       const sent = await runWithSignal(() => this._server.sendTransaction(signedTx), sharedSignal)
+      assertSubmitted(sent, 'RESTORE_TX_FAILED', 'Batch restore transaction')
       restoreHash = asTxHash(sent.hash)
       emitter.emit('restoreSubmitted', restoreHash)
 
@@ -894,6 +904,7 @@ export class SorobanResurrectExecutor {
         }
 
         const sent = await runWithSignal(() => this._server.sendTransaction(signedTx), signal)
+        assertSubmitted(sent, 'ORIGINAL_TX_FAILED', 'Transaction')
         const hash = asTxHash(sent.hash)
         item.onOriginalSubmitted?.(hash)
         emitter.emit('originalSubmitted', hash)

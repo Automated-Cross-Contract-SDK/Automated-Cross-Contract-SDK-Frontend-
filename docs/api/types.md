@@ -29,7 +29,7 @@ interface SorobanResurrectConfig {
   archiveDetectionConcurrency?: number // default: 4
   maxBatchSize?: number // default: 100
   restoreTxMemo?: Memo
-  restoreTxMemoText?: string // at most 28 UTF-8 bytes
+  restoreTxMemoText?: string // deprecated
   logger?: Logger
 }
 ```
@@ -51,8 +51,8 @@ interface SorobanResurrectConfig {
 | `archiveDetectionChunkSize`    | Ledger keys per `getLedgerEntries` request during `'direct'` detection.                                                                              |
 | `archiveDetectionConcurrency`  | Chunk requests kept in flight at once during `'direct'` detection.                                                                                   |
 | `maxBatchSize`                 | Maximum items accepted by `detectArchivedKeysBatch`, `submitBatchWithRestore`, and `restoreKeys`. Oversized batches fail with `BATCH_SIZE_EXCEEDED`. |
-| `restoreTxMemo`                | Optional Stellar memo attached to restore transactions. Only text and none memo types are accepted; text is limited to 28 UTF-8 bytes.               |
-| `restoreTxMemoText`            | Convenience text memo for restore transactions, limited to 28 UTF-8 bytes (not 28 characters). May also be overridden per `submitWithRestore` call.  |
+| `restoreTxMemo`                | **Deprecated.** The network rejects Soroban transactions with a memo; anything but a `none` memo throws `INVALID_RESTORE_MEMO`.                      |
+| `restoreTxMemoText`            | **Deprecated.** Any non-empty value throws `INVALID_RESTORE_MEMO`.                                                                                   |
 | `logger`                       | Optional logger. Hardware-signing warnings are sent through its `warn` method.                                                                       |
 
 The memo limit is measured after UTF-8 encoding. For example, fourteen `é`
@@ -713,7 +713,7 @@ const contract = await getExpiringEntriesForContract(contractId, {
       new xdr.LedgerKeyContractData({
         contract: xdr.ScAddress.scAddressTypeContract(contractId),
         key: xdr.ScVal.scvSymbol('counter'),
-        durability: xdr.ContractDataDurability.persistent(),
+        durability: xdr.ContractDataDurability.persistent,
       }),
     ),
   ],

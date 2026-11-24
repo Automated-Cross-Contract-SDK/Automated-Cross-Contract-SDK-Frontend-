@@ -51,6 +51,7 @@ import {
   POLL_TIMEOUT_MS,
   MAX_SEQUENCE_RETRIES,
 } from './constants.js'
+import { assembleIfNeeded, assertSubmitted } from './submission.js'
 import { asTxHash, asXdrBase64, type TxHash, type XdrBase64 } from './branded-types.js'
 import { parseTransactionFailure } from './TransactionFailure.js'
 import { createFailureGuidance } from './FailureGuidance.js'
@@ -211,6 +212,7 @@ async function signAndMaybeFeeBump(params: {
     throwIfAborted(signal)
     onSubmitting?.()
     const result = await runWithSignal(() => server.sendTransaction(signedTx), signal)
+    assertSubmitted(result, 'ORIGINAL_TX_FAILED', 'Transaction')
     return { hash: asTxHash(result.hash) }
   }
 
@@ -234,6 +236,7 @@ async function signAndMaybeFeeBump(params: {
     () => submitFeeBumpTransaction(server, feeBumpXdr, networkPassphrase),
     signal,
   )
+  assertSubmitted(result, 'ORIGINAL_TX_FAILED', 'Fee-bump transaction')
   return { hash: asTxHash(result.hash) }
 }
 
@@ -441,6 +444,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
         () => server.sendTransaction(signedRestoreTx),
         signal,
       )
+      assertSubmitted(restoreResult, 'RESTORE_TX_FAILED', 'Restore transaction')
       restoreTxHash = asTxHash(restoreResult.hash)
       onRestoreSubmitted?.(restoreTxHash)
 
@@ -565,6 +569,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
         }
       }
 
+      assertSubmitted(originalResult!, 'ORIGINAL_TX_FAILED', 'Original transaction')
       originalTxHash = asTxHash(originalResult!.hash)
       onOriginalSubmitted?.(originalTxHash)
 
@@ -614,7 +619,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       const { transaction: txToSubmit } = await runWithSignal(
         () =>
           ensureAddressAuthorization({
-            transaction: originalTx,
+            transaction: assembleIfNeeded(originalTx, simResponse),
             simulation: simResponse,
             wallet,
             networkPassphrase,
@@ -764,6 +769,7 @@ export async function sendTransaction(
     }
 
     const result = await runWithSignal(() => server.sendTransaction(signedTx), signal)
+    assertSubmitted(result, 'ORIGINAL_TX_FAILED', 'Transaction')
 
     return {
       success: true,
@@ -776,7 +782,11 @@ export async function sendTransaction(
       success: false,
       archivedKeysDetected: 0,
       error: message,
-      errorCode: signal?.aborted ? ('ABORTED' as const) : ('UNKNOWN_ERROR' as const),
+      errorCode: signal?.aborted
+        ? ('ABORTED' as const)
+        : err instanceof ResurrectError
+          ? err.code
+          : ('UNKNOWN_ERROR' as const),
     }
   }
 }
@@ -968,7 +978,7 @@ export async function restoreKeys(params: RestoreKeysParams): Promise<ResurrectR
         failure: createFailureGuidance('RESTORE_TX_FAILED', 'submission'),
       }
     }
-    if (sendResult.status === 'ERROR') {
+    if (sendResult.status === 'ERROR' || sendResult.status === 'TRY_AGAIN_LATER') {
       return {
         success: false,
         archivedKeysDetected: keys.length,

@@ -115,7 +115,7 @@ describe('Archiver', () => {
     it('reports an explicitly empty readWrite array', () => {
       const response = makeMockRestoreResponse()
       Object.defineProperty(response.transactionData, 'getFootprint', {
-        value: () => ({ readOnly: () => [], readWrite: () => [] }),
+        value: () => ({ readOnly: [], readWrite: [] }),
       })
       expect(() => extractArchivedKeys(response)).toThrow(/empty-read-write-footprint/)
     })
@@ -131,7 +131,7 @@ describe('Archiver', () => {
     it('reports when readWrite() returns undefined', () => {
       const response = makeMockRestoreResponse()
       Object.defineProperty(response.transactionData, 'getFootprint', {
-        value: () => ({ readOnly: () => [], readWrite: () => undefined }),
+        value: () => ({ readOnly: [], readWrite: undefined }),
       })
       expect(() => extractArchivedKeys(response)).toThrow(/missing-read-write-entries/)
     })
@@ -149,15 +149,15 @@ describe('Archiver', () => {
     it('ignores readOnly entries and only extracts readWrite keys', () => {
       const readOnlyKey = {
         toXDR: () => 'read-only-key',
-        switch: () => ({ name: 'contractData' }),
+        type: 'contractData',
       }
       const readWriteKey = {
         toXDR: () => 'read-write-key',
-        switch: () => ({ name: 'contractData' }),
+        type: 'contractData',
       }
       const response = makeMockRestoreResponse()
       Object.defineProperty(response.transactionData, 'getFootprint', {
-        value: () => ({ readOnly: () => [readOnlyKey], readWrite: () => [readWriteKey] }),
+        value: () => ({ readOnly: [readOnlyKey], readWrite: [readWriteKey] }),
       })
 
       const keys = extractArchivedKeys(response)
@@ -166,12 +166,12 @@ describe('Archiver', () => {
     })
 
     it('extracts multiple archived keys from a restore response with several readWrite entries', () => {
-      const key1 = { toXDR: () => 'key-1', switch: () => ({ name: 'contractData' }) }
-      const key2 = { toXDR: () => 'key-2', switch: () => ({ name: 'contractData' }) }
-      const key3 = { toXDR: () => 'key-3', switch: () => ({ name: 'contractCode' }) }
+      const key1 = { toXDR: () => 'key-1', type: 'contractData' }
+      const key2 = { toXDR: () => 'key-2', type: 'contractData' }
+      const key3 = { toXDR: () => 'key-3', type: 'contractCode' }
       const response = makeMockRestoreResponse()
       Object.defineProperty(response.transactionData, 'getFootprint', {
-        value: () => ({ readOnly: () => [], readWrite: () => [key3, key1, key2] }),
+        value: () => ({ readOnly: [], readWrite: [key3, key1, key2] }),
       })
 
       const keys = extractArchivedKeys(response)
@@ -189,11 +189,11 @@ describe('Archiver', () => {
     it('returns empty array when all entries are live', async () => {
       const key1 = {
         toXDR: () => 'base64-1',
-        switch: () => ({ name: 'contractData' }),
+        type: 'contractData',
       } as unknown as xdr.LedgerKey
       const key2 = {
         toXDR: () => 'base64-2',
-        switch: () => ({ name: 'contractCode' }),
+        type: 'contractCode',
       } as unknown as xdr.LedgerKey
       const server = {
         getLedgerEntries: vi.fn().mockResolvedValue({
@@ -210,11 +210,11 @@ describe('Archiver', () => {
     it('detects archived entries when ledger entries are missing', async () => {
       const existingKey = {
         toXDR: () => 'base64-1',
-        switch: () => ({ name: 'contractData' }),
+        type: 'contractData',
       } as unknown as xdr.LedgerKey
       const missingKey = {
         toXDR: () => 'base64-2',
-        switch: () => ({ name: 'contractCode' }),
+        type: 'contractCode',
       } as unknown as xdr.LedgerKey
       const server = {
         getLedgerEntries: vi.fn().mockResolvedValue({
@@ -252,7 +252,7 @@ describe('Archiver', () => {
 
       const mockKey = {
         toXDR: () => 'base64-xdr',
-        switch: () => ({ name: 'contractData' }),
+        type: 'contractData',
       } as unknown as xdr.LedgerKey
       const keys = [mockKey]
 
@@ -283,13 +283,13 @@ describe('Archiver', () => {
     it('returns archived keys from restore response', async () => {
       const mockKey = {
         toXDR: () => 'base64-key',
-        switch: () => ({ name: 'contractData' }),
+        type: 'contractData',
       }
       const response = {
         ...makeMockRestoreResponse(),
         transactionData: {
           build: () => ({}),
-          getFootprint: () => ({ readOnly: () => [], readWrite: () => [mockKey] }),
+          getFootprint: () => ({ readOnly: [], readWrite: [mockKey] }),
         },
       }
 
@@ -351,7 +351,7 @@ describe('Archiver', () => {
           ...makeMockSuccessResponse(),
           transactionData: {
             build: () => ({}),
-            getFootprint: () => ({ readOnly: () => [], readWrite: () => [] }),
+            getFootprint: () => ({ readOnly: [], readWrite: [] }),
           },
         }),
       } as unknown as rpc.Server
@@ -363,11 +363,11 @@ describe('Archiver', () => {
     it('detects archived entries from success response footprint', async () => {
       const archivedKey = {
         toXDR: () => 'base64-archived',
-        switch: () => ({ name: 'contractCode' }),
+        type: 'contractCode',
       } as unknown as xdr.LedgerKey
       const liveKey = {
         toXDR: () => 'base64-live',
-        switch: () => ({ name: 'contractData' }),
+        type: 'contractData',
       } as unknown as xdr.LedgerKey
 
       const server = {
@@ -375,7 +375,7 @@ describe('Archiver', () => {
           ...makeMockSuccessResponse(),
           transactionData: {
             build: () => ({}),
-            getFootprint: () => ({ readOnly: () => [], readWrite: () => [liveKey, archivedKey] }),
+            getFootprint: () => ({ readOnly: [], readWrite: [liveKey, archivedKey] }),
           },
         }),
         getLedgerEntries: vi.fn().mockResolvedValue({

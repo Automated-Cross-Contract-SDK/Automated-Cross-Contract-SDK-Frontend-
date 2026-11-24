@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** requires `@stellar/stellar-sdk` 17.4+ and Node.js 22.12+.
+- **Breaking:** non-empty `restoreTxMemo` / `restoreTxMemoText` throw
+  `INVALID_RESTORE_MEMO`; the network rejects Soroban transactions with a memo.
+- Restore and TTL-extension fees never drop below the 100-stroop base fee, and
+  fractional fees are truncated to whole stroops.
+
+### Fixed
+
+- Hardware-wallet restores no longer get an automatic memo, which made the
+  network reject them.
+- `attachAuthorizationEntries` returns a transaction that carries the entries.
+- `buildContractDataKey` returns real XDR instead of a look-alike object.
+- `submitWithRestore` assembles un-assembled transactions when no restore is
+  needed; previously the network rejected them.
+- Rejected submissions fail immediately instead of polling until timeout, and
+  the `tx_bad_seq` retry recognises real RPC rejections.
+- `submitWithRestore` rejects a missing transaction or wallet up front.
+
 ### Added
 
 - `CODE_OF_CONDUCT.md`, `CHANGELOG.md`, `ARCHITECTURE.md`, and expanded JSDoc /

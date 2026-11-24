@@ -210,7 +210,7 @@ describe('SorobanResurrect', () => {
         _parsed: true,
         transactionData: {
           build: () => ({}),
-          getFootprint: () => ({ readOnly: () => [], readWrite: () => [] }),
+          getFootprint: () => ({ readOnly: [], readWrite: [] }),
         },
         minResourceFee: '100',
         cost: { cpuInsns: '100', memBytes: '100' },
@@ -231,7 +231,7 @@ describe('SorobanResurrect', () => {
         _parsed: true,
         transactionData: {
           build: () => ({}),
-          getFootprint: () => ({ readOnly: () => [], readWrite: () => [] }),
+          getFootprint: () => ({ readOnly: [], readWrite: [] }),
         },
         minResourceFee: '100',
         cost: { cpuInsns: '100', memBytes: '100' },
@@ -256,7 +256,7 @@ describe('SorobanResurrect', () => {
         events: [],
         _parsed: true,
         transactionData: {
-          getFootprint: () => ({ readOnly: () => [], readWrite: () => [archivedKey] }),
+          getFootprint: () => ({ readOnly: [], readWrite: [archivedKey] }),
         },
         minResourceFee: '100',
         cost: { cpuInsns: '100', memBytes: '100' },
@@ -358,7 +358,7 @@ describe('SorobanResurrect', () => {
         _parsed: true,
         transactionData: {
           build: () => mockSorobanData,
-          getFootprint: () => ({ readOnly: () => [], readWrite: () => [mockKey] }),
+          getFootprint: () => ({ readOnly: [], readWrite: [mockKey] }),
         },
         minResourceFee: '100',
         cost: { cpuInsns: '100', memBytes: '100' },

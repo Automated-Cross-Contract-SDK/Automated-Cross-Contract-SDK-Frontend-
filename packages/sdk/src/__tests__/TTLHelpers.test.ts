@@ -18,7 +18,7 @@ function dataKey(i: number): xdr.LedgerKey {
     new xdr.LedgerKeyContractData({
       contract,
       key: xdr.ScVal.scvU32(i),
-      durability: xdr.ContractDataDurability.persistent(),
+      durability: xdr.ContractDataDurability.persistent,
     }),
   )
 }
@@ -331,7 +331,7 @@ describe('getArchivedEntries', () => {
 
     expect(res.map((e) => e.keyBase64)).toEqual([b64(expired), b64(missing)])
     for (const e of res) expect(e.key.toXDR('base64')).toBe(e.keyBase64)
-    expect(res[1].key.switch().name).toBe('contractCode')
+    expect(res[1].key.type).toBe('contractCode')
     expect(res.map((entry) => entry.entryType)).toEqual(['contractData', 'contractCode'])
     expect(res[1]).toMatchObject({ currentLedger: CURRENT_LEDGER })
     expect(res[1].liveUntilLedger).toBeUndefined()

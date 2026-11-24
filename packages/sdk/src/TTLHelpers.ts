@@ -112,7 +112,7 @@ export interface LedgerEntryTTLInfo {
  * wasm (contract code) entries apart from contract storage entries.
  */
 export function getLedgerKeyEntryType(key: xdr.LedgerKey): LedgerKeyEntryType {
-  switch (key.switch().name) {
+  switch (key.type) {
     case 'contractData':
       return 'contractData'
     case 'contractCode':

@@ -61,7 +61,7 @@ describe('getExpiringEntriesForContract', () => {
       new xdr.LedgerKeyContractData({
         contract: new (await import('@stellar/stellar-sdk')).Address(CONTRACT_ID).toScAddress(),
         key: storageKeys[1],
-        durability: xdr.ContractDataDurability.persistent(),
+        durability: xdr.ContractDataDurability.persistent,
       }),
     ).toXDR('base64')
 
@@ -119,16 +119,13 @@ describe('getExpiringEntriesForContract', () => {
         entries: [
           {
             val: {
-              contractData: () => ({
-                val: () => ({
-                  instance: () => ({
-                    executable: () => ({
-                      switch: () => ({ name: 'contractExecutableWasm' }),
-                      wasmHash: () => wasmHash,
-                    }),
-                  }),
-                }),
-              }),
+              type: 'contractData',
+              contractData: {
+                val: {
+                  type: 'scvContractInstance',
+                  instance: { executable: { type: 'contractExecutableWasm', wasmHash } },
+                },
+              },
             },
           },
         ],
@@ -145,7 +142,7 @@ describe('getExpiringEntriesForContract', () => {
 
     // instance + code = 2 entries
     expect(res.entries).toHaveLength(2)
-    const kinds = res.entries.map((e) => xdr.LedgerKey.fromXDR(e.keyBase64, 'base64').switch().name)
+    const kinds = res.entries.map((e) => xdr.LedgerKey.fromXDR(e.keyBase64, 'base64').type)
     expect(kinds).toContain('contractCode')
   })
 
@@ -168,7 +165,7 @@ describe('getExpiringEntriesForAccount', () => {
     // Return only the account entry + the USDC trustline; EURC is missing.
     vi.mocked(mock.getLedgerEntries).mockImplementation((...keys: xdr.LedgerKey[]) => {
       const entries = keys
-        .filter((k) => k.switch().name === 'account' || isTrustlineFor(k, 'USDC'))
+        .filter((k) => k.type === 'account' || isTrustlineFor(k, 'USDC'))
         .map((k) => ({ key: k }))
       return Promise.resolve({ entries, latestLedger: CURRENT_LEDGER } as never)
     })
@@ -191,13 +188,9 @@ describe('getExpiringEntriesForAccount', () => {
 })
 
 function isTrustlineFor(key: xdr.LedgerKey, code: string): boolean {
-  if (key.switch().name !== 'trustline') return false
-  try {
-    const asset = key.trustLine().asset()
-    const alphaNum4 = asset.alphaNum4?.()
-    const raw = alphaNum4?.assetCode?.() as Buffer | undefined
-    return raw ? raw.toString('utf8').replace(/\0+$/, '') === code : false
-  } catch {
-    return false
-  }
+  return (
+    key.type === 'trustline' &&
+    key.trustLine.asset.type === 'assetTypeCreditAlphanum4' &&
+    new TextDecoder().decode(key.trustLine.asset.alphaNum4.assetCode.toBytes()).startsWith(code)
+  )
 }

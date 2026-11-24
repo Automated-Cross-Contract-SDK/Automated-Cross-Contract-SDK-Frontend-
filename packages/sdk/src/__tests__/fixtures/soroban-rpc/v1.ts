@@ -7,8 +7,8 @@ function transactionData(readWrite: unknown[] = []) {
   return {
     build: () => sorobanData,
     getFootprint: () => ({
-      readOnly: () => [],
-      readWrite: () => readWrite,
+      readOnly: [],
+      readWrite: readWrite,
     }),
   }
 }

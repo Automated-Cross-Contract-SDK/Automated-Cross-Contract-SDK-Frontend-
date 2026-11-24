@@ -61,7 +61,6 @@ Simulation / wallet-signing / restore-confirmation / original-submission timeout
 Behaviour of `buildRestoreTransaction`, `assertRestoreTransactionFresh`, `buildOriginalAfterRestore`, abortable polling and canonical key ordering diverged from these tests during the merges.
 
 - `Archiver.test.ts` — detectArchivedEntries › returns missing entries in canonical key order, independent of input order
-- `Restorer.test.ts` — extractXdrOperations › [regression #27] throws descriptive error on unsupported inner envelope type in fee-bump
 - `Restorer.test.ts` — waitForTransaction › stops polling promptly when its abort signal is triggered
 - `Restorer.test.ts` — buildRestoreTransaction › builds a transaction with restore footprint operation
 - `Restorer.test.ts` — assertRestoreTransactionFresh › allows a signed restore while the latest ledger is inside the bounds
@@ -74,7 +73,6 @@ Behaviour of `buildRestoreTransaction`, `assertRestoreTransactionFresh`, `buildO
 
 - `ConfigResolution.test.ts` — returns effective settings and defaults without runtime resources
 - `SorobanResurrect.config.test.ts` — getEffectiveConfig › returns a validated snapshot with defaults and no runtime clients
-- `SorobanResurrect.invalidConfig.test.ts` — rejects submitWithRestore with a descriptive wallet validation error
 - `SorobanResurrect.invalidConfig.test.ts` — throws a typed INVALID_INPUT error for invalid configuration
 - `SorobanResurrect.test.ts` — submitWithRestore › forwards an AbortSignal to the execution workflow
 - `SorobanResurrect.test.ts` — previewRestore › returns a typed restore plan without mutating or submitting the original transaction

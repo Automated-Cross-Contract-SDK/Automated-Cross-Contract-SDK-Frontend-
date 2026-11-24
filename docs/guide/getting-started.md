@@ -16,11 +16,11 @@ import { createClient } from '@your-scope/your-package'
 const client = createClient({/* options */})
 ```
 
-`@stellar/stellar-sdk` (`^12.0.0`) and `react` (`^18.0.0`, for the hook package) are peer dependencies — install them alongside the SDK.
+`@stellar/stellar-sdk` (`^17.4.0`) and `react` (`^18.0.0`, for the hook package) are peer dependencies — install them alongside the SDK.
 
 ## Requirements
 
-- Node.js 20+
+- Node.js 22.12+
 - Current and previous major releases of Chrome, Edge, Firefox, and Safari.
   The browser SDK build targets ES2022 and requires `fetch`, `AbortController`,
   `TextEncoder`, and `TextDecoder`; SSE additionally requires a streaming
@@ -39,7 +39,7 @@ reproducible environment that the SDK and examples can target.
 
 - [Docker](https://docs.docker.com/get-docker/) 24+ (or a native `stellar` CLI install)
 - The [Stellar CLI](https://developers.stellar.org/docs/tools/developer-tools/cli/stellar-cli) (`stellar`)
-- Node.js 20+ (matches the SDK requirement above)
+- Node.js 22.12+ (matches the SDK requirement above)
 
 ### Start the local network
 
@@ -115,7 +115,7 @@ timeouts, and malformed responses, so it is safe to call in CI and scripts.
 ### Compatibility notes
 
 - The helper targets the same Soroban RPC version as `@stellar/stellar-sdk`
-  `^12.0.0`; older RPC nodes that do not implement `getLatestLedger` will
+  `^17.4.0`; older RPC nodes that do not implement `getLatestLedger` will
   report `ready: false` with a `reason` describing the unsupported method.
 - Public endpoints (Testnet/Futurenet/Mainnet) work with the same helper —
   swap `rpcUrl` and `networkPassphrase` accordingly.

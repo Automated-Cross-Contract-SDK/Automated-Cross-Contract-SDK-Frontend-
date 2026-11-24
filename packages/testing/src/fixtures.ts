@@ -19,9 +19,9 @@ function sorobanData(readWrite: xdr.LedgerKey[] = []): SorobanDataBuilder {
 export function archivedKey(seed = 0): xdr.LedgerKey {
   return xdr.LedgerKey.contractData(
     new xdr.LedgerKeyContractData({
-      contract: Address.contract(Buffer.alloc(32, seed + 1)).toScAddress(),
+      contract: Address.contract(new Uint8Array(32).fill(seed + 1)).toScAddress(),
       key: xdr.ScVal.scvU32(seed),
-      durability: xdr.ContractDataDurability.persistent(),
+      durability: xdr.ContractDataDurability.persistent,
     }),
   )
 }
@@ -51,7 +51,7 @@ export function ledgerEntryFixture(
     status === 'unsupported'
       ? xdr.LedgerKey.account(
           new xdr.LedgerKeyAccount({
-            accountId: Keypair.fromRawEd25519Seed(Buffer.alloc(32, seed + 1)).xdrAccountId(),
+            accountId: Keypair.fromRawEd25519Seed(new Uint8Array(32).fill(seed + 1)).xdrAccountId(),
           }),
         )
       : archivedKey(seed)
@@ -146,7 +146,7 @@ export function sendError(
     errorResult: new xdr.TransactionResult({
       feeCharged: xdr.Int64.fromString('100'),
       result,
-      ext: xdr.TransactionResultExt[0](),
+      ext: xdr.TransactionResultExt.v0(),
     }),
   } as unknown as rpc.Api.SendTransactionResponse
 }

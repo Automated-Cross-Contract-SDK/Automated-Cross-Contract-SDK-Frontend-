@@ -1,5 +1,12 @@
 import type { ExpiredTransactionInfo } from './types.js'
 
+function captureStackTrace(target: object, constructor: unknown): void {
+  const { captureStackTrace: capture } = Error as {
+    captureStackTrace?: (target: object, constructor: unknown) => void
+  }
+  capture?.(target, constructor)
+}
+
 /**
  * Structured error codes for ResurrectResult — similar to GraphQL's
  * `extensions.code` pattern. Consumers can branch on these codes
@@ -163,9 +170,7 @@ export class ResurrectError extends Error {
     this.name = 'ResurrectError'
     this.code = code
     // Maintains proper stack trace in V8 environments (Node.js / Chrome).
-    if (Error.captureStackTrace) {
-      Error.captureStackTrace(this, ResurrectError)
-    }
+    captureStackTrace(this, ResurrectError)
   }
 }
 
@@ -215,8 +220,6 @@ export class RestoreFeeExceededError extends ResurrectError {
     this.computedFeeStroops = computedFeeStroops
     this.maxFeeStroops = maxFeeStroops
     // Maintains proper stack trace in V8 environments (Node.js / Chrome).
-    if (Error.captureStackTrace) {
-      Error.captureStackTrace(this, RestoreFeeExceededError)
-    }
+    captureStackTrace(this, RestoreFeeExceededError)
   }
 }

@@ -77,16 +77,16 @@ export function readSimulationFootprint(
   }
 
   const footprint = rawFootprint as {
-    readOnly?: () => unknown
-    readWrite?: () => unknown
+    readOnly?: unknown
+    readWrite?: unknown
   }
-  if (typeof footprint.readOnly !== 'function') {
+  if (footprint.readOnly === undefined) {
     throw new IncompleteFootprintError(
       'missing-read-only-entries',
       'the footprint does not provide readOnly entries.',
     )
   }
-  if (typeof footprint.readWrite !== 'function') {
+  if (footprint.readWrite === undefined) {
     throw new IncompleteFootprintError(
       'missing-read-write-entries',
       'the footprint does not provide readWrite entries.',
@@ -96,8 +96,8 @@ export function readSimulationFootprint(
   let readOnly: unknown
   let readWrite: unknown
   try {
-    readOnly = footprint.readOnly()
-    readWrite = footprint.readWrite()
+    readOnly = footprint.readOnly
+    readWrite = footprint.readWrite
   } catch (error) {
     throw new IncompleteFootprintError(
       'invalid-footprint',

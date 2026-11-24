@@ -2,7 +2,7 @@
   "name": "@soroban-resurrect/adapter-freighter",
   "version": "0.1.0",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12"
   },
   "keywords": [
     "soroban",
@@ -43,10 +43,11 @@
     "@soroban-resurrect/sdk": "0.1.0"
   },
   "devDependencies": {
+    "@soroban-resurrect/sdk": "0.1.0",
+    "@types/node": "^22.0.0",
     "@vitest/coverage-v8": "^5.0.5",
     "typescript": "~6.0.3",
-    "vitest": "^5.0.5",
-    "@soroban-resurrect/sdk": "0.1.0"
+    "vitest": "^5.0.5"
   },
   "license": "MIT",
   "repository": {

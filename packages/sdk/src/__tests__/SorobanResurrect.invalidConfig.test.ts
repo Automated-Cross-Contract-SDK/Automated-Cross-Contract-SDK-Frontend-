@@ -50,8 +50,7 @@ describe('SorobanResurrect — invalid config handling', () => {
     ).rejects.toThrow()
   })
 
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('rejects submitWithRestore with a descriptive wallet validation error', async () => {
+  it('rejects submitWithRestore with a descriptive wallet validation error', async () => {
     const resurrect = new SorobanResurrect({ rpcUrl: 'https://soroban-testnet.stellar.org' })
 
     await expect(

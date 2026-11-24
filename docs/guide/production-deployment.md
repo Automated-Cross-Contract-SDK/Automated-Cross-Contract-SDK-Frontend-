@@ -160,7 +160,7 @@ Instrument the SDK so you can see restore rates and failures in production:
   passphrase or reset state. Re-read the passphrase from configuration on each
   deploy rather than hard-coding it in the bundle.
 - **SDK versions.** `@soroban-resurrect/sdk` requires `@stellar/stellar-sdk`
-  `^12.0.0`. Check the [API Reference](/api/sdk) for the stable interface and
+  `^17.4.0`. Check the [API Reference](/api/sdk) for the stable interface and
   any breaking changes before upgrading.
 - **Browser support.** The SDK targets ES2022 and requires `fetch`,
   `AbortController`, `TextEncoder`, and `TextDecoder`. SSE confirmation needs a

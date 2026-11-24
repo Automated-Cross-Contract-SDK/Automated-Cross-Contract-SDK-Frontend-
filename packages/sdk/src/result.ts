@@ -258,7 +258,7 @@ export function extractArchivedKeysSafe(
 
     try {
       const footprint = response.transactionData.getFootprint()
-      const readWrite = footprint.readWrite()
+      const readWrite = footprint.readWrite
 
       for (const ledgerKey of readWrite) {
         const keyBase64 = asXdrBase64(ledgerKey.toXDR('base64'))

@@ -18,12 +18,12 @@ import type { SdkRuntime } from './types.js'
 import { SYSTEM_RUNTIME } from './runtime.js'
 import type { TypedEventEmitter } from './EventEmitter.js'
 import { getExpiringSoonEntries, type LedgerEntryTTLInfo } from './TTLHelpers.js'
-import { calculateRestoreFee } from './feeCalculation.js'
+import { toBuilderFee, calculateRestoreFee } from './feeCalculation.js'
 import { isErrorResponse } from './Archiver.js'
 import { DEFAULT_NETWORK_PASSPHRASE } from './constants.js'
 import { asTxHash, asXdrBase64 } from './branded-types.js'
 import { signAndVerifyTransaction } from './signedTransaction.js'
-import { configForWalletRestore } from './memoValidation.js'
+import { assertSubmitted } from './submission.js'
 import { assertRestoreTransactionFresh, resolveRestoreMemo } from './Restorer.js'
 import { RESTORE_TX_LEDGER_BOUNDS_WINDOW } from './index.js'
 import { withPhaseTimeout } from './phaseTimeout.js'
@@ -82,11 +82,11 @@ export interface TTLWatchHandle {
 }
 
 function isPersistentKey(key: xdr.LedgerKey): boolean {
-  switch (key.switch().name) {
+  switch (key.type) {
     case 'contractCode':
       return true
     case 'contractData':
-      return key.contractData().durability().name === 'persistent'
+      return key.contractData.durability.name === 'persistent'
     default:
       return false
   }
@@ -98,8 +98,12 @@ function buildTTLExtensionTransaction(
   sorobanData: xdr.SorobanTransactionData,
   fee: string,
   networkPassphrase: string,
+  config: Pick<ResolvedSorobanResurrectConfig, 'maxRestoreFeeStroops'> = {},
 ): Transaction {
-  return new TransactionBuilder(account, { fee, networkPassphrase })
+  return new TransactionBuilder(account, {
+    fee: toBuilderFee(fee, sorobanData, config),
+    networkPassphrase,
+  })
     .addOperation(Operation.extendFootprintTtl({ extendTo }))
     .setSorobanData(sorobanData)
     .setTimeout(30)
@@ -194,6 +198,7 @@ export async function extendLedgerTTL(
     simulation.transactionData.build(),
     estimatedFee,
     networkPassphrase,
+    config,
   )
   const signedXdr = await withPhaseTimeout(
     options.wallet.signTransaction(asXdrBase64(transaction.toXDR()), { networkPassphrase }),
@@ -210,6 +215,7 @@ export async function extendLedgerTTL(
     config.originalSubmissionTimeoutMs,
     'TTL extension submission',
   )
+  assertSubmitted(sent, 'ORIGINAL_TX_FAILED', 'TTL extension')
   const hash = asTxHash(sent.hash)
   const status = await withPhaseTimeout(
     waitForTerminalStatus(
@@ -299,12 +305,13 @@ async function buildRestoreTxForKeys(
 
   const restoreFee = calculateRestoreFee(parseInt(sim.minResourceFee, 10), config)
 
+  const sorobanData = sim.transactionData.build()
   const builder = new TransactionBuilder(new Account(sourcePublicKey, sequence), {
-    fee: restoreFee,
+    fee: toBuilderFee(restoreFee, sorobanData, config),
     networkPassphrase,
   })
     .addOperation(Operation.restoreFootprint({}))
-    .setSorobanData(sim.transactionData.build())
+    .setSorobanData(sorobanData)
     .setTimeout(30)
     .setLedgerbounds(sim.latestLedger, sim.latestLedger + RESTORE_TX_LEDGER_BOUNDS_WINDOW)
 
@@ -389,17 +396,14 @@ export function watchTTL(
       const publicKey = await wallet.getPublicKey()
       if (stopped) return
 
-      const restoreConfig = {
-        ...config,
-        ...configForWalletRestore(config, wallet),
-      } as ResolvedSorobanResurrectConfig
-      const restoreTx = await buildRestoreTxForKeys(server, publicKey, keysToRestore, restoreConfig)
+      const restoreTx = await buildRestoreTxForKeys(server, publicKey, keysToRestore, config)
       const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
       const signedTx = await signAndVerifyTransaction(restoreTx, wallet, networkPassphrase, config)
 
       await assertRestoreTransactionFresh(server, signedTx, restoreTx)
 
       const sent = await server.sendTransaction(signedTx)
+      assertSubmitted(sent, 'RESTORE_TX_FAILED', 'TTL auto-extend restore')
       const hash = asTxHash(sent.hash)
       const status = await waitForTerminalStatus(
         server,

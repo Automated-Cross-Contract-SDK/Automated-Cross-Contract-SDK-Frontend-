@@ -1,4 +1,4 @@
-import { ref, watch, onMounted, toValue, type Ref, type MaybeRefOrGetter } from 'vue'
+import { ref, shallowRef, watch, onMounted, toValue, type Ref, type MaybeRefOrGetter } from 'vue'
 import { RESTORE_FEE_MULTIPLIER } from '@soroban-resurrect/sdk'
 import { rpc, type Transaction } from '@stellar/stellar-sdk'
 import { resolveResurrect, type ResolveResurrectOptions } from './resolveResurrect.js'
@@ -55,7 +55,7 @@ export function useSorobanResurrectEstimate(
   const { auto = true } = options
   const resurrect = resolveResurrect(options)
 
-  const estimate = ref<SorobanFeeEstimate | null>(null)
+  const estimate = shallowRef<SorobanFeeEstimate | null>(null)
   const refreshing = ref(false)
   const error = ref<string | null>(null)
 

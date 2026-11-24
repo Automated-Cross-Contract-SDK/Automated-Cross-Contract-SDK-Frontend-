@@ -59,7 +59,7 @@ function makeSuccessResponse() {
     _parsed: true,
     transactionData: {
       build: () => mockSorobanData,
-      getFootprint: () => ({ readOnly: () => [], readWrite: () => [] }),
+      getFootprint: () => ({ readOnly: [], readWrite: [] }),
     },
     minResourceFee: '100',
     cost: { cpuInsns: '100', memBytes: '100' },
@@ -76,7 +76,7 @@ function makeRestoreResponse() {
     _parsed: true,
     transactionData: {
       build: () => mockSorobanData,
-      getFootprint: () => ({ readOnly: () => [], readWrite: () => [mockLedgerKey] }),
+      getFootprint: () => ({ readOnly: [], readWrite: [mockLedgerKey] }),
     },
     minResourceFee: '100',
     cost: { cpuInsns: '100', memBytes: '100' },

@@ -63,25 +63,17 @@ describe('request-specific configuration overrides', () => {
       configOverrides: {
         pollTimeoutMs: 12_000,
         restoreFeeMultiplier: 7,
-        restoreTxMemoText: 'one request only',
       },
     })
 
     expect(effective.pollTimeoutMs).toBe(12_000)
     expect(effective.restoreFeeMultiplier).toBe(7)
-    expect(effective.restoreTxMemoText).toBe('one request only')
     expect(baseConfig.pollTimeoutMs).toBe(60_000)
     expect(baseConfig.restoreFeeMultiplier).toBe(3)
     expect(Object.isFrozen(effective)).toBe(true)
   })
 
-  it('preserves legacy top-level memo precedence and validates overrides', () => {
-    const effective = resolveSubmitConfig({ rpcUrl, restoreTxMemoText: 'instance' } as never, {
-      configOverrides: { restoreTxMemoText: 'nested' },
-      restoreTxMemoText: 'legacy',
-    })
-
-    expect(effective.restoreTxMemoText).toBe('legacy')
+  it('validates overrides', () => {
     expect(() =>
       resolveSubmitConfig(baseConfig as never, {
         configOverrides: { pollTimeoutMs: 0 },

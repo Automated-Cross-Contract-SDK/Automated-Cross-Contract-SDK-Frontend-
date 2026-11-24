@@ -25,7 +25,7 @@ function makeMockServer(): rpc.Server {
         _parsed: true,
         transactionData: {
           build: () => mockSorobanData,
-          getFootprint: () => ({ readOnly: () => [], readWrite: () => [mockLedgerKey] }),
+          getFootprint: () => ({ readOnly: [], readWrite: [mockLedgerKey] }),
         },
         minResourceFee: '100',
         cost: { cpuInsns: '100', memBytes: '100' },

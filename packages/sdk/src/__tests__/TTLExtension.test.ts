@@ -10,7 +10,7 @@ function persistentKey(): xdr.LedgerKey {
     new xdr.LedgerKeyContractData({
       contract: Address.contract(Buffer.alloc(32, 7)).toScAddress(),
       key: xdr.ScVal.scvU32(1),
-      durability: xdr.ContractDataDurability.persistent(),
+      durability: xdr.ContractDataDurability.persistent,
     }),
   )
 }
@@ -20,7 +20,7 @@ function temporaryKey(): xdr.LedgerKey {
     new xdr.LedgerKeyContractData({
       contract: Address.contract(Buffer.alloc(32, 7)).toScAddress(),
       key: xdr.ScVal.scvU32(1),
-      durability: xdr.ContractDataDurability.temporary(),
+      durability: xdr.ContractDataDurability.temporary,
     }),
   )
 }

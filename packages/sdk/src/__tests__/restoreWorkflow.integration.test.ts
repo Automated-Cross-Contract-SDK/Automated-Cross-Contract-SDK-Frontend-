@@ -81,7 +81,7 @@ function makeRestoreSimResponse() {
     _parsed: true,
     transactionData: {
       build: () => mockSorobanData,
-      getFootprint: () => ({ readOnly: () => [], readWrite: () => [archivedLedgerKey] }),
+      getFootprint: () => ({ readOnly: [], readWrite: [archivedLedgerKey] }),
     },
     minResourceFee: '100',
     cost: { cpuInsns: '100', memBytes: '100' },

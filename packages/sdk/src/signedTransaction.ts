@@ -2,6 +2,7 @@ import { FeeBumpTransaction, Transaction, TransactionBuilder } from '@stellar/st
 import type { WalletAdapter } from './types.js'
 import type { SorobanResurrectConfig } from './types.js'
 import { ResurrectError } from './errors.js'
+import { extractXdrOperations } from './Restorer.js'
 import { asXdrBase64 } from './branded-types.js'
 
 function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
@@ -9,8 +10,8 @@ function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
 }
 
 function sameOperations(expected: Transaction, actual: Transaction): boolean {
-  const expectedOperations = expected.toEnvelope().v1().tx().operations()
-  const actualOperations = actual.toEnvelope().v1().tx().operations()
+  const expectedOperations = extractXdrOperations(expected)
+  const actualOperations = extractXdrOperations(actual)
   return (
     expectedOperations.length === actualOperations.length &&
     expectedOperations.every(

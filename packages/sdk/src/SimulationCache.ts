@@ -124,11 +124,9 @@ export class SimulationCache {
     // Include the Soroban footprint so otherwise-identical invocations that
     // touch different ledger entries never share a cached verdict.
     let sorobanData = ''
-    try {
-      const ext = transaction.toEnvelope().v1().tx().ext()
-      if (ext.switch() === 1) sorobanData = ext.sorobanData().toXDR('base64')
-    } catch {
-      // Non-v1 envelopes carry no Soroban data.
+    const envelope = transaction.toEnvelope()
+    if (envelope.type === 'envelopeTypeTx' && 'sorobanData' in envelope.v1.tx.ext) {
+      sorobanData = envelope.v1.tx.ext.sorobanData.toXdr('base64')
     }
 
     const parts = [

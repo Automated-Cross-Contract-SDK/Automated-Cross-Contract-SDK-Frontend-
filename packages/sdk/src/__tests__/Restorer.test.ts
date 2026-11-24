@@ -92,21 +92,18 @@ describe('Restorer', () => {
       // then wrap those operations in a V0 envelope.
       const helperTx = makeSampleTx()
       const helperEnvelope = helperTx.toEnvelope()
-      const helperV1Env = helperEnvelope.value() as xdr.TransactionV1Envelope
-      const operations = helperV1Env.tx().operations()
+      if (helperEnvelope.type !== 'envelopeTypeTx') throw new Error('expected a v1 envelope')
+      const { operations } = helperEnvelope.v1.tx
 
       const v0TxBody = new xdr.TransactionV0({
         sourceAccountEd25519: kp.rawPublicKey(),
 
-        fee: 100 as unknown as any,
-        seqNum: BigInt(1) as unknown as xdr.Int64,
-        timeBounds: new xdr.TimeBounds({
-          minTime: BigInt(0) as unknown as xdr.Uint64,
-          maxTime: BigInt(0) as unknown as xdr.Uint64,
-        }),
+        fee: 100,
+        seqNum: 1n,
+        timeBounds: new xdr.TimeBounds({ minTime: 0n, maxTime: 0n }),
         memo: xdr.Memo.memoNone(),
         operations,
-        ext: 0 as unknown as xdr.TransactionExt,
+        ext: xdr.TransactionV0Ext.v0(),
       })
 
       const v0Envelope = new xdr.TransactionV0Envelope({
@@ -129,8 +126,7 @@ describe('Restorer', () => {
       const tx = makeSampleTx()
       // Mock toEnvelope to return an unknown switch type
       vi.spyOn(tx, 'toEnvelope').mockReturnValue({
-        switch: () => ({ name: 'envelopeTypeUnknown42' }),
-        value: () => ({}),
+        type: 'envelopeTypeUnknown42',
       } as any)
 
       expect(() => extractXdrOperations(tx)).toThrow(
@@ -138,25 +134,20 @@ describe('Restorer', () => {
       )
     })
 
-    // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-    it.skip('[regression #27] throws descriptive error on unsupported inner envelope type in fee-bump', () => {
+    it('[regression #27] throws descriptive error on unsupported inner envelope type in fee-bump', () => {
       const tx = makeSampleTx()
       // Mock toEnvelope to return a fee-bump envelope with an unsupported inner type
       const fakeInnerEnvelope = {
-        switch: () => ({ name: 'envelopeTypeUnknownInner99' }),
+        type: 'envelopeTypeUnknownInner99',
       }
 
       vi.spyOn(tx, 'toEnvelope').mockReturnValue({
-        switch: () => ({ name: 'envelopeTypeTxFeeBump' }),
-        value: () => ({
-          tx: () => ({
-            innerTx: () => fakeInnerEnvelope,
-          }),
-        }),
+        type: 'envelopeTypeTxFeeBump',
+        feeBump: { tx: { innerTx: fakeInnerEnvelope } },
       } as any)
 
       expect(() => extractXdrOperations(tx)).toThrow(
-        /Unsupported inner transaction envelope type in fee-bump/,
+        /Unsupported inner transaction envelope type: envelopeTypeUnknownInner99/,
       )
     })
   })

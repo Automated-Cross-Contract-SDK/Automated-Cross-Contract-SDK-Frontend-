@@ -220,8 +220,8 @@ const ledgerKeyArb = fc.oneof(
       contractId: fc.uint8Array({ minLength: 32, maxLength: 32 }),
       storageKey: fc.string({ minLength: 1, maxLength: 32 }),
       durability: fc.constantFrom(
-        xdr.ContractDataDurability.persistent(),
-        xdr.ContractDataDurability.temporary(),
+        xdr.ContractDataDurability.persistent,
+        xdr.ContractDataDurability.temporary,
       ),
     })
     .map(({ contractId, storageKey, durability }) =>
@@ -246,7 +246,7 @@ describe('ledger-key XDR parsing and normalization (property-based)', () => {
         const serialized = key.toXDR('base64')
         const parsed = xdr.LedgerKey.fromXDR(serialized, 'base64')
 
-        expect(parsed.switch().name).toBe(key.switch().name)
+        expect(parsed.type).toBe(key.type)
         expect(normalizeLedgerKey(serialized)).toBe(serialized)
         expect(normalizeLedgerKey(normalizeLedgerKey(serialized))).toBe(serialized)
       }),

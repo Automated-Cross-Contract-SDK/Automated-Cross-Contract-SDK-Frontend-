@@ -141,12 +141,8 @@ the device.
 
 Prompts and supported fields vary with device app/firmware versions.
 
-Restore transactions signed by a hardware wallet include the configured
-`restoreTxMemo` or `restoreTxMemoText`. If neither is set, the SDK attaches the
-short text memo `Restore archived entries`. Trezor may display the memo when
-supported by the installed firmware; the Ledger hash-signing flow does not
-display memo fields. The memo remains part of the transaction and is limited
-to 28 UTF-8 bytes.
+Restore transactions never carry a memo: the network rejects Soroban transactions
+that have one.
 
 ## Custom adapters
 

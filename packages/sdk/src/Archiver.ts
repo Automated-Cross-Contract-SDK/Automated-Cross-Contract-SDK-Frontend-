@@ -1,4 +1,4 @@
-import { rpc, Transaction } from '@stellar/stellar-sdk'
+import { Address, rpc, Transaction } from '@stellar/stellar-sdk'
 import { xdr } from '@stellar/stellar-sdk'
 import { ArchivedLedgerEntry, SimulateResponse } from './types.js'
 import { getLedgerKeyEntryType } from './TTLHelpers.js'
@@ -389,24 +389,16 @@ export function buildContractDataKey(
     (contractId.match(/.{1,2}/g) ?? []).map((b) => parseInt(b, 16)),
   )
 
-  const contractAddress = {
-    switch: () => xdr.ScAddressType.scAddressTypeContract(),
-    contractId: contractBytes,
-  } as unknown as xdr.ScAddress
-
-  const contractData = {
-    contract: contractAddress,
-    key,
-    durability:
-      keyType === 'temporary'
-        ? xdr.ContractDataDurability.temporary()
-        : xdr.ContractDataDurability.persistent(),
-  } as unknown as xdr.LedgerKeyContractData
-
-  return {
-    type: xdr.LedgerEntryType.contractData(),
-    contractData,
-  } as unknown as xdr.LedgerKey
+  return xdr.LedgerKey.contractData(
+    new xdr.LedgerKeyContractData({
+      contract: Address.contract(contractBytes).toScAddress(),
+      key,
+      durability:
+        keyType === 'temporary'
+          ? xdr.ContractDataDurability.temporary
+          : xdr.ContractDataDurability.persistent,
+    }),
+  )
 }
 
 /**
@@ -495,7 +487,7 @@ export async function getContractDataEntry(
  *
  * @param wasmHash - The wasm hash as a 64-char hex string (as returned by
  *   `Operation.uploadContractWasm`/`installContractWasm` responses), or a
- *   raw `Buffer`/`Uint8Array`.
+ *   raw `Uint8Array`.
  * @returns An xdr.LedgerKey for the ContractCode entry.
  *
  * @example
@@ -504,13 +496,11 @@ export async function getContractDataEntry(
  * const archived = await checkArchivedContractCode(server, wasmHashHex)
  * ```
  */
-export function buildContractCodeKey(
-  wasmHash: HexString | string | Buffer | Uint8Array,
-): xdr.LedgerKey {
+export function buildContractCodeKey(wasmHash: HexString | string | Uint8Array): xdr.LedgerKey {
   const hash =
     typeof wasmHash === 'string'
-      ? Buffer.from((wasmHash.match(/.{1,2}/g) ?? []).map((b) => parseInt(b, 16)))
-      : Buffer.from(wasmHash)
+      ? new Uint8Array((wasmHash.match(/.{1,2}/g) ?? []).map((b) => parseInt(b, 16)))
+      : wasmHash
 
   const contractCode = new xdr.LedgerKeyContractCode({ hash })
 
@@ -528,7 +518,7 @@ export function buildContractCodeKey(
  */
 export async function checkArchivedContractCode(
   server: ISorobanRpcClient,
-  wasmHash: HexString | string | Buffer | Uint8Array,
+  wasmHash: HexString | string | Uint8Array,
 ): Promise<boolean> {
   const ledgerKey = buildContractCodeKey(wasmHash)
   const archived = await detectArchivedEntries(server, [ledgerKey])
@@ -545,7 +535,7 @@ export async function checkArchivedContractCode(
  */
 export async function getContractCodeEntry(
   server: ISorobanRpcClient,
-  wasmHash: HexString | string | Buffer | Uint8Array,
+  wasmHash: HexString | string | Uint8Array,
 ): Promise<rpc.Api.LedgerEntryResult | null> {
   const ledgerKey = buildContractCodeKey(wasmHash)
 

@@ -37,6 +37,7 @@
  */
 
 import { FeeBumpTransaction, Keypair, Transaction, TransactionBuilder } from '@stellar/stellar-sdk'
+import { bytesToHex } from './bytes.js'
 import type { WalletAdapter } from './types.js'
 import { asXdrBase64, type XdrBase64 } from './branded-types.js'
 
@@ -206,12 +207,12 @@ export class MultiSigWalletAdapter implements WalletAdapter {
     const tx = TransactionBuilder.fromXDR(signedXdr, networkPassphrase) as
       Transaction | FeeBumpTransaction
 
-    const presentHints = new Set(tx.signatures.map((sig) => sig.hint().toString('hex')))
+    const presentHints = new Set(tx.signatures.map((sig) => bytesToHex(sig.hint.toBytes())))
     const signerKeys = await Promise.all(this.config.signers.map((s) => s.adapter.getPublicKey()))
 
     let weight = 0
     signerKeys.forEach((pk, i) => {
-      const hint = Keypair.fromPublicKey(String(pk)).signatureHint().toString('hex')
+      const hint = bytesToHex(Keypair.fromPublicKey(String(pk)).signatureHint())
       if (presentHints.has(hint)) weight += this.config.signers[i].weight ?? 1
     })
     return weight >= this.config.threshold

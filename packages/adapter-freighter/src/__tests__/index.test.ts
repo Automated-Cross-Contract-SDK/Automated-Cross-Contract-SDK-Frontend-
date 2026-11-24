@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { WalletAdapter } from '@soroban-resurrect/sdk'
 import {
