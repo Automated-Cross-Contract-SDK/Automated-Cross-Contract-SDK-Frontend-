@@ -12,11 +12,7 @@ import {
 } from '@stellar/stellar-sdk'
 import { SorobanResurrect } from '../SorobanResurrect.js'
 import { WalletError } from '../types.js'
-import type {
-  WalletAdapter,
-  SorobanResurrectConfig,
-  SubmitLifecycleEvent,
-} from '../types.js'
+import type { WalletAdapter, SorobanResurrectConfig, SubmitLifecycleEvent } from '../types.js'
 
 function makeSampleTx(): Transaction {
   const kp = Keypair.random()
@@ -452,9 +448,9 @@ describe('SorobanResurrect.submitWithRestore — callback invocation ordering', 
       makeSuccessResponse() as never,
     )
     const wallet = makeWallet()
-    wallet.signTransaction = vi.fn().mockRejectedValue(
-      new WalletError('USER_REJECTED', 'Signature request declined'),
-    )
+    wallet.signTransaction = vi
+      .fn()
+      .mockRejectedValue(new WalletError('USER_REJECTED', 'Signature request declined'))
 
     const result = await resurrect.submitWithRestore({
       transaction: makeSampleTx(),
@@ -533,7 +529,11 @@ describe('SorobanResurrect.submitWithRestore — callback invocation ordering', 
       'onRestoreFailed',
     ])
 
-    for (const name of ['onRestoreConfirmed', 'onSigningOriginal', 'onOriginalSubmitted'] as const) {
+    for (const name of [
+      'onRestoreConfirmed',
+      'onSigningOriginal',
+      'onOriginalSubmitted',
+    ] as const) {
       expect(callbacks[name]).not.toHaveBeenCalled()
     }
   })

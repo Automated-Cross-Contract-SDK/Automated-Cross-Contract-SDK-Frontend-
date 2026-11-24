@@ -35,12 +35,20 @@ let wallet: WalletConnectAdapter | undefined
 
 function setSession(next: WalletConnectSessionLike | undefined) {
   session = next
-  wallet = next ? new WalletConnectAdapter({ client: client!, session: next, networkPassphrase: NETWORK_PASSPHRASE }) : undefined
+  wallet = next
+    ? new WalletConnectAdapter({
+        client: client!,
+        session: next,
+        networkPassphrase: NETWORK_PASSPHRASE,
+      })
+    : undefined
   qr.hidden = true
   connectBtn.hidden = Boolean(next)
   disconnectBtn.hidden = !next
   withdrawBtn.disabled = !next
-  $('session').textContent = next ? `Session ${next.topic.slice(0, 8)}… on ${CHAIN_ID}` : 'Not paired'
+  $('session').textContent = next
+    ? `Session ${next.topic.slice(0, 8)}… on ${CHAIN_ID}`
+    : 'Not paired'
 }
 
 async function init() {
@@ -100,7 +108,10 @@ async function connect() {
 
 async function disconnect() {
   if (!client || !session) return
-  await client.disconnect({ topic: session.topic, reason: { code: 6000, message: 'User disconnected' } })
+  await client.disconnect({
+    topic: session.topic,
+    reason: { code: 6000, message: 'User disconnected' },
+  })
   setSession(undefined)
   log('Disconnected.')
 }
@@ -120,7 +131,11 @@ async function withdraw() {
     .build()
 
   const archived = await resurrect.detectArchivedKeys(tx)
-  log(archived.length ? `${archived.length} archived key(s) — restore will be requested first.` : 'No restore needed.')
+  log(
+    archived.length
+      ? `${archived.length} archived key(s) — restore will be requested first.`
+      : 'No restore needed.',
+  )
 
   // Each signature (restore, then the original) is approved on the phone.
   const result = await resurrect.submitWithRestore({ transaction: tx, wallet })

@@ -11,9 +11,7 @@ describe('SorobanResurrect — invalid config handling', () => {
   })
 
   it('throws a descriptive error for an invalid RPC URL', () => {
-    expect(() => new SorobanResurrect({ rpcUrl: 'not-a-url' })).toThrow(
-      'Invalid config.rpcUrl',
-    )
+    expect(() => new SorobanResurrect({ rpcUrl: 'not-a-url' })).toThrow('Invalid config.rpcUrl')
   })
 
   it('rejects non-HTTP RPC URLs', () => {
@@ -65,11 +63,12 @@ describe('SorobanResurrect — invalid config handling', () => {
   })
 
   it('throws when a poll interval is not greater than zero', () => {
-    expect(() =>
-      new SorobanResurrect({
-        rpcUrl: 'https://soroban-testnet.stellar.org',
-        pollIntervalMs: 0,
-      }),
+    expect(
+      () =>
+        new SorobanResurrect({
+          rpcUrl: 'https://soroban-testnet.stellar.org',
+          pollIntervalMs: 0,
+        }),
     ).toThrow('Invalid config.pollIntervalMs')
   })
 
@@ -100,11 +99,12 @@ describe('SorobanResurrect — invalid config handling', () => {
   })
 
   it('throws when the restore fee multiplier is below one', () => {
-    expect(() =>
-      new SorobanResurrect({
-        rpcUrl: 'https://soroban-testnet.stellar.org',
-        restoreFeeMultiplier: 0.5,
-      }),
+    expect(
+      () =>
+        new SorobanResurrect({
+          rpcUrl: 'https://soroban-testnet.stellar.org',
+          restoreFeeMultiplier: 0.5,
+        }),
     ).toThrow('Invalid config.restoreFeeMultiplier')
   })
 

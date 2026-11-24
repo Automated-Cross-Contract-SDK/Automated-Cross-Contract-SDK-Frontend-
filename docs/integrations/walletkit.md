@@ -13,7 +13,12 @@ npm install @soroban-resurrect/adapter-walletkit @creit.tech/stellar-wallets-kit
 ## Usage
 
 ```ts
-import { StellarWalletsKit, WalletNetwork, FREIGHTER_ID, allowAllModules } from '@creit.tech/stellar-wallets-kit'
+import {
+  StellarWalletsKit,
+  WalletNetwork,
+  FREIGHTER_ID,
+  allowAllModules,
+} from '@creit.tech/stellar-wallets-kit'
 import { WalletKitAdapter } from '@soroban-resurrect/adapter-walletkit'
 
 const kit = new StellarWalletsKit({
@@ -29,8 +34,8 @@ const result = await sr.submitWithRestore({ transaction, wallet })
 
 ## Constructor options
 
-| Option | Type                    | Required | Description                                                          |
-| ------ | ----------------------- | -------- | -------------------------------------------------------------------- |
+| Option | Type                    | Required | Description                                                                    |
+| ------ | ----------------------- | -------- | ------------------------------------------------------------------------------ |
 | `kit`  | `StellarWalletsKitLike` | ✅       | A configured Kit; call `kit.setWallet(...)` (or use its modal) before signing. |
 
 No environment variables are required by the adapter itself. If you enable the Kit's

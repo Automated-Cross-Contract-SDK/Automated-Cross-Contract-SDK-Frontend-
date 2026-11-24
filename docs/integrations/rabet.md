@@ -22,8 +22,8 @@ const wallet2 = await createAdapter('rabet')
 
 ## Constructor options
 
-| Option  | Type       | Default        | Description                                          |
-| ------- | ---------- | -------------- | ---------------------------------------------------- |
+| Option  | Type       | Default        | Description                                              |
+| ------- | ---------- | -------------- | -------------------------------------------------------- |
 | `rabet` | `RabetApi` | `window.rabet` | Override the Rabet API object (tests, custom injection). |
 
 No environment variables are required.

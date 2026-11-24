@@ -10,14 +10,17 @@ import {
 const mockOnStateChange = vi.fn()
 
 vi.mock('@soroban-resurrect/sdk', () => ({
-  SorobanResurrect: vi.fn().mockImplementation(() => ({
-    onStateChange: mockOnStateChange,
-    reset: vi.fn(),
-    detectArchivedKeys: vi.fn(),
-    submitWithRestore: vi.fn(),
-    cancel: vi.fn().mockReturnValue(false),
-    config: { rpcUrl: 'https://test' },
-  })),
+  SorobanResurrect: vi.fn().mockImplementation(function () {
+    return {
+      onStateChange: mockOnStateChange,
+      reset: vi.fn(),
+      dispose: vi.fn(),
+      detectArchivedKeys: vi.fn(),
+      submitWithRestore: vi.fn(),
+      cancel: vi.fn().mockReturnValue(false),
+      config: { rpcUrl: 'https://test' },
+    }
+  }),
   createSubscriptionStore: <T,>(initialSnapshot: T) => {
     let snapshot = initialSnapshot
     const listeners = new Set<() => void>()
@@ -66,7 +69,9 @@ function SelectorProbe() {
 describe('useSorobanResurrectSelector', () => {
   it('throws when used outside a provider', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    expect(() => render(<SelectorProbe />)).toThrow(/must be used within a SorobanResurrectProvider/)
+    expect(() => render(<SelectorProbe />)).toThrow(
+      /must be used within a SorobanResurrectProvider/,
+    )
     spy.mockRestore()
   })
 

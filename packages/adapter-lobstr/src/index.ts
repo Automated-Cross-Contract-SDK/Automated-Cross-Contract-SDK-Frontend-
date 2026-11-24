@@ -1,10 +1,17 @@
-import {
-  isConnected as lobstrIsConnected,
-  getPublicKey as lobstrGetPublicKey,
-  signTransaction as lobstrSignTransaction,
-} from '@lobstrco/signer-extension-api'
+import * as walletApiModule from '@lobstrco/signer-extension-api'
 import { WalletError, type WalletAdapter, type WalletCapabilities } from '@soroban-resurrect/sdk'
 import { asStellarPublicKey, asXdrBase64 } from '@soroban-resurrect/sdk'
+
+// @lobstrco/signer-extension-api is CommonJS: native ESM (Node/SSR) only exposes it through
+// `default`, while bundlers expose named exports.
+const walletApi: typeof walletApiModule =
+  ('default' in walletApiModule && (walletApiModule.default as typeof walletApiModule)) ||
+  walletApiModule
+const {
+  isConnected: lobstrIsConnected,
+  getPublicKey: lobstrGetPublicKey,
+  signTransaction: lobstrSignTransaction,
+} = walletApi
 
 /**
  * WalletAdapter implementation for the LOBSTR browser extension wallet.

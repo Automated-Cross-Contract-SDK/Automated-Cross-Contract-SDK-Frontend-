@@ -7,9 +7,7 @@ The React package offers two ways to use the SDK: a **context provider + hook** 
 ### `SorobanResurrectProvider`
 
 ```tsx
-<SorobanResurrectProvider config={config}>
-  {children}
-</SorobanResurrectProvider>
+<SorobanResurrectProvider config={config}>{children}</SorobanResurrectProvider>
 ```
 
 React context provider that instantiates `SorobanResurrect` and subscribes to its state changes. When the `config` prop changes (by deep equality), a new SDK instance is created and state resets to `idle`.
@@ -20,10 +18,10 @@ until initialization completes.
 
 **Props** (`SorobanResurrectProviderProps`)
 
-| Prop       | Type                     | Description               |
-| ---------- | ------------------------ | -------------------------- |
-| `config`   | `SorobanResurrectConfig` | SDK configuration.          |
-| `children` | `ReactNode`              | React children.             |
+| Prop       | Type                     | Description        |
+| ---------- | ------------------------ | ------------------ |
+| `config`   | `SorobanResurrectConfig` | SDK configuration. |
+| `children` | `ReactNode`              | React children.    |
 
 ### `useSorobanResurrectContext()`
 
@@ -95,21 +93,21 @@ Creates and manages its own `SorobanResurrect` instance — no provider needed. 
 **Options** (`UseSorobanResurrectOptions`)
 
 | Field    | Type                     | Description        |
-| -------- | ------------------------ | -------------------- |
-| `config` | `SorobanResurrectConfig` | SDK configuration.    |
+| -------- | ------------------------ | ------------------ |
+| `config` | `SorobanResurrectConfig` | SDK configuration. |
 
 **Returns** (`UseSorobanResurrectReturn`)
 
-| Field                 | Type                                                              | Description                                  |
-| ---------------------- | ------------------------------------------------------------------ | ----------------------------------------------- |
-| `state`                | `RestoreStateInfo`                                                  | Current workflow state snapshot.                |
-| `isProcessing`         | `boolean`                                                           | Whether a restore/submit operation is running.  |
-| `submitWithRestore`    | `(transaction: Transaction, wallet: WalletAdapter) => Promise<ResurrectResult>` | Submit with automatic restoration. |
-| `cancel`               | `() => boolean`                                                     | Cancel active workflows; returns `true` if any were newly cancelled. |
-| `detectArchivedKeys`   | `(transaction: Transaction) => Promise<ArchivedLedgerEntry[]>`     | Check for archived entries.                     |
-| `reset`                | `() => void`                                                        | Reset state back to idle.                       |
-| `on`                    | `<K>(event: K, listener: (payload) => void) => () => void`         | Subscribe to a lifecycle event. See below.      |
-| `resurrect`            | `SorobanResurrect`                                                  | The underlying SDK instance.                    |
+| Field                | Type                                                                            | Description                                                          |
+| -------------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `state`              | `RestoreStateInfo`                                                              | Current workflow state snapshot.                                     |
+| `isProcessing`       | `boolean`                                                                       | Whether a restore/submit operation is running.                       |
+| `submitWithRestore`  | `(transaction: Transaction, wallet: WalletAdapter) => Promise<ResurrectResult>` | Submit with automatic restoration.                                   |
+| `cancel`             | `() => boolean`                                                                 | Cancel active workflows; returns `true` if any were newly cancelled. |
+| `detectArchivedKeys` | `(transaction: Transaction) => Promise<ArchivedLedgerEntry[]>`                  | Check for archived entries.                                          |
+| `reset`              | `() => void`                                                                    | Reset state back to idle.                                            |
+| `on`                 | `<K>(event: K, listener: (payload) => void) => () => void`                      | Subscribe to a lifecycle event. See below.                           |
+| `resurrect`          | `SorobanResurrect`                                                              | The underlying SDK instance.                                         |
 
 The standalone hook cancels active workflows when its owning component
 unmounts. Both the context hook and standalone hook expose `cancel()`.
@@ -125,17 +123,17 @@ already submitted to the network.
 
 ## Lifecycle Events
 
-Both `useSorobanResurrectContext()` and `useSorobanResurrect()` expose an `on` helper backed by the underlying SDK instance's `on`/`off` event emitter (`resurrect.on(...)`), so dApp teams can wire up telemetry or progress UIs without reaching into `resurrect` directly. `on` always subscribes to the *current* SDK instance — resubscribe if you call it again after `config` changes.
+Both `useSorobanResurrectContext()` and `useSorobanResurrect()` expose an `on` helper backed by the underlying SDK instance's `on`/`off` event emitter (`resurrect.on(...)`), so dApp teams can wire up telemetry or progress UIs without reaching into `resurrect` directly. `on` always subscribes to the _current_ SDK instance — resubscribe if you call it again after `config` changes.
 
-| Event               | Payload               | Fires when                                                        |
-| -------------------- | ---------------------- | -------------------------------------------------------------------- |
-| `stateChange`        | `RestoreStateInfo`      | On every state transition (mirrors `onStateChange`).                 |
-| `restoreNeeded`       | `ArchivedLedgerEntry[]` | Archived entries are detected and restoration is required.           |
-| `restoreSubmitted`    | `TxHash`                | The restore transaction is submitted.                                |
-| `restoreConfirmed`    | `TxHash`                | The restore transaction is confirmed on-chain.                       |
-| `originalSubmitted`   | `TxHash`                | The original transaction is submitted.                               |
-| `restoreComplete`     | `ResurrectResult`       | The full restore-and-submit workflow finishes.                       |
-| `error`               | `string`                | The workflow fails, with the error message.                          |
+| Event               | Payload                 | Fires when                                                 |
+| ------------------- | ----------------------- | ---------------------------------------------------------- |
+| `stateChange`       | `RestoreStateInfo`      | On every state transition (mirrors `onStateChange`).       |
+| `restoreNeeded`     | `ArchivedLedgerEntry[]` | Archived entries are detected and restoration is required. |
+| `restoreSubmitted`  | `TxHash`                | The restore transaction is submitted.                      |
+| `restoreConfirmed`  | `TxHash`                | The restore transaction is confirmed on-chain.             |
+| `originalSubmitted` | `TxHash`                | The original transaction is submitted.                     |
+| `restoreComplete`   | `ResurrectResult`       | The full restore-and-submit workflow finishes.             |
+| `error`             | `string`                | The workflow fails, with the error message.                |
 
 ```tsx
 useEffect(() => {

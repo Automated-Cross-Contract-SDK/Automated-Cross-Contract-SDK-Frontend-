@@ -505,4 +505,5 @@ MIT
 - #366: SDK: futurenet presets resolve to a passphrase the config validator rejects
 
 <!-- handsoff-issue-560 -->
+
 - #560: Add backpressure for concurrent restore workflows

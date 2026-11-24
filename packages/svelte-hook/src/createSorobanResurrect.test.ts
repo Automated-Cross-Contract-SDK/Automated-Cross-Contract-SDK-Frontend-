@@ -14,19 +14,21 @@ let stateListener: (info: unknown) => void = () => {}
 vi.mock('@soroban-resurrect/sdk', () => ({
   RESTORE_FEE_MULTIPLIER: 3,
   isProcessingState: (s: string) => s !== 'idle' && s !== 'success' && s !== 'error',
-  SorobanResurrect: vi.fn().mockImplementation(() => ({
-    onStateChange: (cb: typeof stateListener) => {
-      stateListener = cb
-      mockOnStateChange(cb)
-      return vi.fn()
-    },
-    reset: mockReset,
-    detectArchivedKeys: mockDetectArchivedKeys,
-    estimateRestoreCost: vi.fn().mockResolvedValue({ minResourceFee: 100 }),
-    submitWithRestore: mockSubmitWithRestore,
-    dispose: mockDispose,
-    simulate: mockSimulate,
-  })),
+  SorobanResurrect: vi.fn().mockImplementation(function () {
+    return {
+      onStateChange: (cb: typeof stateListener) => {
+        stateListener = cb
+        mockOnStateChange(cb)
+        return vi.fn()
+      },
+      reset: mockReset,
+      detectArchivedKeys: mockDetectArchivedKeys,
+      estimateRestoreCost: vi.fn().mockResolvedValue({ minResourceFee: 100 }),
+      submitWithRestore: mockSubmitWithRestore,
+      dispose: mockDispose,
+      simulate: mockSimulate,
+    }
+  }),
 }))
 
 const config = writable({ rpcUrl: 'https://soroban-testnet.stellar.org' })

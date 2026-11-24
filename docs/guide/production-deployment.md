@@ -23,11 +23,11 @@ const sr = new SorobanResurrect({
 })
 ```
 
-| Environment | `networkPassphrase` | Typical RPC URL |
-| --- | --- | --- |
-| Mainnet | `Networks.PUBLIC` | `https://soroban-mainnet.stellar.org` |
-| Testnet | `Networks.TESTNET` | `https://soroban-testnet.stellar.org` |
-| Futurenet | `Networks.FUTURENET` | `https://rpc-futurenet.stellar.org` |
+| Environment | `networkPassphrase`  | Typical RPC URL                       |
+| ----------- | -------------------- | ------------------------------------- |
+| Mainnet     | `Networks.PUBLIC`    | `https://soroban-mainnet.stellar.org` |
+| Testnet     | `Networks.TESTNET`   | `https://soroban-testnet.stellar.org` |
+| Futurenet   | `Networks.FUTURENET` | `https://rpc-futurenet.stellar.org`   |
 
 Recommendations:
 

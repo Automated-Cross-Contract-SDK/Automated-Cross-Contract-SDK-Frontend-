@@ -29,13 +29,13 @@ Click **Pair wallet**, scan the QR code, approve the session, then
 
 ## Configuration
 
-| Variable                  | Required | Purpose                                                        |
-| ------------------------- | -------- | -------------------------------------------------------------- |
+| Variable                  | Required | Purpose                                                            |
+| ------------------------- | -------- | ------------------------------------------------------------------ |
 | `VITE_WC_PROJECT_ID`      | yes      | WalletConnect project id; the relay rejects connections without it |
-| `VITE_WC_RELAY_URL`       | no       | Custom relay; defaults to `wss://relay.walletconnect.com`      |
-| `VITE_RPC_URL`            | no       | Soroban RPC endpoint                                           |
-| `VITE_NETWORK_PASSPHRASE` | no       | Selects the CAIP-2 chain (`stellar:testnet` / `stellar:pubnet`) |
-| `VITE_CONTRACT_ID`        | no       | Contract invoked by the demo transaction                       |
+| `VITE_WC_RELAY_URL`       | no       | Custom relay; defaults to `wss://relay.walletconnect.com`          |
+| `VITE_RPC_URL`            | no       | Soroban RPC endpoint                                               |
+| `VITE_NETWORK_PASSPHRASE` | no       | Selects the CAIP-2 chain (`stellar:testnet` / `stellar:pubnet`)    |
+| `VITE_CONTRACT_ID`        | no       | Contract invoked by the demo transaction                           |
 
 ## Session lifecycle
 

@@ -168,10 +168,7 @@ export {
 export { fetchLedgerEntriesChunked } from './ledgerChunks.js'
 export type { ChunkedFetchOptions } from './ledgerChunks.js'
 export { RESTORE_TX_LEDGER_BOUNDS_WINDOW } from './Restorer.js'
-export {
-  checkNetworkCapabilities,
-  MIN_RESTORE_PROTOCOL_VERSION,
-} from './NetworkCapabilities.js'
+export { checkNetworkCapabilities, MIN_RESTORE_PROTOCOL_VERSION } from './NetworkCapabilities.js'
 export { IncompleteFootprintError } from './SimulationFootprint.js'
 export type { IncompleteFootprintCondition } from './SimulationFootprint.js'
 export type {
@@ -292,11 +289,7 @@ export type {
 } from './MetricsHooks.js'
 export { MetricsRedaction } from './MetricsHooks.js'
 
-export {
-  checkRpcHealth,
-  checkRpcEndpointReachability,
-  checkRpcMethod,
-} from './RpcHealthCheck.js'
+export { checkRpcHealth, checkRpcEndpointReachability, checkRpcMethod } from './RpcHealthCheck.js'
 export type {
   RpcHealthCheckResult,
   RpcEndpointCheckResult,

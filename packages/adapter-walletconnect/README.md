@@ -42,7 +42,7 @@ const client = await SignClient.init({
 const { uri, approval } = await client.connect({
   requiredNamespaces: {
     stellar: {
-      chains: ['stellar:testnet'],       // or 'stellar:pubnet'
+      chains: ['stellar:testnet'], // or 'stellar:pubnet'
       methods: ['stellar_signXDR'],
       events: [],
     },
@@ -75,12 +75,12 @@ The constructor validates the approved session before any signing:
 
 ## API
 
-| Member | Description |
-| --- | --- |
-| `isConnected()` | `true` while the session topic and resolved account are present. |
-| `getPublicKey()` | Returns the verified account from the session as a `StellarPublicKey`. |
+| Member                 | Description                                                                                                                                                             |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `isConnected()`        | `true` while the session topic and resolved account are present.                                                                                                        |
+| `getPublicKey()`       | Returns the verified account from the session as a `StellarPublicKey`.                                                                                                  |
 | `signTransaction(xdr)` | Sends a `stellar_signXDR` JSON-RPC request over the relay and returns the `signedXDR` as `XdrBase64`. Relay/user-rejection errors are normalized to `WalletConnect: …`. |
-| `capabilities` | `{ signAuthEntry: false, feeBump: true }` |
+| `capabilities`         | `{ signAuthEntry: false, feeBump: true }`                                                                                                                               |
 
 ## Testing
 

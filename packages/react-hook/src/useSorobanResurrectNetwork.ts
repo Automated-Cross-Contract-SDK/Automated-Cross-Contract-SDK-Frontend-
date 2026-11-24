@@ -94,20 +94,17 @@ export function useSorobanResurrectNetwork(
     return unsub
   }, [key])
 
-  const switchNetwork = useCallback(
-    (name: SorobanNetworkName) => {
-      setNetwork((prev) => {
-        if (prev === name) return prev
-        // The instance + subscription are rebuilt by the render + effect
-        // above once `network` changes; notify listeners afterwards.
-        queueMicrotask(() => {
-          if (instanceRef.current) optsRef.current.onSwitch?.(name, instanceRef.current)
-        })
-        return name
+  const switchNetwork = useCallback((name: SorobanNetworkName) => {
+    setNetwork((prev) => {
+      if (prev === name) return prev
+      // The instance + subscription are rebuilt by the render + effect
+      // above once `network` changes; notify listeners afterwards.
+      queueMicrotask(() => {
+        if (instanceRef.current) optsRef.current.onSwitch?.(name, instanceRef.current)
       })
-    },
-    [],
-  )
+      return name
+    })
+  }, [])
 
   const current = useMemo(
     () => presets.find((p) => p.name === network) ?? presets[0],

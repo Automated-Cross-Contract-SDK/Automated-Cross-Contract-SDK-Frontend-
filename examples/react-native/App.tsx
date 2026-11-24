@@ -16,7 +16,7 @@ import {
   Networks,
   nativeToScVal,
 } from '@stellar/stellar-sdk'
-import type { WalletAdapter } from '@soroban-resurrect/sdk'
+import { asStellarPublicKey, asXdrBase64, type WalletAdapter } from '@soroban-resurrect/sdk'
 
 const RPC_URL = 'https://soroban-testnet.stellar.org'
 const NETWORK_PASSPHRASE = Networks.TESTNET
@@ -30,11 +30,11 @@ function makeLocalWalletAdapter(secretKey: string): WalletAdapter {
   const keypair = Keypair.fromSecret(secretKey)
   return {
     isConnected: async () => true,
-    getPublicKey: async () => keypair.publicKey(),
+    getPublicKey: async () => asStellarPublicKey(keypair.publicKey()),
     signTransaction: async (xdr) => {
       const tx = TransactionBuilder.fromXDR(xdr, NETWORK_PASSPHRASE)
       tx.sign(keypair)
-      return tx.toXDR()
+      return asXdrBase64(tx.toXDR())
     },
   }
 }
@@ -93,9 +93,7 @@ function WithdrawScreen() {
         onPress={handleWithdraw}
         disabled={!secretKey || isProcessing}
       >
-        <Text style={styles.buttonText}>
-          {isProcessing ? 'Processing...' : 'Submit Withdraw'}
-        </Text>
+        <Text style={styles.buttonText}>{isProcessing ? 'Processing...' : 'Submit Withdraw'}</Text>
       </TouchableOpacity>
 
       {state.message ? <Text style={styles.status}>Status: {state.message}</Text> : null}
@@ -107,9 +105,7 @@ function WithdrawScreen() {
 export default function App() {
   return (
     <SafeAreaView style={styles.safeArea}>
-      <SorobanResurrectProvider
-        config={{ rpcUrl: RPC_URL, networkPassphrase: NETWORK_PASSPHRASE }}
-      >
+      <SorobanResurrectProvider config={{ rpcUrl: RPC_URL, networkPassphrase: NETWORK_PASSPHRASE }}>
         <WithdrawScreen />
       </SorobanResurrectProvider>
     </SafeAreaView>

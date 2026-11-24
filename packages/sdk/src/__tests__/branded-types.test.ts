@@ -189,7 +189,9 @@ describe('StellarPublicKey', () => {
     })
 
     it('rejects a string not starting with G', () => {
-      expect(isStellarPublicKey('SAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN')).toBe(false)
+      expect(isStellarPublicKey('SAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN')).toBe(
+        false,
+      )
     })
 
     it('rejects a 64-char hex string (different type)', () => {
@@ -246,7 +248,7 @@ describe('XdrBase64', () => {
 
     it('accepts a longer valid base64 string', () => {
       // Typical ledger key base64 (36+ bytes → 48+ base64 chars)
-      expect(isXdrBase64('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'+'AAAA')).toBe(true)
+      expect(isXdrBase64('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' + 'AAAA')).toBe(true)
     })
 
     it('accepts base64 containing + and /', () => {

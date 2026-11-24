@@ -14,10 +14,10 @@ can avoid stale network and TTL information.
 ```ts
 type CachePolicy = {
   /** Maximum age (ms) a cached entry may be served before it is refetched. */
-  ttlMs?: number;
+  ttlMs?: number
   /** When true, bypass the cache and refetch, then store the fresh result. */
-  forceRefresh?: boolean;
-};
+  forceRefresh?: boolean
+}
 ```
 
 - `ttlMs` defaults to `DEFAULT_CACHE_TTL_MS`. Set it to `0` to disable caching for a call.
@@ -26,7 +26,7 @@ type CachePolicy = {
 ### `invalidateCache`
 
 ```ts
-function invalidateCache(keys?: CacheKey | CacheKey[]): void;
+function invalidateCache(keys?: CacheKey | CacheKey[]): void
 ```
 
 Drops cached entries. With no argument, the entire cache is cleared. Pass one or more
@@ -36,16 +36,16 @@ mutates a contract's data).
 ### Passing a policy to a read
 
 ```ts
-import { getContractData, invalidateCache } from "@sdk/rpc";
+import { getContractData, invalidateCache } from '@sdk/rpc'
 
 // Serve from cache for up to 5s.
-const data = await getContractData(contractId, { cache: { ttlMs: 5_000 } });
+const data = await getContractData(contractId, { cache: { ttlMs: 5_000 } })
 
 // After a mutation, drop the affected entry so the next read is fresh.
-invalidateCache({ kind: "contractData", contractId });
+invalidateCache({ kind: 'contractData', contractId })
 
 // Or force a refetch for a single call without touching the cache policy.
-const fresh = await getContractData(contractId, { cache: { forceRefresh: true } });
+const fresh = await getContractData(contractId, { cache: { forceRefresh: true } })
 ```
 
 ### Compatibility notes
@@ -101,32 +101,28 @@ sequenceDiagram
 ### Worked 2-of-3 example
 
 ```ts
-import {
-  MultiSigWalletAdapter,
-  MultiSigConfig,
-  MultiSigSigner,
-} from "@sdk/wallets";
+import { MultiSigWalletAdapter, MultiSigConfig, MultiSigSigner } from '@sdk/wallets'
 
 const config: MultiSigConfig = {
   threshold: 2,
   signers: [signerA, signerB, signerC],
-};
-
-const adapter = new MultiSigWalletAdapter(config);
-
-// 1. Build the restore transaction for the keys being restored.
-const tx = await adapter.buildRestoreTransaction({ restoreKeys });
-
-// 2. Collect signatures from each signer (2 of 3 required).
-const signatures = [];
-for (const signer of [signerA, signerB]) {
-  signatures.push(await signer.sign(tx));
 }
 
-const result = await adapter.collectSignatures(tx, signatures);
+const adapter = new MultiSigWalletAdapter(config)
+
+// 1. Build the restore transaction for the keys being restored.
+const tx = await adapter.buildRestoreTransaction({ restoreKeys })
+
+// 2. Collect signatures from each signer (2 of 3 required).
+const signatures = []
+for (const signer of [signerA, signerB]) {
+  signatures.push(await signer.sign(tx))
+}
+
+const result = await adapter.collectSignatures(tx, signatures)
 
 // 3. Submit once the threshold is met.
-const receipt = await adapter.submitWithRestore(result);
+const receipt = await adapter.submitWithRestore(result)
 ```
 
 ### Failure handling for a refusing signer
@@ -140,11 +136,11 @@ signatures later.
 
 ### Types
 
-| Type | Description |
-| --- | --- |
-| `MultiSigWalletAdapter` | Builds restore transactions, collects signatures, and submits them. |
-| `MultiSigSigner` | A single signer that produces a signature for a restore transaction. |
-| `MultiSigConfig` | Threshold and signer set for an N-of-M wallet. |
+| Type                        | Description                                                                             |
+| --------------------------- | --------------------------------------------------------------------------------------- |
+| `MultiSigWalletAdapter`     | Builds restore transactions, collects signatures, and submits them.                     |
+| `MultiSigSigner`            | A single signer that produces a signature for a restore transaction.                    |
+| `MultiSigConfig`            | Threshold and signer set for an N-of-M wallet.                                          |
 | `SignatureCollectionResult` | Outcome of `collectSignatures`, including collected signatures and per-signer failures. |
 
 ## Timeout and partial-failure scenarios
@@ -260,18 +256,18 @@ fee a restore would incur — **without submitting anything**. Use it to show th
 restore will cost before they sign.
 
 ```ts
-function estimateRestoreCost(transaction: Transaction): Promise<RestoreCostEstimate>;
+function estimateRestoreCost(transaction: Transaction): Promise<RestoreCostEstimate>
 ```
 
 ### `RestoreCostEstimate`
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `minResourceFee` | `number` | Minimum resource fee for the restore, in stroops. |
-| `multiplier` | `number` | Fee multiplier applied to the restore resources. |
-| `estimatedFee` | `number` | Total estimated restore fee (`minResourceFee` scaled by `multiplier`), in stroops. |
-| `archivedKeysDetected` | `LedgerKey[]` | Footprint keys found to be archived and therefore needing a restore. |
-| `wouldNeedRestore` | `boolean` | `true` when at least one archived key was detected; `false` when no restore is required. |
+| Field                  | Type          | Description                                                                              |
+| ---------------------- | ------------- | ---------------------------------------------------------------------------------------- |
+| `minResourceFee`       | `number`      | Minimum resource fee for the restore, in stroops.                                        |
+| `multiplier`           | `number`      | Fee multiplier applied to the restore resources.                                         |
+| `estimatedFee`         | `number`      | Total estimated restore fee (`minResourceFee` scaled by `multiplier`), in stroops.       |
+| `archivedKeysDetected` | `LedgerKey[]` | Footprint keys found to be archived and therefore needing a restore.                     |
+| `wouldNeedRestore`     | `boolean`     | `true` when at least one archived key was detected; `false` when no restore is required. |
 
 ### Zero-fee behaviour (`wouldNeedRestore: false`)
 
@@ -283,29 +279,29 @@ cost, and you can skip the restore confirmation entirely.
 ### Worked example: confirm the cost before signing
 
 ```ts
-import { estimateRestoreCost } from "@sdk/restore";
+import { estimateRestoreCost } from '@sdk/restore'
 
-const estimate = await estimateRestoreCost(tx);
+const estimate = await estimateRestoreCost(tx)
 
 if (estimate.wouldNeedRestore) {
   // Show the extra cost to the user before they sign.
-  const feeXlm = estimate.estimatedFee / 10_000_000;
+  const feeXlm = estimate.estimatedFee / 10_000_000
   const confirmed = await ui.confirm(
     `This transaction needs a restore of ${estimate.archivedKeysDetected.length} ` +
       `archived key(s) and will cost an extra ${feeXlm} XLM. Continue?`,
-  );
-  if (!confirmed) return;
+  )
+  if (!confirmed) return
 } else {
   // No archived keys: no restore, no extra fee.
-  console.log("No restore needed; submitting as-is.");
+  console.log('No restore needed; submitting as-is.')
 }
 
 // Proceed to sign and submit only after the user has seen the cost.
-const signed = await signer.sign(tx);
-await submit(signed);
+const signed = await signer.sign(tx)
+await submit(signed)
 ```
 
-See the [fee-model guide](./guide/fees.md) and the [TTL guides](./guide/ttl.md) for how restore
+See the [fee guide](./guide/restore-fees.md) and the [TTL watch guide](./guide/ttl-watch.md) for how restore
 fees fit into the overall fee model and TTL management.
 
 ## Large footprint processing
@@ -313,26 +309,26 @@ fees fit into the overall fee model and TTL management.
 Footprint processing (e.g. scanning a transaction's footprint for archived keys) can be
 expensive for large footprints. To avoid blocking the UI thread, the SDK exposes a chunked,
 yielding processor alongside the existing synchronous behaviour. Output ordering and results
-are **deterministic** and identical to the synchronous path — chunking only affects *when*
-work runs, not *what* it produces.
+are **deterministic** and identical to the synchronous path — chunking only affects _when_
+work runs, not _what_ it produces.
 
 ```ts
 type FootprintChunkOptions = {
   /** Number of footprint keys processed per chunk. Defaults to `DEFAULT_FOOTPRINT_CHUNK_SIZE`. */
-  chunkSize?: number;
+  chunkSize?: number
   /**
    * Yields control back to the event loop between chunks. Defaults to a macrotask
    * (`setTimeout(…, 0)`) so the UI thread can paint. Pass a custom scheduler to
    * integrate with your own runtime (e.g. `requestIdleCallback`).
    */
-  yieldTo?: () => Promise<void>;
-};
+  yieldTo?: () => Promise<void>
+}
 
 function processFootprintChunked<T, R>(
   items: readonly T[],
   process: (item: T, index: number) => R,
   options?: FootprintChunkOptions,
-): Promise<R[]>;
+): Promise<R[]>
 ```
 
 - Results are returned in the same order as the input `items`, regardless of `chunkSize`.
@@ -345,20 +341,18 @@ function processFootprintChunked<T, R>(
 ### Worked example: chunked footprint scan
 
 ```ts
-import { processFootprintChunked } from "@sdk/restore";
+import { processFootprintChunked } from '@sdk/restore'
 
 // `footprintKeys` may be very large; process it in chunks so the UI stays responsive.
-const archived = await processFootprintChunked(
-  footprintKeys,
-  (key) => isArchived(key),
-  { chunkSize: 256 },
-);
+const archived = await processFootprintChunked(footprintKeys, (key) => isArchived(key), {
+  chunkSize: 256,
+})
 ```
 
 > **Compatibility note:** the synchronous processing path is unchanged and remains the
-default for small footprints. Adopt `processFootprintChunked` when footprints may be large
-or when running on a UI thread. Because output is deterministic, switching between the sync
-and chunked paths does not change results.
+> default for small footprints. Adopt `processFootprintChunked` when footprints may be large
+> or when running on a UI thread. Because output is deterministic, switching between the sync
+> and chunked paths does not change results.
 
 ## Contract and account scanning
 
@@ -373,31 +367,31 @@ threshold.
 ```ts
 type ContractScanOptions = {
   /** Ledger offset below which an entry is considered "expiring soon". */
-  expiringSoonLedgers?: number;
+  expiringSoonLedgers?: number
   /** Instance entry to scan, if any. */
-  instance?: LedgerKey;
+  instance?: LedgerKey
   /** Wasm code entry to scan, if any. */
-  wasmCode?: LedgerKey;
+  wasmCode?: LedgerKey
   /** Storage keys to scan. */
-  storageKeys?: LedgerKey[];
-};
+  storageKeys?: LedgerKey[]
+}
 
 type ContractScanResult = {
-  instance?: ClassicEntryStatus;
-  wasmCode?: ClassicEntryStatus;
-  storage: ClassicEntryStatus[];
-};
+  instance?: ClassicEntryStatus
+  wasmCode?: ClassicEntryStatus
+  storage: ClassicEntryStatus[]
+}
 
 type ClassicEntryStatus = {
-  key: LedgerKey;
-  liveUntilLedger: number;
-  expiringSoon: boolean;
-};
+  key: LedgerKey
+  liveUntilLedger: number
+  expiringSoon: boolean
+}
 
 function getExpiringEntriesForContract(
   contractId: string,
   options?: ContractScanOptions,
-): Promise<ContractScanResult>;
+): Promise<ContractScanResult>
 ```
 
 > **Important limitation:** a contract's storage keys **cannot be enumerated** from the
@@ -417,13 +411,13 @@ information.
 ```ts
 type AccountScanOptions = {
   /** Trustline asset keys to check for presence. */
-  trustlines?: LedgerKey[];
-};
+  trustlines?: LedgerKey[]
+}
 
 function getExpiringEntriesForAccount(
   accountId: string,
   options?: AccountScanOptions,
-): Promise<ContractScanResult>;
+): Promise<ContractScanResult>
 ```
 
 ### Worked example: instance, wasm code, and storage keys
@@ -433,9 +427,10 @@ import {
   getExpiringEntriesForContract,
   getExpiringEntriesForAccount,
   DEFAULT_EXPIRING_SOON_LEDGERS,
-} from "@sdk/scanning";
+} from '@sdk/scanning'
 
 // Contract scan: instance + wasm code are discovered automatically, but storage
 // keys
 
 /* … truncated 1239 chars — edit only what you need near the top … */
+```

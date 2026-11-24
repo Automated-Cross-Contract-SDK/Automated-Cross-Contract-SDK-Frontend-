@@ -19,7 +19,12 @@ import { resolveConfig } from './SorobanResurrectConfig.js'
 import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
 import { SorobanResurrectSimulator } from './SorobanResurrectSimulation.js'
 import { SorobanResurrectExecutor } from './SorobanResurrectExecution.js'
-import { isErrorResponse, isRestoreResponse, isSuccessResponse, extractArchivedKeys } from './Archiver.js'
+import {
+  isErrorResponse,
+  isRestoreResponse,
+  isSuccessResponse,
+  extractArchivedKeys,
+} from './Archiver.js'
 import { buildRestoreCostEstimate, type RestoreCostEstimate } from './feeCalculation.js'
 import type { RestorePlan } from './RestorePlan.js'
 import type { TransactionHistoryEntry } from './TransactionHistory.js'
@@ -41,8 +46,8 @@ import {
 } from './TTLWatch.js'
 import type { SorobanNetworkName } from './constants.js'
 import type { AbortSignalOptions } from './AbortUtils.js'
-import { resolveLogger,createRequestId } from './Logger.js'
-import { SorobanNetworkCapabilityReport,checkNetworkCapabilities } from './NetworkCapabilities.js'
+import { resolveLogger, createRequestId } from './Logger.js'
+import { SorobanNetworkCapabilityReport, checkNetworkCapabilities } from './NetworkCapabilities.js'
 
 /**
  * Main facade for the Soroban-Resurrect SDK.
@@ -233,11 +238,10 @@ export class SorobanResurrect {
   switchNetwork(
     presetOrConfig: SorobanNetworkName | (Partial<SorobanResurrectConfig> & { rpcUrl: string }),
   ): void {
-    if (
-      this._activeOperations > 0 ||
-      [...this._ttlWatches].some((handle) => handle.inFlight)
-    ) {
-      throw new Error('Cannot switch networks while an SDK operation or TTL watch cycle is in progress')
+    if (this._activeOperations > 0 || [...this._ttlWatches].some((handle) => handle.inFlight)) {
+      throw new Error(
+        'Cannot switch networks while an SDK operation or TTL watch cycle is in progress',
+      )
     }
 
     const overrideConfig: SorobanResurrectConfig =
@@ -357,13 +361,7 @@ export class SorobanResurrect {
    * instance so {@link dispose} stops it even if the caller loses it.
    */
   watchTTL(keys: xdr.LedgerKey[], opts: TTLWatchOptions = {}): TTLWatchHandle {
-    const handle = watchTTL(
-      this._server,
-      this._config,
-      this._stateMgr.emitter as never,
-      keys,
-      opts,
-    )
+    const handle = watchTTL(this._server, this._config, this._stateMgr.emitter as never, keys, opts)
     const stop = handle.stop.bind(handle)
     handle.stop = () => {
       this._ttlWatches.delete(handle)
@@ -443,10 +441,7 @@ export class SorobanResurrect {
    * }
    * ```
    */
-  async needsRestore(
-    transaction: Transaction,
-    options: AbortSignalOptions = {},
-  ): Promise<boolean> {
+  async needsRestore(transaction: Transaction, options: AbortSignalOptions = {}): Promise<boolean> {
     return this._simulator.needsRestore(transaction, options)
   }
 
@@ -461,9 +456,7 @@ export class SorobanResurrect {
     transactions: Transaction[],
     options: AbortSignalOptions = {},
   ): Promise<ArchivedLedgerEntry[][]> {
-    return Promise.all(
-      transactions.map((tx) => this._simulator.detectArchivedKeys(tx, options)),
-    )
+    return Promise.all(transactions.map((tx) => this._simulator.detectArchivedKeys(tx, options)))
   }
 
   /**

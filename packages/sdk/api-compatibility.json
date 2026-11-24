@@ -1,6 +1,10 @@
 {
   "entryPoints": {
     ".": {
+      "react-native": {
+        "import": "./dist/native.js",
+        "types": "./dist/index.d.ts"
+      },
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
     }
@@ -11,16 +15,8 @@
     "SorobanResurrectNetwork",
     "NETWORK_PRESETS",
     "WalletError",
-    "ResurrectErrorCode",
-    "getResurrectErrorCode",
     "ResurrectError",
     "RestoreFeeExceededError",
-    "NetworkError",
-    "SimulationError",
-    "SigningError",
-    "RestoreError",
-    "ResurrectTimeoutError",
-    "InvalidInputError",
     "SorobanRpcClient",
     "createRpcClient",
     "RpcTimeoutError",

@@ -8,10 +8,7 @@ import { asStellarPublicKey, asXdrBase64 } from '@soroban-resurrect/sdk'
 export interface RabetApi {
   connect(): Promise<{ publicKey: string }>
   disconnect?(): Promise<void> | void
-  sign(
-    xdr: string,
-    network: string,
-  ): Promise<{ xdr: string }>
+  sign(xdr: string, network: string): Promise<{ xdr: string }>
   isUnlocked?(): Promise<boolean> | boolean
 }
 
@@ -28,9 +25,7 @@ const RABET_PUBLIC = 'mainnet'
 /** Maps a Stellar network passphrase to Rabet's network identifier. */
 function toRabetNetwork(networkPassphrase?: string): string {
   if (!networkPassphrase) return RABET_TESTNET
-  return networkPassphrase.includes('Public Global Stellar Network')
-    ? RABET_PUBLIC
-    : RABET_TESTNET
+  return networkPassphrase.includes('Public Global Stellar Network') ? RABET_PUBLIC : RABET_TESTNET
 }
 
 /** Normalizes an unknown thrown value into an `Error` with a `Rabet:` prefix. */
@@ -122,10 +117,7 @@ export class RabetAdapter implements WalletAdapter {
     }
   }
 
-  async signTransaction(
-    tx: string,
-    opts?: { networkPassphrase?: string; network?: string },
-  ) {
+  async signTransaction(tx: string, opts?: { networkPassphrase?: string; network?: string }) {
     try {
       const result = await this.getApi().sign(tx, toRabetNetwork(opts?.networkPassphrase))
       return asXdrBase64(result.xdr)

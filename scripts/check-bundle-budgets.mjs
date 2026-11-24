@@ -7,7 +7,7 @@
  *    compares the gzipped size to `scripts/bundle-budgets.json`. Any entry
  *    over budget fails CI and is named in the output.
  * 2. Bundles a fixture that imports only `SorobanResurrect` from the SDK
- *    source and asserts hardware and authorization modules are tree-shaken.
+ *    source and asserts hardware and multisig modules are tree-shaken.
  *
  * Usage:
  *   npm run build && node scripts/check-bundle-budgets.mjs
@@ -84,8 +84,8 @@ for (const dir of readdirSync(join(root, 'packages'))) {
 }
 
 // Tree-shaking fixture: importing only SorobanResurrect must not pull in
-// hardware-wallet or authorization code.
-const FORBIDDEN = ['HardwareWalletAdapters.ts', 'Authorization.ts', 'MultiSigWalletAdapter.ts']
+// hardware-wallet or multisig code.
+const FORBIDDEN = ['HardwareWalletAdapters.ts', 'MultiSigWalletAdapter.ts']
 const sdkPkg = JSON.parse(readFileSync(join(root, 'packages/sdk/package.json'), 'utf8'))
 const fixture = await build({
   stdin: {

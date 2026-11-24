@@ -105,7 +105,7 @@ Run this checklist against testnet to confirm the integration works end-to-end. 
 
 1. **No-restore path.** Submit a transaction that touches only live state. Confirm only `onSigningOriginal` / `onOriginalSubmitted` fire and the transaction succeeds.
 2. **Restore path.** Submit a transaction that touches archived state. Confirm `onRestoreNeeded` fires, the restore signature is requested, and the original transaction is submitted after the restore confirms.
-3. **Failure path.** Reject the restore signature in your wallet. Confirm `onRestoreFailed` fires, the original transaction is *not* submitted, and your retry affordance works.
+3. **Failure path.** Reject the restore signature in your wallet. Confirm `onRestoreFailed` fires, the original transaction is _not_ submitted, and your retry affordance works.
 4. **Status check.** Call `sr.needsRestore(tx)` on the same transaction and confirm it reports `true` before restoration and `false` after.
 
 ```typescript

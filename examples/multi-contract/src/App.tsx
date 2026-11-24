@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from 'react'
 import { SorobanResurrectProvider, useSorobanResurrectContext } from '@soroban-resurrect/react-hook'
+import { asStellarPublicKey, asXdrBase64 } from '@soroban-resurrect/sdk'
 import { TransactionBuilder, Operation, Networks, nativeToScVal, xdr } from '@stellar/stellar-sdk'
 
 const RPC_URL: string = import.meta.env.VITE_RPC_URL || 'https://soroban-testnet.stellar.org'
@@ -33,7 +34,9 @@ const CONTRACTS: ContractAction[] = [
     contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
     functionName: 'transfer',
     args: [
-      nativeToScVal('GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3B2WSQHG4W37', { type: 'address' }),
+      nativeToScVal('GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3B2WSQHG4W37', {
+        type: 'address',
+      }),
       nativeToScVal(500, { type: 'i128' }),
     ],
     label: 'Transfer 500 Token',
@@ -62,11 +65,11 @@ function ContractActionCard({ action }: { action: ContractAction }) {
       const publicKey = await stellar.getPublicKey()
       const wallet = {
         isConnected: async () => true,
-        getPublicKey: async () => stellar.getPublicKey(),
+        getPublicKey: async () => asStellarPublicKey(await stellar.getPublicKey()),
         signTransaction: async (
           tx: string,
           opts?: { networkPassphrase?: string; network?: string },
-        ) => stellar.signTransaction(tx, opts),
+        ) => asXdrBase64(await stellar.signTransaction(tx, opts)),
       }
 
       // Every action reuses the same shared `resurrect.server` connection —
@@ -108,7 +111,15 @@ function ContractActionCard({ action }: { action: ContractAction }) {
         </p>
       )}
       {lastResult && (
-        <pre style={{ marginTop: 8, padding: 8, background: '#f5f5f5', fontSize: 12, overflow: 'auto' }}>
+        <pre
+          style={{
+            marginTop: 8,
+            padding: 8,
+            background: '#f5f5f5',
+            fontSize: 12,
+            overflow: 'auto',
+          }}
+        >
           {lastResult}
         </pre>
       )}
@@ -133,7 +144,10 @@ function ConnectWallet() {
     <div style={{ marginBottom: 24 }}>
       {publicKey ? (
         <span>
-          Connected: <code>{publicKey.slice(0, 8)}...{publicKey.slice(-4)}</code>
+          Connected:{' '}
+          <code>
+            {publicKey.slice(0, 8)}...{publicKey.slice(-4)}
+          </code>
         </span>
       ) : (
         <button onClick={connect}>Connect Freighter Wallet</button>
@@ -148,10 +162,9 @@ export default function App() {
       <div style={{ maxWidth: 640, margin: '0 auto', padding: 24, fontFamily: 'sans-serif' }}>
         <h2>Soroban-Resurrect – Multi-Contract Demo</h2>
         <p>
-          A single <code>SorobanResurrectProvider</code> — one RPC connection and restore
-          workflow — is reused across interactions with two independent contracts below. Each
-          card builds and submits its own transaction through the shared{' '}
-          <code>submitWithRestore</code>.
+          A single <code>SorobanResurrectProvider</code> — one RPC connection and restore workflow —
+          is reused across interactions with two independent contracts below. Each card builds and
+          submits its own transaction through the shared <code>submitWithRestore</code>.
         </p>
         <ConnectWallet />
         {CONTRACTS.map((action) => (

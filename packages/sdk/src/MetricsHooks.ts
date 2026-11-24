@@ -28,7 +28,7 @@ export type MetricsStage =
   | 'restore_confirmation'
   | 'original_submission'
   | 'original_confirmation'
-  | 'finalization';
+  | 'finalization'
 
 /**
  * Known outcome codes (no wallet addresses or transaction data).
@@ -48,7 +48,7 @@ export type MetricsOutcomeCode =
   | 'NETWORK_ERROR'
   | 'RPC_ERROR'
   | 'INVALID_CONFIG'
-  | 'UNKNOWN_ERROR';
+  | 'UNKNOWN_ERROR'
 
 /**
  * Metadata safe to emit for a workflow completion.
@@ -60,28 +60,28 @@ export type MetricsOutcomeCode =
  */
 export interface MetricsOutcomeMetadata {
   /** Unique workflow ID for correlation. */
-  workflowId?: string;
+  workflowId?: string
 
   /** Final stage reached. */
-  stage?: MetricsStage;
+  stage?: MetricsStage
 
   /** Machine-readable outcome code. */
-  outcomeCode?: MetricsOutcomeCode;
+  outcomeCode?: MetricsOutcomeCode
 
   /** Total workflow duration in milliseconds. */
-  durationMs?: number;
+  durationMs?: number
 
   /** Number of times a transient error was retried. */
-  retries?: number;
+  retries?: number
 
   /** Number of ledger entries archived (if applicable). */
-  archivedKeysCount?: number;
+  archivedKeysCount?: number
 
   /** Estimated restore fee in stroops (if applicable). */
-  estimatedRestoreFeeStoops?: number;
+  estimatedRestoreFeeStoops?: number
 
   /** Custom, low-cardinality labels (not wallet addresses or hashes). */
-  customLabels?: Record<string, string | number | boolean>;
+  customLabels?: Record<string, string | number | boolean>
 }
 
 /**
@@ -91,22 +91,22 @@ export interface MetricsOutcomeMetadata {
  */
 export interface MetricsRecoveryMetadata {
   /** Unique workflow ID for correlation. */
-  workflowId?: string;
+  workflowId?: string
 
   /** Stage at which recovery was triggered. */
-  stage?: MetricsStage;
+  stage?: MetricsStage
 
   /** Low-cardinality error category (not full error message). */
-  errorCategory?: string;
+  errorCategory?: string
 
   /** Retry attempt number (1, 2, 3, ...). */
-  attemptNumber?: number;
+  attemptNumber?: number
 
   /** Delay before next retry in milliseconds. */
-  backoffMs?: number;
+  backoffMs?: number
 
   /** Custom, low-cardinality labels. */
-  customLabels?: Record<string, string | number | boolean>;
+  customLabels?: Record<string, string | number | boolean>
 }
 
 /**
@@ -123,14 +123,14 @@ export interface MetricsHook {
    *
    * @param metadata - Safe metadata about the outcome.
    */
-  onOutcome?(metadata: MetricsOutcomeMetadata): void | Promise<void>;
+  onOutcome?(metadata: MetricsOutcomeMetadata): void | Promise<void>
 
   /**
    * Called when a recoverable error is detected and a retry is scheduled.
    *
    * @param metadata - Safe metadata about the recovery attempt.
    */
-  onRecovery?(metadata: MetricsRecoveryMetadata): void | Promise<void>;
+  onRecovery?(metadata: MetricsRecoveryMetadata): void | Promise<void>
 
   /**
    * Called periodically during long operations (polling, simulation, etc.)
@@ -142,7 +142,7 @@ export interface MetricsHook {
   onProgress?(
     stage: MetricsStage,
     progressMetadata?: Record<string, string | number | boolean>,
-  ): void | Promise<void>;
+  ): void | Promise<void>
 }
 
 /**
@@ -206,7 +206,7 @@ export const MetricsRedaction = {
    * ```
    */
   hashSuffix(hexString: string, chars: number = 4): string {
-    if (!hexString || hexString.length < chars) return '';
-    return hexString.slice(-chars);
+    if (!hexString || hexString.length < chars) return ''
+    return hexString.slice(-chars)
   },
-} as const;
+} as const

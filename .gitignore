@@ -7,3 +7,10 @@ coverage/
 .env
 .env.local
 .vite/
+.next/
+.astro/
+next-env.d.ts
+docs/.vitepress/dist/
+docs/.vitepress/cache/
+*.log
+.DS_Store

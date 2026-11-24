@@ -66,6 +66,7 @@ hackathon entries, and open-source tools alike.
    - Link text should be `Site`, `Source`, `Docs`, or `Demo`.
    - Keep rows sorted alphabetically by project name.
    - Optionally add a short testimonial under the table as a quote attributed to the project.
+
 3. **Use the commit format.** Title your PR `docs(showcase): add <project name>`, following the
    [commit conventions](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/blob/main/CONTRIBUTING.md#commit-format).
 4. **Prefer not to open a PR?** Post in

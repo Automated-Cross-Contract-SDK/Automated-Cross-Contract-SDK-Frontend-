@@ -33,17 +33,17 @@ Please include:
 
 ### What to expect
 
-| Stage                    | Target                        |
-| ------------------------ | ----------------------------- |
-| Acknowledgement          | within 3 business days        |
-| Initial assessment       | within 7 business days        |
-| Fix or mitigation plan   | within 30 days for high/critical |
+| Stage                  | Target                           |
+| ---------------------- | -------------------------------- |
+| Acknowledgement        | within 3 business days           |
+| Initial assessment     | within 7 business days           |
+| Fix or mitigation plan | within 30 days for high/critical |
 
 ### Security Triage & Release Ownership
 
 Security triage and emergency patch approvals are coordinated directly by the primary code owners designated in [`.github/CODEOWNERS`](./.github/CODEOWNERS). Security advisories require sign-off from `@micmusjnr20` before public vulnerability disclosure or release tags are cut.
 
-| Public disclosure        | coordinated, after a fix ships |
+| Public disclosure | coordinated, after a fix ships |
 
 We ask that you give us a reasonable window to release a fix before any public
 disclosure, and we will credit reporters in the release notes unless you prefer
@@ -77,7 +77,7 @@ straight to a rollback without confirming impact.
 
 ### 1. Detect and confirm
 
-A release is considered *broken* when any of the following is true:
+A release is considered _broken_ when any of the following is true:
 
 - A published version fails to install, build, or run for a supported consumer.
 - A regression is reported against the latest release (via issue, advisory, or
@@ -90,12 +90,12 @@ package(s), version(s), and commit SHA.
 
 ### 2. Assess impact and severity
 
-| Severity | Criteria                                                        | Response target |
-| -------- | --------------------------------------------------------------- | --------------- |
+| Severity | Criteria                                                               | Response target                                     |
+| -------- | ---------------------------------------------------------------------- | --------------------------------------------------- |
 | Critical | Security vulnerability, data loss, or total breakage for all consumers | Immediate; rollback or emergency patch within hours |
-| High     | Major functionality broken for most consumers                   | Same day        |
-| Medium   | Partial breakage or a workaround exists                         | Within 3 business days |
-| Low      | Cosmetic or edge-case issue                                     | Next scheduled release |
+| High     | Major functionality broken for most consumers                          | Same day                                            |
+| Medium   | Partial breakage or a workaround exists                                | Within 3 business days                              |
+| Low      | Cosmetic or edge-case issue                                            | Next scheduled release                              |
 
 ### 3. Decide: rollback vs. forward-fix
 

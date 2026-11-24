@@ -56,12 +56,12 @@ signer.
 
 ## API
 
-| Member | Description |
-| --- | --- |
-| `isConnected()` | `true` once an address has been resolved, or when `kit.getAddress()` succeeds. |
-| `getPublicKey()` | Delegates to `kit.getAddress()`, caches and returns a `StellarPublicKey`. |
+| Member                       | Description                                                                                                          |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `isConnected()`              | `true` once an address has been resolved, or when `kit.getAddress()` succeeds.                                       |
+| `getPublicKey()`             | Delegates to `kit.getAddress()`, caches and returns a `StellarPublicKey`.                                            |
 | `signTransaction(xdr, opts)` | Delegates to `kit.signTransaction(xdr, { address, networkPassphrase })`, returns the signed envelope as `XdrBase64`. |
-| `capabilities` | `{ signAuthEntry: false, feeBump: true }` (`hardware` is left unknown — it depends on the selected wallet). |
+| `capabilities`               | `{ signAuthEntry: false, feeBump: true }` (`hardware` is left unknown — it depends on the selected wallet).          |
 
 ## Capabilities
 

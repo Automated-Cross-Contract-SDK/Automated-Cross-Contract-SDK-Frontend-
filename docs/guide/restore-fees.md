@@ -33,12 +33,12 @@ restoreFee = min(restoreFee, maxRestoreFeeStroops)   // only when the cap is set
 
 ## The four knobs
 
-| Knob | Meaning | Default |
-| --- | --- | --- |
-| `minResourceFee` | Base resource fee for the restore, in stroops | Reported by the network |
-| `restoreFeeMultiplier` | Multiplier applied to `minResourceFee` | `1` |
-| `maxRestoreFeeStroops` | Optional hard cap on the computed fee, in stroops | unset (no cap) |
-| footprint-size guard | Maximum number of entries a restore may touch | see `constants.ts` |
+| Knob                   | Meaning                                           | Default                 |
+| ---------------------- | ------------------------------------------------- | ----------------------- |
+| `minResourceFee`       | Base resource fee for the restore, in stroops     | Reported by the network |
+| `restoreFeeMultiplier` | Multiplier applied to `minResourceFee`            | `1`                     |
+| `maxRestoreFeeStroops` | Optional hard cap on the computed fee, in stroops | unset (no cap)          |
+| footprint-size guard   | Maximum number of entries a restore may touch     | see `constants.ts`      |
 
 The defaults above match `config/defaults.json` and `constants.ts`. If you
 change them in code, update this table so the documentation stays in sync.
@@ -77,13 +77,13 @@ It takes the same inputs the restore path uses and returns the exact fee the
 restore will charge, so callers never have to re-implement the formula.
 
 ```ts
-import { estimateRestoreCost } from '@stellar/restore';
+import { estimateRestoreCost } from '@stellar/restore'
 
 const estimate = await estimateRestoreCost({
-  minResourceFee,          // from the restore simulation
-  restoreFeeMultiplier,    // defaults to 1
-  maxRestoreFeeStroops,    // optional cap
-});
+  minResourceFee, // from the restore simulation
+  restoreFeeMultiplier, // defaults to 1
+  maxRestoreFeeStroops, // optional cap
+})
 
 // estimate.feeStroops is the exact amount the restore will charge.
 // estimate.capped is true when the cap clamped the fee.
@@ -125,8 +125,8 @@ following patterns keep consent clear and auditable:
 4. **Explain what is being restored.** Name the archived entries being restored
    so the user understands what the fee buys.
 5. **Require an explicit action.** Use a distinct confirm control (not a
-default-focused button) so consent is deliberate, and record the accepted
-estimate alongside the signed transaction for auditability.
+   default-focused button) so consent is deliberate, and record the accepted
+   estimate alongside the signed transaction for auditability.
 6. **Handle staleness.** If the ledger-bounds window elapses while the prompt
    is open, the SDK fails without submitting. Re-estimate and re-prompt rather
    than silently reusing the old consent.

@@ -4,7 +4,13 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "inputs": ["src/**", "tsconfig.json", "tsup.config.ts", "package.json"],
+      "inputs": [
+        "src/**",
+        "tsconfig.json",
+        "tsup.config.ts",
+        "package.json",
+        "tsconfig.build.json"
+      ],
       "outputs": ["dist/**"]
     },
     "test": {

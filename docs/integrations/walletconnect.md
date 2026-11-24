@@ -53,12 +53,12 @@ const result = await sr.submitWithRestore({ transaction, wallet })
 
 ## Constructor options
 
-| Option              | Type                         | Required | Description                                                             |
-| ------------------- | ---------------------------- | -------- | ----------------------------------------------------------------------- |
-| `client`            | `WalletConnectSignClientLike` | ✅       | A connected `SignClient` (or compatible stub).                          |
-| `session`           | `WalletConnectSessionLike`    | ✅       | An approved session for this dApp.                                      |
-| `networkPassphrase` | `string`                     | ✅       | Selects the CAIP-2 chain and checks the session granted an account on it. |
-| `namespace`         | `string`                     | —        | Namespace key, defaults to `"stellar"`.                                 |
+| Option              | Type                          | Required | Description                                                               |
+| ------------------- | ----------------------------- | -------- | ------------------------------------------------------------------------- |
+| `client`            | `WalletConnectSignClientLike` | ✅       | A connected `SignClient` (or compatible stub).                            |
+| `session`           | `WalletConnectSessionLike`    | ✅       | An approved session for this dApp.                                        |
+| `networkPassphrase` | `string`                      | ✅       | Selects the CAIP-2 chain and checks the session granted an account on it. |
+| `namespace`         | `string`                      | —        | Namespace key, defaults to `"stellar"`.                                   |
 
 The constructor throws if `client`/`session` are missing or the session has no account on the
 requested network.

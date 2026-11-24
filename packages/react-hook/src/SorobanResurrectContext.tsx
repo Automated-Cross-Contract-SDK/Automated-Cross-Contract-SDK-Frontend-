@@ -180,27 +180,30 @@ export function SorobanResurrectProvider({ config, children }: SorobanResurrectP
     resurrectRef.current?.reset(fromState)
   }, [])
 
-  const on = useCallback(<K extends keyof SorobanResurrectEvents>(
-    event: K,
-    listener: (payload: SorobanResurrectEvents[K]) => void,
-  ) => {
-    let unsubscribe: (() => void) | null = null
-    const subscription: PendingEventSubscription = {
-      attach(instance) {
-        unsubscribe = instance.on(event, listener)
-      },
-      detach() {
-        unsubscribe?.()
-        unsubscribe = null
-      },
-    }
-    eventSubscriptionsRef.current.add(subscription)
-    if (resurrectRef.current) subscription.attach(resurrectRef.current)
-    return () => {
-      subscription.detach()
-      eventSubscriptionsRef.current.delete(subscription)
-    }
-  }, [])
+  const on = useCallback(
+    <K extends keyof SorobanResurrectEvents>(
+      event: K,
+      listener: (payload: SorobanResurrectEvents[K]) => void,
+    ) => {
+      let unsubscribe: (() => void) | null = null
+      const subscription: PendingEventSubscription = {
+        attach(instance) {
+          unsubscribe = instance.on(event, listener)
+        },
+        detach() {
+          unsubscribe?.()
+          unsubscribe = null
+        },
+      }
+      eventSubscriptionsRef.current.add(subscription)
+      if (resurrectRef.current) subscription.attach(resurrectRef.current)
+      return () => {
+        subscription.detach()
+        eventSubscriptionsRef.current.delete(subscription)
+      }
+    },
+    [],
+  )
 
   const isProcessing = isProcessingState(state.state)
 

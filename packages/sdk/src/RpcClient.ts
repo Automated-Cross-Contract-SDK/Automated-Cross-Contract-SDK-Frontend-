@@ -313,10 +313,7 @@ export class RpcTimeoutError extends Error {
 /** Thrown when the circuit breaker is open and calls are failing fast. */
 export class RpcCircuitOpenError extends ResurrectError {
   constructor(retryAfterMs: number) {
-    super(
-      'NETWORK_ERROR',
-      `RPC circuit breaker is open; retry after ${retryAfterMs}ms`,
-    )
+    super('NETWORK_ERROR', `RPC circuit breaker is open; retry after ${retryAfterMs}ms`)
     this.name = 'RpcCircuitOpenError'
   }
 }
@@ -370,7 +367,6 @@ export class ResilientRpcClient implements ISorobanRpcClient {
    * construction (`Restorer.ts`) keep working through the resilient wrapper.
    */
   get serverURL(): string | undefined {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (this._inner as any).serverURL
   }
 
@@ -409,7 +405,9 @@ export class ResilientRpcClient implements ISorobanRpcClient {
 
   getVersionInfo(): Promise<unknown> {
     if (!this._inner.getVersionInfo) {
-      return Promise.reject(new Error('The wrapped RPC client does not implement getVersionInfo().'))
+      return Promise.reject(
+        new Error('The wrapped RPC client does not implement getVersionInfo().'),
+      )
     }
     return this._call(() => this._inner.getVersionInfo!())
   }
@@ -471,7 +469,8 @@ const TRANSIENT_ERROR_CODES = new Set([
   'UND_ERR_SOCKET',
 ])
 
-const DETERMINISTIC_ERROR = /\b(tx_bad_seq|tx_bad_auth|tx_invalid|tx_malformed|tx_failed|tx_soroban_invalid|tx_insufficient_fee|op_?[a-z0-9_]*failed|contract(?:error| failure| reverted| trap)|invalid transaction|signature rejected|wallet rejected)\b/i
+const DETERMINISTIC_ERROR =
+  /\b(tx_bad_seq|tx_bad_auth|tx_invalid|tx_malformed|tx_failed|tx_soroban_invalid|tx_insufficient_fee|op_?[a-z0-9_]*failed|contract(?:error| failure| reverted| trap)|invalid transaction|signature rejected|wallet rejected)\b/i
 
 function property(value: unknown, key: string): unknown {
   if (typeof value !== 'object' || value === null || !(key in value)) return undefined
@@ -489,9 +488,7 @@ export function isRetryableRpcError(error: unknown): boolean {
 
   const response = property(error, 'response')
   const status =
-    property(error, 'status') ??
-    property(error, 'statusCode') ??
-    property(response, 'status')
+    property(error, 'status') ?? property(error, 'statusCode') ?? property(response, 'status')
   if (typeof status === 'number') {
     return status === 408 || status === 425 || status === 429 || (status >= 500 && status <= 599)
   }

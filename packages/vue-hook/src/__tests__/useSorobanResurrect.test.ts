@@ -13,8 +13,6 @@ const mockReset = vi.fn()
 const mockDispose = vi.fn()
 const mockDetectArchivedKeys = vi.fn()
 const mockSubmitWithRestore = vi.fn()
-const mockDispose = vi.fn()
-const mockOn = vi.fn()
 
 const PROCESSING_STATES = [
   'simulating',
@@ -26,17 +24,17 @@ const PROCESSING_STATES = [
 ]
 
 vi.mock('@soroban-resurrect/sdk', () => ({
-  SorobanResurrect: vi.fn().mockImplementation((config: unknown) => ({
-    config,
-    onStateChange: mockOnStateChange,
-    on: mockOn,
-    reset: mockReset,
-    dispose: mockDispose,
-    detectArchivedKeys: mockDetectArchivedKeys,
-    submitWithRestore: mockSubmitWithRestore,
-    dispose: mockDispose,
-    on: mockOn,
-  })),
+  SorobanResurrect: vi.fn().mockImplementation(function (config: unknown) {
+    return {
+      config,
+      onStateChange: mockOnStateChange,
+      on: mockOn,
+      reset: mockReset,
+      dispose: mockDispose,
+      detectArchivedKeys: mockDetectArchivedKeys,
+      submitWithRestore: mockSubmitWithRestore,
+    }
+  }),
   isProcessingState: (state: string) => PROCESSING_STATES.includes(state),
 }))
 

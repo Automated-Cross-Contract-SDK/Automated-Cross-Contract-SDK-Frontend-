@@ -28,7 +28,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
     "lint": "eslint 'src/**/*.{ts,tsx}'",
@@ -36,7 +36,7 @@
     "test:types": "vitest run --typecheck --typecheck.only"
   },
   "peerDependencies": {
-    "@soroban-resurrect/sdk": "^0.1.0"
+    "@soroban-resurrect/sdk": "0.1.0"
   },
   "peerDependenciesMeta": {
     "@walletconnect/sign-client": {
@@ -45,6 +45,17 @@
   },
   "devDependencies": {
     "typescript": "~6.0.3",
-    "vitest": "^5.0.5"
+    "vitest": "^5.0.5",
+    "@soroban-resurrect/sdk": "0.1.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-.git",
+    "directory": "packages/adapter-walletconnect"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

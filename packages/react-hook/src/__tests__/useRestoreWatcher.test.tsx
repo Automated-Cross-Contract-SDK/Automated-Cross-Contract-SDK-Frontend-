@@ -4,8 +4,7 @@ import { StrictMode, createElement, type PropsWithChildren } from 'react'
 import { useRestoreWatcher } from '../useRestoreWatcher.js'
 
 const NO_KEYS = [] as never
-const StrictWrapper = ({ children }: PropsWithChildren) =>
-  createElement(StrictMode, null, children)
+const StrictWrapper = ({ children }: PropsWithChildren) => createElement(StrictMode, null, children)
 
 function makeFake(entries: unknown[] = []) {
   return {
@@ -25,9 +24,7 @@ describe('useRestoreWatcher', () => {
       { keyBase64: 'k2', isArchived: true, ttlLedgers: 0 },
     ]
     const fake = makeFake()
-    fake.getExpiringSoonEntries
-      .mockResolvedValueOnce(a)
-      .mockResolvedValue(b)
+    fake.getExpiringSoonEntries.mockResolvedValueOnce(a).mockResolvedValue(b)
 
     const { result } = renderHook(() =>
       useRestoreWatcher(NO_KEYS, { resurrect: fake as never, intervalMs: 1000 }),
@@ -112,10 +109,9 @@ describe('useRestoreWatcher', () => {
   it('does not retain duplicate polling intervals across Strict Mode remounts', () => {
     const fake = makeFake([])
     const renderWatcher = () =>
-      renderHook(
-        () => useRestoreWatcher(NO_KEYS, { resurrect: fake as never, intervalMs: 1000 }),
-        { wrapper: StrictWrapper },
-      )
+      renderHook(() => useRestoreWatcher(NO_KEYS, { resurrect: fake as never, intervalMs: 1000 }), {
+        wrapper: StrictWrapper,
+      })
 
     const firstMount = renderWatcher()
     expect(vi.getTimerCount()).toBe(1)

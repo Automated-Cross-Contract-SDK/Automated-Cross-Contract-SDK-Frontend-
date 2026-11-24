@@ -5,10 +5,10 @@ middleware to its likely causes, safe recovery steps, and links to the
 relevant RPC or wallet diagnostics.
 
 > **Stable interface.** The `category` field on every thrown error is part of
-the public API. Categories are stable strings — new categories may be added in
-minor releases, but existing category names will not be renamed or removed
-without a major version bump. Always branch on `error.category`, not on the
-human-readable `message`.
+> the public API. Categories are stable strings — new categories may be added in
+> minor releases, but existing category names will not be renamed or removed
+> without a major version bump. Always branch on `error.category`, not on the
+> human-readable `message`.
 
 ```ts
 import { ResurrectError } from '@soroban-resurrect/sdk'

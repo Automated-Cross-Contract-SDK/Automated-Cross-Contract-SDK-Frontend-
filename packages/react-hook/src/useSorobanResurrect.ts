@@ -120,12 +120,15 @@ export function useSorobanResurrect(
     resurrectRef.current!.reset(fromState)
   }, [])
 
-  const on = useCallback(<K extends keyof SorobanResurrectEvents>(
-    event: K,
-    listener: (payload: SorobanResurrectEvents[K]) => void,
-  ) => {
-    return resurrectRef.current!.on(event, listener)
-  }, [])
+  const on = useCallback(
+    <K extends keyof SorobanResurrectEvents>(
+      event: K,
+      listener: (payload: SorobanResurrectEvents[K]) => void,
+    ) => {
+      return resurrectRef.current!.on(event, listener)
+    },
+    [],
+  )
 
   const isProcessing = isProcessingState(state.state)
 

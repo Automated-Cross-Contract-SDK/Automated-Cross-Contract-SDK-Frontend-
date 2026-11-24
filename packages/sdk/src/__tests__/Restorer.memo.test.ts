@@ -1,5 +1,13 @@
 import { describe, it, expect, vi } from 'vitest'
-import { Account, Keypair, Memo, Networks, Transaction, SorobanDataBuilder, rpc } from '@stellar/stellar-sdk'
+import {
+  Account,
+  Keypair,
+  Memo,
+  Networks,
+  Transaction,
+  SorobanDataBuilder,
+  rpc,
+} from '@stellar/stellar-sdk'
 import { buildRestoreTransaction, resolveRestoreMemo } from '../Restorer.js'
 
 function makeMockServer(): rpc.Server {
@@ -61,9 +69,15 @@ describe('resolveRestoreMemo', () => {
     const explicit = Memo.text('explicit')
     const configMemo = Memo.text('config-memo')
 
-    expect(resolveRestoreMemo(explicit, { restoreTxMemo: configMemo, restoreTxMemoText: 'txt' })).toBe(explicit)
-    expect(resolveRestoreMemo(undefined, { restoreTxMemo: configMemo, restoreTxMemoText: 'txt' })).toBe(configMemo)
-    expect(resolveRestoreMemo(undefined, { restoreTxMemoText: 'txt' })?.value?.toString()).toBe('txt')
+    expect(
+      resolveRestoreMemo(explicit, { restoreTxMemo: configMemo, restoreTxMemoText: 'txt' }),
+    ).toBe(explicit)
+    expect(
+      resolveRestoreMemo(undefined, { restoreTxMemo: configMemo, restoreTxMemoText: 'txt' }),
+    ).toBe(configMemo)
+    expect(resolveRestoreMemo(undefined, { restoreTxMemoText: 'txt' })?.value?.toString()).toBe(
+      'txt',
+    )
     expect(resolveRestoreMemo(undefined, {})).toBeUndefined()
   })
 })

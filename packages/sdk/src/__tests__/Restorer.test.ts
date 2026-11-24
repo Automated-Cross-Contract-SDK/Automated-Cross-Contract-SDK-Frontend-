@@ -336,12 +336,7 @@ describe('Restorer', () => {
       vi.mocked(server.getAccount).mockResolvedValue(new Account(originalTx.source, '3') as never)
       mockSuccessfulSimulation(server)
 
-      const rebuilt = await buildOriginalAfterRestore(
-        server,
-        originalTx,
-        Networks.TESTNET,
-        '100',
-      )
+      const rebuilt = await buildOriginalAfterRestore(server, originalTx, Networks.TESTNET, '100')
 
       expect(rebuilt.timeBounds).toEqual({
         minTime: String(bounds.minTime),
@@ -387,26 +382,20 @@ describe('Restorer', () => {
       vi.mocked(server.getAccount).mockResolvedValue(new Account(originalTx.source, '3') as never)
       mockSuccessfulSimulation(server)
 
-      const rebuilt = await buildOriginalAfterRestore(
-        server,
-        originalTx,
-        Networks.TESTNET,
-        '100',
-        { minTime: now, maxTime: now + 180 },
-      )
+      const rebuilt = await buildOriginalAfterRestore(server, originalTx, Networks.TESTNET, '100', {
+        minTime: now,
+        maxTime: now + 180,
+      })
       expect(rebuilt.timeBounds).toEqual({
         minTime: String(now),
         maxTime: String(now + 180),
       })
 
       await expect(
-        buildOriginalAfterRestore(
-          server,
-          originalTx,
-          Networks.TESTNET,
-          '100',
-          { minTime: now, maxTime: now },
-        ),
+        buildOriginalAfterRestore(server, originalTx, Networks.TESTNET, '100', {
+          minTime: now,
+          maxTime: now,
+        }),
       ).rejects.toMatchObject({ code: 'INVALID_REBUILD_TIME_BOUNDS' })
     })
   })

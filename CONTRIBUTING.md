@@ -73,11 +73,11 @@ by commenting with a brief status update.
 
 ### Prerequisites
 
-| Tool    | Minimum version          |
-| ------- | ------------------------ |
-| Node.js | 18.x                     |
-| npm     | 9.x (ships with Node 18) |
-| Git     | any recent version       |
+| Tool    | Minimum version    |
+| ------- | ------------------ |
+| Node.js | 20.x               |
+| npm     | 10.x               |
+| Git     | any recent version |
 
 ### Steps
 
@@ -168,11 +168,11 @@ previous release. Record findings in the incident issue.
 
 ### 2. Assess impact and severity
 
-| Severity | Definition                                                                 | Response target              |
-| -------- | -------------------------------------------------------------------------- | ---------------------------- |
-| SEV-1    | Broken install/build, data loss, or security issue in a published version  | Acknowledge within 1 hour     |
+| Severity | Definition                                                                | Response target                   |
+| -------- | ------------------------------------------------------------------------- | --------------------------------- |
+| SEV-1    | Broken install/build, data loss, or security issue in a published version | Acknowledge within 1 hour         |
 | SEV-2    | Functional regression with a workaround, or one package affected          | Acknowledge within 1 business day |
-| SEV-3    | Cosmetic/docs issue, no functional impact                                  | Next scheduled release       |
+| SEV-3    | Cosmetic/docs issue, no functional impact                                 | Next scheduled release            |
 
 Identify affected versions, affected packages, and whether a safe previous version exists.
 
@@ -201,10 +201,10 @@ the regression is severe, or a known-good previous version exists. Choose **forw
 a patch) when the fix is small, well understood, and can ship quickly.
 
 - Rollback: `npm deprecate @soroban-resurrect/sdk@<bad> "Broken release, use <safe>"`, then publish
-a corrected patch so `latest` points at a safe version. Never unpublish a version consumers may
-have pinned.
+  a corrected patch so `latest` points at a safe version. Never unpublish a version consumers may
+  have pinned.
 - Forward-fix: branch from the release tag, apply the minimal fix, and let release-please cut a
-patch release through the normal `publish.yml` flow.
+  patch release through the normal `publish.yml` flow.
 
 ### 5. Direct consumers to a safe version
 

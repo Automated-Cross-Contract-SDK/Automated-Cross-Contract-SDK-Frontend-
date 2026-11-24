@@ -82,7 +82,12 @@ export class SimulationCache {
 
   /** Snapshot of cache hit, miss and eviction counters. */
   stats(): SimulationCacheStats {
-    return { hits: this.hits, misses: this.misses, evictions: this.evictions, size: this.store.size }
+    return {
+      hits: this.hits,
+      misses: this.misses,
+      evictions: this.evictions,
+      size: this.store.size,
+    }
   }
 
   /**

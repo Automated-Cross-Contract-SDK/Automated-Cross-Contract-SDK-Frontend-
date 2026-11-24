@@ -30,7 +30,6 @@
 
 # Security Policies & Audits
 /SECURITY.md @micmusjnr20
-/security/ @micmusjnr20
 
 # Documentation & Architecture Guides
 /docs/ @micmusjnr20
@@ -38,8 +37,7 @@
 /MIGRATION.md @micmusjnr20
 /README.md @micmusjnr20
 
-# Testing, Benchmarks, and E2E
+# Testing, Benchmarks
 /benchmarks/ @micmusjnr20
-/e2e/ @micmusjnr20
 /examples/ @micmusjnr20
 /scripts/ @micmusjnr20

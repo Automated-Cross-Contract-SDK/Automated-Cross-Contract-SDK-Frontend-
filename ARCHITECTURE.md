@@ -21,7 +21,7 @@ that are hard to diagnose.
 
 **Decision**
 
-After restoration, the original transaction is *rebuilt* rather than reused
+After restoration, the original transaction is _rebuilt_ rather than reused
 directly. Rebuilding produces a fresh transaction that reflects the current
 state of the account and network before it is signed and submitted.
 
@@ -57,7 +57,7 @@ state of the account and network before it is signed and submitted.
 
 **Caller responsibilities**
 
-- Callers must treat a restored transaction as *input to rebuilding*, not as a
+- Callers must treat a restored transaction as _input to rebuilding_, not as a
   ready-to-submit transaction.
 - Callers are responsible for supplying the signers required to re-sign the
   rebuilt transaction.

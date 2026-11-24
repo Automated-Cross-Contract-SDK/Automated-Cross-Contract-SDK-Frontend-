@@ -12,21 +12,24 @@ vi.mock('@soroban-resurrect/sdk', async (importOriginal) => {
   const listeners = new Set<(i: unknown) => void>()
   return {
     ...actual,
-    SorobanResurrect: vi.fn().mockImplementation(() => ({
-      stateInfo: { state: 'idle', message: '' },
-      onStateChange: vi.fn((cb: (i: unknown) => void) => {
-        listeners.add(cb)
-        return () => listeners.delete(cb)
-      }),
-      submitWithRestore: vi.fn().mockResolvedValue({
-        success: true,
-        archivedKeysDetected: 0,
-        originalTxHash: 'xyz',
-      }),
-      detectArchivedKeys: vi.fn().mockResolvedValue([]),
-      cancel: vi.fn().mockReturnValue(false),
-      reset: vi.fn(),
-    })),
+    SorobanResurrect: vi.fn().mockImplementation(function () {
+      return {
+        stateInfo: { state: 'idle', message: '' },
+        onStateChange: vi.fn((cb: (i: unknown) => void) => {
+          listeners.add(cb)
+          return () => listeners.delete(cb)
+        }),
+        submitWithRestore: vi.fn().mockResolvedValue({
+          success: true,
+          archivedKeysDetected: 0,
+          originalTxHash: 'xyz',
+        }),
+        detectArchivedKeys: vi.fn().mockResolvedValue([]),
+        cancel: vi.fn().mockReturnValue(false),
+        reset: vi.fn(),
+        dispose: vi.fn(),
+      }
+    }),
   }
 })
 
@@ -60,9 +63,7 @@ describe('useSorobanResurrectSubmit', () => {
   })
 
   it('starts idle with no result or error', () => {
-    const { result } = renderHook(() =>
-      useSorobanResurrectSubmit({ resurrect: fake as never }),
-    )
+    const { result } = renderHook(() => useSorobanResurrectSubmit({ resurrect: fake as never }))
     expect(result.current.result).toBeNull()
     expect(result.current.error).toBeNull()
     expect(result.current.isProcessing).toBe(false)
@@ -70,9 +71,7 @@ describe('useSorobanResurrectSubmit', () => {
   })
 
   it('subscribes to SDK state changes and reflects isProcessing', () => {
-    const { result } = renderHook(() =>
-      useSorobanResurrectSubmit({ resurrect: fake as never }),
-    )
+    const { result } = renderHook(() => useSorobanResurrectSubmit({ resurrect: fake as never }))
     expect(fake.onStateChange).toHaveBeenCalledTimes(1)
 
     act(() => fake.emit({ state: 'simulating', message: 'Simulating…' }))
@@ -137,9 +136,7 @@ describe('useSorobanResurrectSubmit', () => {
   it('converts a thrown error into a failure result', async () => {
     fake.submitWithRestore.mockRejectedValue(new Error('network down'))
 
-    const { result } = renderHook(() =>
-      useSorobanResurrectSubmit({ resurrect: fake as never }),
-    )
+    const { result } = renderHook(() => useSorobanResurrectSubmit({ resurrect: fake as never }))
 
     let returned: { success: boolean; error?: string } = { success: true }
     await act(async () => {
@@ -186,9 +183,7 @@ describe('useSorobanResurrectSubmit', () => {
       error: 'boom',
     })
 
-    const { result } = renderHook(() =>
-      useSorobanResurrectSubmit({ resurrect: fake as never }),
-    )
+    const { result } = renderHook(() => useSorobanResurrectSubmit({ resurrect: fake as never }))
 
     await act(async () => {
       await result.current.submit(tx, wallet)

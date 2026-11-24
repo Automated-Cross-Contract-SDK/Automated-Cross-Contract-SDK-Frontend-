@@ -1,6 +1,6 @@
-import type { Memo, Transaction, xdr } from '@stellar/stellar-sdk';
-import type { rpc } from '@stellar/stellar-sdk';
-import type { ISorobanRpcClient } from './RpcClient.js';
+import type { Memo, Transaction, xdr } from '@stellar/stellar-sdk'
+import type { rpc } from '@stellar/stellar-sdk'
+import type { ISorobanRpcClient } from './RpcClient.js'
 import type {
   TxHash,
   XdrBase64,
@@ -12,7 +12,7 @@ import type {
   FeeStroops,
   SequenceNumber,
   HistoryEntryId,
-} from './branded-types.js';
+} from './branded-types.js'
 
 export type {
   TxHash,
@@ -25,10 +25,10 @@ export type {
   FeeStroops,
   SequenceNumber,
   HistoryEntryId,
-};
-import type { OnchainError } from './TransactionFailure.js';
-import type { ResurrectErrorCode } from './errors.js';
-export type { OnchainError, ResurrectErrorCode };
+}
+import type { OnchainError } from './TransactionFailure.js'
+import type { ResurrectErrorCode } from './errors.js'
+export type { OnchainError, ResurrectErrorCode }
 
 /** Logging sink accepted by `config.logger`. */
 export interface Logger {
@@ -218,8 +218,8 @@ export interface SorobanResurrectConfig {
  * host application when its platform is available.
  */
 export interface HistoryStorage {
-  getItem(key: string): string | null | Promise<string | null>;
-  setItem(key: string, value: string): void | Promise<void>;
+  getItem(key: string): string | null | Promise<string | null>
+  setItem(key: string, value: string): void | Promise<void>
 
   removeItem?(key: string): void | Promise<void>
 }
@@ -227,16 +227,16 @@ export interface HistoryStorage {
 /** Options for persisting transaction history. */
 export interface HistoryPersistenceOptions {
   /** A platform-appropriate key/value storage adapter. */
-  storage: HistoryStorage;
+  storage: HistoryStorage
   /** Storage key; defaults to `soroban-resurrect:history`. */
-  key?: string;
+  key?: string
   /** Persist redacted transaction hashes instead of full transaction data. */
-  mode?: 'full' | 'minimal';
+  mode?: 'full' | 'minimal'
   /** Optional transform used to encrypt/decrypt or forward stored data. */
   serializer?: {
-    serialize(plain: string): string | Promise<string>;
-    deserialize(stored: string): string | Promise<string>;
-  };
+    serialize(plain: string): string | Promise<string>
+    deserialize(stored: string): string | Promise<string>
+  }
 }
 
 /**
@@ -492,13 +492,7 @@ export interface ResurrectResult {
 
 /** Lifecycle stage at which a restore workflow can fail. */
 export type ResurrectFailureStage =
-  | 'simulation'
-  | 'restore'
-  | 'rebuild'
-  | 'signing'
-  | 'submission'
-  | 'confirmation'
-  | 'unknown'
+  'simulation' | 'restore' | 'rebuild' | 'signing' | 'submission' | 'confirmation' | 'unknown'
 
 /** Stable, actionable metadata accompanying the readable `error` message. */
 export interface ResurrectFailure {
@@ -709,7 +703,6 @@ export interface RestoreStateInfo {
   error?: string
 }
 
-
 /**
  * Typed events emitted by SorobanResurrect for specific workflow transitions,
  * in addition to the general-purpose `onStateChange` observer.
@@ -759,19 +752,19 @@ export interface HardwareWalletAdapter extends WalletAdapter {
 }
 
 /** Confirmation policy for the original transaction. */
-export type ConfirmationPolicy = 'wait-for-finality' | 'return-on-submission';
+export type ConfirmationPolicy = 'wait-for-finality' | 'return-on-submission'
 
 /** Behavior when confirmation polling reaches its timeout. */
-export type ConfirmationTimeoutBehavior = 'error' | 'return-pending';
+export type ConfirmationTimeoutBehavior = 'error' | 'return-pending'
 
 /** Retry policy for transient RPC transport/server failures. */
 export interface SubmitRetryOptions {
   /** Retries beyond the initial RPC call. Defaults to 3 when enabled. */
-  maxRetries?: number;
+  maxRetries?: number
   /** Initial backoff in ms. Defaults to 250. */
-  baseDelayMs?: number;
+  baseDelayMs?: number
   /** Maximum backoff in ms. Defaults to 5000. */
-  maxDelayMs?: number;
+  maxDelayMs?: number
 }
 
 /** Lifecycle phases reported during a submit-with-restore request. */
@@ -787,50 +780,50 @@ export type SubmitLifecyclePhase =
   | 'original_confirmation_started'
   | 'original_confirmed'
   | 'completed'
-  | 'failed';
+  | 'failed'
 
 /** Typed event emitted for a submit-with-restore lifecycle phase. */
 export interface SubmitLifecycleEvent {
-  phase: SubmitLifecyclePhase;
-  requestId?: string;
-  transactionHash?: TxHash;
-  archivedKeys?: ArchivedLedgerEntry[];
-  result?: ResurrectResult;
-  error?: string;
+  phase: SubmitLifecyclePhase
+  requestId?: string
+  transactionHash?: TxHash
+  archivedKeys?: ArchivedLedgerEntry[]
+  result?: ResurrectResult
+  error?: string
 }
 
 /** Logger verbosity level. */
-export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 
 /** Structured context accepted by the SDK logger. */
 export interface LogContext extends Record<string, unknown> {
-  method?: string;
-  durationMs?: number;
-  requestId?: string;
-  ok?: boolean;
-  error?: string;
+  method?: string
+  durationMs?: number
+  requestId?: string
+  ok?: boolean
+  error?: string
 }
 
 /** Timing information for an RPC call. */
 export interface RpcTimingEvent {
-  method: string;
-  durationMs: number;
-  ok: boolean;
-  requestId?: string;
-  error?: string;
+  method: string
+  durationMs: number
+  ok: boolean
+  requestId?: string
+  error?: string
 }
 
 /** Configuration for the Ledger adapter. */
 export interface LedgerAdapterConfig {
-  transport?: unknown;
-  accountIndex?: number;
+  transport?: unknown
+  accountIndex?: number
 }
 
 /** Configuration for the Trezor adapter. */
 export interface TrezorAdapterConfig {
-  trezorConnect: unknown;
-  manifest: { email: string; appUrl: string };
-  accountIndex?: number;
+  trezorConnect: unknown
+  manifest: { email: string; appUrl: string }
+  accountIndex?: number
 }
 
 /** Injectable wall clock, random source, and timer functions. */

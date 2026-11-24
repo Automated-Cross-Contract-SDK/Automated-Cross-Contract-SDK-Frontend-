@@ -1,4 +1,3 @@
-
 # Local Package Development (npm link / yalc)
 
 When you change `@soroban-resurrect/sdk` or one of the framework hook packages,
@@ -17,13 +16,13 @@ keep the pinned versions in sync when you bump a package.
 
 ## Which one to use
 
-| | `npm link` | `yalc` |
-|---|---|---|
-| Setup | Built into npm | `npm i -g yalc` |
-| Mechanism | Symlink into the consumer's `node_modules` | Copies the packed tarball contents |
-| Catches missing `files` entries | No | Yes |
-| Duplicate React / peer-dep instances | Common | Rare |
-| Good for | Quick one-off checks | Anything longer than a few minutes |
+|                                      | `npm link`                                 | `yalc`                             |
+| ------------------------------------ | ------------------------------------------ | ---------------------------------- |
+| Setup                                | Built into npm                             | `npm i -g yalc`                    |
+| Mechanism                            | Symlink into the consumer's `node_modules` | Copies the packed tarball contents |
+| Catches missing `files` entries      | No                                         | Yes                                |
+| Duplicate React / peer-dep instances | Common                                     | Rare                               |
+| Good for                             | Quick one-off checks                       | Anything longer than a few minutes |
 
 Reach for `yalc` by default. Use `npm link` when you want a change to appear in
 the consumer without re-publishing on every edit.
@@ -42,29 +41,6 @@ Or keep a rebuild running while you work:
 ```bash
 npm run build -w packages/sdk -- --watch
 ```
-
-## Inspecting release readiness
-
-Before you link, publish to yalc, or open a release PR, run the release-readiness
-check. It inspects the workspace without publishing anything:
-
-```bash
-npm run release:check
-```
-
-It reports, for every workspace package:
-
-- **Version alignment** — sibling dependencies pinned to exact workspace
-  versions, and no package resolving a sibling from the registry.
-- **Build results** — whether `dist/` exists and is newer than `src/`.
-- **Package contents** — the files that would land in the tarball, so a missing
-  `files` entry shows up here instead of after publish.
-- **Release metadata** — required `package.json` fields (`name`, `version`,
-  `license`, `repository`, `exports`) and the presence of a `README`.
-
-The command exits non-zero when any check fails, so it is safe to wire into CI.
-Pass `--json` for machine-readable output and `--package <name>` to inspect a
-single package. It never runs `npm publish` and never mutates the workspace.
 
 ## Using yalc
 
@@ -97,7 +73,8 @@ Do not commit either.
 cd packages/sdk.npm run build
 yalc push
 ```
- `yalc push` republishes and updates every consumer that added the package, so
+
+`yalc push` republishes and updates every consumer that added the package, so
 this is the command you repeat while iterating.
 
 ### 4. Clean up
@@ -121,7 +98,7 @@ npm link
 
 ### 2. Link it into the consumer
 
-```bash
+````bash
 cd ~/my-dapp
 npm link @soroban-resurrect/sdk.```
 
@@ -136,7 +113,7 @@ npm unlink --no-save @soroban-resurrect/sdk.npm install
 
 cd packages/sdk
 npm unlink -g
-```
+````
 
 ## Linking the hook packages
 
@@ -212,20 +189,6 @@ For every package published at the release version, the verifier confirms:
 If any package is missing either, the verification step exits non-zero and the
 release workflow fails.
 
-### Running it locally
-
-You can run the same check against a published version before or after a
-release:
-
-```bash
-npm run verify:provenance -- --version 1.2.3
-```
-
-Pass `--package <name>` to check a single package, or omit it to verify every
-workspace package at that version. The command exits `0` when all packages
-verify and non-zero on the first mismatch, printing which package failed and
-why.
-
 ### When verification fails
 
 A mismatch means the published artifact cannot be attributed to this
@@ -239,16 +202,16 @@ repository's workflow. Do not bump the version to paper over it. Instead:
 
 ## Troubleshooting
 
-| Symptom | Cause and fix |
-|---------|---------------|
-| Changes do not show up | `dist/` is stale. Run `npm run build:sdk`, and with yalc also `yalc push`. |
-| `Cannot find module '@soroban-resurrect/sdk'` | Run `npm install` in the consumer after `yalc add`, or re-run `npm link`. |
-| `Invalid hook call` / two React copies | `npm link` gave the hook package its own `react`. Point the consumer's bundler at a single React, or switch to yalc. |
-| Two `@stellar/stellar-sdk` instances | Same cause as above. `stellar-sdk` is a peer dependency and must resolve to one copy. |
-| Vite does not reload the linked package | Linked packages sit outside the project root. Add `optimizeDeps: { exclude: ['@soroban-resurrect/sdk'] }` to the consumer's Vite config. |
-| A file is missing only under yalc | It is not covered by `files` in the package's `package.json`. It would be missing from the npm release too, so fix it there. |
-| A missing sibling resolves from the registry | The internal dependency is not pinned to an exact workspace version. Pin it and re-run the pre-publish check. |
-| Provenance verification fails after release | The published tarball lacks a registry signature or attestation. See "When verification fails" above; do not bump the version. |
+| Symptom                                       | Cause and fix                                                                                                                            |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Changes do not show up                        | `dist/` is stale. Run `npm run build:sdk`, and with yalc also `yalc push`.                                                               |
+| `Cannot find module '@soroban-resurrect/sdk'` | Run `npm install` in the consumer after `yalc add`, or re-run `npm link`.                                                                |
+| `Invalid hook call` / two React copies        | `npm link` gave the hook package its own `react`. Point the consumer's bundler at a single React, or switch to yalc.                     |
+| Two `@stellar/stellar-sdk` instances          | Same cause as above. `stellar-sdk` is a peer dependency and must resolve to one copy.                                                    |
+| Vite does not reload the linked package       | Linked packages sit outside the project root. Add `optimizeDeps: { exclude: ['@soroban-resurrect/sdk'] }` to the consumer's Vite config. |
+| A file is missing only under yalc             | It is not covered by `files` in the package's `package.json`. It would be missing from the npm release too, so fix it there.             |
+| A missing sibling resolves from the registry  | The internal dependency is not pinned to an exact workspace version. Pin it and re-run the pre-publish check.                            |
+| Provenance verification fails after release   | The published tarball lacks a registry signature or attestation. See "When verification fails" above; do not bump the version.           |
 
 ## Do not commit link artifacts
 

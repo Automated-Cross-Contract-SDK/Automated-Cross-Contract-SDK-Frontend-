@@ -35,11 +35,11 @@ This site serves documentation for each supported package release. Use the
 **version selector** in the navigation bar to switch between versions; the
 active version is shown next to the selector.
 
-| Version | Status | Notes |
-| --- | --- | --- |
-| `latest` | Current release | Tracks the most recent published package. |
-| `v1.x` | Supported | Stable public API; see migration notes when upgrading from `v0.x`. |
-| `v0.x` | Legacy | No longer receiving features; upgrade to `v1.x`. |
+| Version  | Status          | Notes                                                              |
+| -------- | --------------- | ------------------------------------------------------------------ |
+| `latest` | Current release | Tracks the most recent published package.                          |
+| `v1.x`   | Supported       | Stable public API; see migration notes when upgrading from `v0.x`. |
+| `v0.x`   | Legacy          | No longer receiving features; upgrade to `v1.x`.                   |
 
 Version identifiers match the published package releases. If you are unsure
 which version applies to your project, check the `soroban-resurrect` dependency

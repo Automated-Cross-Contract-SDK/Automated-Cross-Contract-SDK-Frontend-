@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from 'react'
 import { useSorobanResurrectContext } from '@soroban-resurrect/react-hook'
+import { asStellarPublicKey, asXdrBase64 } from '@soroban-resurrect/sdk'
 import { buildWithdrawTransaction } from './lib/withdraw-tx'
 import { CLIENT_NETWORK_PASSPHRASE, CONTRACT_ID } from './lib/client-config'
 import { getFreighterApi } from './lib/freighter'
@@ -41,9 +42,9 @@ export function RestoreButton({ account, needsRestore }: RestoreButtonProps) {
     try {
       const wallet = {
         isConnected: async () => (await freighter.isConnected()).isConnected,
-        getPublicKey: async () => (await freighter.getAddress()).address,
+        getPublicKey: async () => asStellarPublicKey((await freighter.getAddress()).address),
         signTransaction: async (xdr: string, opts?: { networkPassphrase?: string }) =>
-          (await freighter.signTransaction(xdr, opts)).signedTxXdr,
+          asXdrBase64((await freighter.signTransaction(xdr, opts)).signedTxXdr),
       }
 
       // Rebuild client-side so the sequence number is current, then let the

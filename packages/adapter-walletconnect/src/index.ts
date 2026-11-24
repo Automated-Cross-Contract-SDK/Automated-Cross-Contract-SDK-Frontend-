@@ -171,9 +171,7 @@ export class WalletConnectAdapter implements WalletAdapter {
     // Network passphrase verification: the session must include an account on
     // the CAIP-2 chain the dApp expects, otherwise signatures would be for the
     // wrong network.
-    const match = ns.accounts
-      .map(parseStellarAccount)
-      .find((acc) => acc.chainId === this.chainId)
+    const match = ns.accounts.map(parseStellarAccount).find((acc) => acc.chainId === this.chainId)
     if (!match) {
       throw new Error(
         `WalletConnectAdapter: session does not grant a Stellar account on ` +
@@ -197,10 +195,7 @@ export class WalletConnectAdapter implements WalletAdapter {
     return asStellarPublicKey(this.address)
   }
 
-  async signTransaction(
-    tx: string,
-    _opts?: { networkPassphrase?: string; network?: string },
-  ) {
+  async signTransaction(tx: string, _opts?: { networkPassphrase?: string; network?: string }) {
     try {
       const result = await this.client.request<{ signedXDR: string }>({
         topic: this.session.topic,

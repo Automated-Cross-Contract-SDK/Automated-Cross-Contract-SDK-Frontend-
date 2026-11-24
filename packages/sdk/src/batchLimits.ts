@@ -1,10 +1,6 @@
 import { ResurrectError } from './errors.js'
 
-export function assertBatchSize(
-  actual: number,
-  maximum: number,
-  operation: string,
-): void {
+export function assertBatchSize(actual: number, maximum: number, operation: string): void {
   if (actual > maximum) {
     throw new ResurrectError(
       'BATCH_SIZE_EXCEEDED',
@@ -32,8 +28,6 @@ export async function settleBatchWithConcurrency<T, R>(
     }
   }
 
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, items.length) }, () => worker()),
-  )
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()))
   return results
 }

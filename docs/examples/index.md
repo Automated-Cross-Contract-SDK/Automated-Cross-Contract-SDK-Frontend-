@@ -13,53 +13,6 @@ npm run dev:example
 
 This starts a local dev server demonstrating connecting a wallet, building a transaction, and calling `submitWithRestore`.
 
-## Production-Style React Application
-
-[`examples/react-app`](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/tree/main/examples/react-app) is a realistic React + TypeScript application that goes beyond the minimal example. It demonstrates the patterns you need to ship the SDK in production:
-
-- **Routing** — `react-router-dom` with a wallet-gated route tree (`/`, `/wallet`, `/submit`, `/history`).
-- **Wallet lifecycle** — connect, disconnect, account/network change handling, and reconnection on reload via a `WalletProvider`.
-- **User feedback** — a state-machine-driven progress indicator plus toast notifications for success and failure.
-- **Fee consent** — an explicit confirmation dialog before any restore fee is signed, with the estimated fee surfaced to the user.
-- **Cancellation** — an `AbortController`-based cancel path that stops in-flight restore/submit work and returns the UI to a clean state.
-- **Typed error handling** — a discriminated `Result` type and exhaustive error rendering for every SDK failure mode.
-
-```bash
-git clone https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-.git
-cd Automated-Cross-Contract-SDK-Frontend-/examples/react-app
-npm install
-npm run dev
-```
-
-### Stable interface
-
-The example exposes a small, documented surface so you can copy it into your own app:
-
-```typescript
-// src/sdk/useResurrect.ts
-export interface UseResurrectOptions {
-  rpcUrl: string
-  wallet: WalletAdapter | null
-}
-
-export interface UseResurrectResult {
-  state: ResurrectState
-  submit: (tx: Transaction) => Promise<SubmitResult>
-  cancel: () => void
-  reset: () => void
-}
-
-export function useResurrect(options: UseResurrectOptions): UseResurrectResult
-```
-
-`submit` resolves to a typed `SubmitResult` (`{ success: true; originalTxHash: string } | { success: false; error: ResurrectError }`), and `cancel` aborts any in-flight work. The hook is covered by automated tests for the happy path, fee-consent rejection, cancellation, and each typed error branch.
-
-### Compatibility notes
-
-- Requires React 18+ and `react-router-dom` 6+.
-- Targets the same SDK version as the rest of the docs; if you upgrade the SDK, update the dependency in `examples/react-app/package.json` to match.
-- The wallet adapter is pluggable — the example ships with a Freighter adapter, but any adapter implementing `WalletAdapter` works.
-
 ## Vue Application
 
 [`examples/vue-app`](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/tree/main/examples/vue-app) is a Vue 3 + TypeScript application that wires the Vue composable to a wallet connection flow. It demonstrates the full restore lifecycle with explicit UI states:
@@ -439,10 +392,7 @@ export function resolveNetwork(name: NetworkName): NetworkConfig
  * configured network, so a transaction is never signed against the wrong
  * network.
  */
-export function assertNetworkMatch(
-  configured: NetworkConfig,
-  walletNetwork: NetworkName,
-): void
+export function assertNetworkMatch(configured: NetworkConfig, walletNetwork: NetworkName): void
 ```
 
 ### Estimating restore fees and asking for consent
@@ -744,7 +694,10 @@ const preview: RestorePreview = await sr.prepareRestore({
 ### 3. Present the recovery transaction and fees before signing
 
 ```tsx
-function RecoveryReview({ preview, onConfirm }: {
+function RecoveryReview({
+  preview,
+  onConfirm,
+}: {
   preview: RestorePreview
   onConfirm: () => void
 }) {
@@ -753,8 +706,8 @@ function RecoveryReview({ preview, onConfirm }: {
       <h2>Recover DeFi position</h2>
       <p>
         {preview.archivedKeys.length} archived ledger{' '}
-        {preview.archivedKeys.length === 1 ? 'entry' : 'entries'} will be restored
-        before your position transaction can be submitted.
+        {preview.archivedKeys.length === 1 ? 'entry' : 'entries'} will be restored before your
+        position transaction can be submitted.
       </p>
 
       <dl className="fees">

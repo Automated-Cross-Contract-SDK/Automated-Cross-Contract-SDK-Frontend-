@@ -42,12 +42,12 @@ const wallet = new RabetAdapter({ rabet: myRabetLikeObject })
 
 ## API
 
-| Member | Description |
-| --- | --- |
-| `isConnected()` | `true` once `getPublicKey()` has run, or when `rabet.isUnlocked()` reports an unlocked wallet. |
-| `getPublicKey()` | Calls `rabet.connect()`, caches and returns the account as a `StellarPublicKey`. |
+| Member                       | Description                                                                                                                                                  |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `isConnected()`              | `true` once `getPublicKey()` has run, or when `rabet.isUnlocked()` reports an unlocked wallet.                                                               |
+| `getPublicKey()`             | Calls `rabet.connect()`, caches and returns the account as a `StellarPublicKey`.                                                                             |
 | `signTransaction(xdr, opts)` | Calls `rabet.sign(xdr, network)` where `network` is derived from `opts.networkPassphrase` (defaults to testnet). Returns the signed envelope as `XdrBase64`. |
-| `capabilities` | `{ signAuthEntry: false, feeBump: true, hardware: false }` |
+| `capabilities`               | `{ signAuthEntry: false, feeBump: true, hardware: false }`                                                                                                   |
 
 ## Capabilities
 

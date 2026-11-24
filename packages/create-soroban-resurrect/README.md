@@ -17,12 +17,12 @@ and template files; set `VITE_CONTRACT_ID` there before `npm run dev`.
 
 ## Template choices
 
-| Framework | Language | Template dir        | Scripts                         |
-| --------- | -------- | ------------------- | ------------------------------- |
-| `react`   | `ts`     | `template/react-ts` | `dev`, `build`, `preview`       |
-| `react`   | `js`     | `template/react-js` | `dev`, `build`, `preview`       |
-| `vanilla` | `ts`     | `template/vanilla-ts` | `dev`, `build`, `preview`     |
-| `vanilla` | `js`     | `template/vanilla-js` | `dev`, `build`, `preview`     |
+| Framework | Language | Template dir          | Scripts                   |
+| --------- | -------- | --------------------- | ------------------------- |
+| `react`   | `ts`     | `template/react-ts`   | `dev`, `build`, `preview` |
+| `react`   | `js`     | `template/react-js`   | `dev`, `build`, `preview` |
+| `vanilla` | `ts`     | `template/vanilla-ts` | `dev`, `build`, `preview` |
+| `vanilla` | `js`     | `template/vanilla-js` | `dev`, `build`, `preview` |
 
 Every template pins `@soroban-resurrect/sdk` to the CLI's own version and ships
 runnable `dev`/`build`/`preview` scripts, so `npm install && npm run dev` works

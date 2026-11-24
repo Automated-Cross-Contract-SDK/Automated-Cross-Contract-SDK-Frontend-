@@ -193,4 +193,4 @@ Integration tests that exercise the signing steps need a wallet, not just an
 RPC client. `@soroban-resurrect/testing` also exports a reusable mock wallet
 adapter so you don't have to hand-roll one per suite.
 
-| Behavior                         | Module                            |
+| Behavior | Module |
