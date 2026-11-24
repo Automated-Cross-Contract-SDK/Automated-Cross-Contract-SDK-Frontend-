@@ -23,6 +23,7 @@
  * ```
  */
 
+import { defaultImporter, type AdapterImporter } from './adapterImporter.js'
 import type { WalletAdapter } from './types.js'
 import { createLedgerAdapter, createTrezorAdapter } from './HardwareWalletAdapters.js'
 import type { LedgerAdapterConfig, TrezorAdapterConfig } from './types.js'
@@ -111,14 +112,7 @@ const REGISTRY: Record<KnownWallet, BrowserEntry | HardwareEntry> = {
   },
 }
 
-/**
- * Dynamic-import function used to load browser adapter packages. Injectable so
- * tests can supply a stub without the real packages being installed.
- */
-export type AdapterImporter = (pkg: string) => Promise<Record<string, unknown>>
-
-const defaultImporter: AdapterImporter = (pkg) =>
-  import(/* @vite-ignore */ pkg) as Promise<Record<string, unknown>>
+export type { AdapterImporter }
 
 /** Options forwarded verbatim to the underlying adapter constructor. */
 export type CreateAdapterOptions = Record<string, unknown>
@@ -176,14 +170,12 @@ export async function createAdapter(
     )
   }
 
-  const Ctor = (mod[entry.exportName] ?? (mod.default as Record<string, unknown> | undefined)?.[entry.exportName]) as
-    | (new (opts?: unknown) => WalletAdapter)
-    | undefined
+  const Ctor = (mod[entry.exportName] ??
+    (mod.default as Record<string, unknown> | undefined)?.[entry.exportName]) as
+    (new (opts?: unknown) => WalletAdapter) | undefined
 
   if (typeof Ctor !== 'function') {
-    throw new Error(
-      `createAdapter: package "${entry.pkg}" does not export "${entry.exportName}".`,
-    )
+    throw new Error(`createAdapter: package "${entry.pkg}" does not export "${entry.exportName}".`)
   }
 
   return new Ctor(opts)

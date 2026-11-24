@@ -4,7 +4,7 @@
  * locally with FC_SEED=<n> to explore other inputs.
  */
 
-import { describe, it, expect, beforeAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import fc from 'fast-check'
 import {
   Account,
@@ -60,6 +60,11 @@ const amountArb = fc.integer({ min: 1, max: 1_000_000_000 }).map((n) => (n / 1e7
 
 describe('SimulationCache.fingerprint (property-based)', () => {
   const cache = new SimulationCache()
+
+  // setTimeout(30) derives maxTime from the clock; freeze it so two builds that
+  // straddle a second boundary still describe the same logical transaction.
+  beforeAll(() => void vi.useFakeTimers({ toFake: ['Date'] }))
+  afterAll(() => void vi.useRealTimers())
 
   it('is stable for the same logical tx regardless of sequence number', () => {
     fc.assert(
@@ -208,9 +213,7 @@ const ledgerKeyArb = fc.oneof(
   fc
     .uint8Array({ minLength: 32, maxLength: 32 })
     .map((hash) =>
-      xdr.LedgerKey.contractCode(
-        new xdr.LedgerKeyContractCode({ hash: Buffer.from(hash) }),
-      ),
+      xdr.LedgerKey.contractCode(new xdr.LedgerKeyContractCode({ hash: Buffer.from(hash) })),
     ),
   fc
     .record({

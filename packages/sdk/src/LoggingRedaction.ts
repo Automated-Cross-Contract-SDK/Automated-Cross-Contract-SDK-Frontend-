@@ -44,16 +44,16 @@ export enum LoggingFieldType {
  */
 export interface LoggingFieldClassification {
   /** Field name. */
-  field: string;
+  field: string
 
   /** Privacy category. */
-  type: LoggingFieldType;
+  type: LoggingFieldType
 
   /** Human-readable description. */
-  reason: string;
+  reason: string
 
   /** Redaction function to use (if type is Sensitive). */
-  redactFn?: (value: string) => string;
+  redactFn?: (value: string) => string
 }
 
 /**
@@ -162,7 +162,7 @@ export const LoggingClassifications: LoggingFieldClassification[] = [
     type: LoggingFieldType.Public,
     reason: 'SDK version is safe to log',
   },
-];
+]
 
 /**
  * Redaction utilities for common sensitive identifiers.
@@ -184,10 +184,10 @@ export const RedactionUtils = {
    * ```
    */
   hashAddress(address: string): string {
-    if (!address || address.length < 6) return '***';
-    const prefix = address.slice(0, 2);
-    const suffix = address.slice(-4);
-    return `${prefix}...${suffix}`;
+    if (!address || address.length < 6) return '***'
+    const prefix = address.slice(0, 2)
+    const suffix = address.slice(-4)
+    return `${prefix}...${suffix}`
   },
 
   /**
@@ -205,9 +205,9 @@ export const RedactionUtils = {
    * ```
    */
   hashSuffix(hexString: string, chars: number = 4): string {
-    if (!hexString || hexString.length < chars) return '***';
-    const suffix = hexString.slice(-chars);
-    return `...${suffix}`;
+    if (!hexString || hexString.length < chars) return '***'
+    const suffix = hexString.slice(-chars)
+    return `...${suffix}`
   },
 
   /**
@@ -226,7 +226,7 @@ export const RedactionUtils = {
    * ```
    */
   redactXdr(_txXdr: string): string {
-    return '[XDR redacted]';
+    return '[XDR redacted]'
   },
 
   /**
@@ -258,46 +258,43 @@ export const RedactionUtils = {
     obj: Record<string, unknown>,
     allowSensitive: boolean = false,
   ): Record<string, unknown> {
-    const result: Record<string, unknown> = {};
+    const result: Record<string, unknown> = {}
 
     const forbiddenFields = LoggingClassifications.filter(
       (c) => c.type === LoggingFieldType.Forbidden,
-    ).map((c) => c.field.toLowerCase());
+    ).map((c) => c.field.toLowerCase())
 
     const sensitiveFields = LoggingClassifications.filter(
       (c) => c.type === LoggingFieldType.Sensitive,
-    ).map((c) => c.field.toLowerCase());
+    ).map((c) => c.field.toLowerCase())
 
     for (const [key, value] of Object.entries(obj)) {
-      const keyLower = key.toLowerCase();
+      const keyLower = key.toLowerCase()
 
       if (forbiddenFields.includes(keyLower)) {
-        continue;
+        continue
       }
 
       if (sensitiveFields.includes(keyLower)) {
         if (allowSensitive && typeof value === 'string') {
           const classification = LoggingClassifications.find(
             (c) => c.field.toLowerCase() === keyLower,
-          );
+          )
           if (classification?.redactFn) {
-            result[key] = classification.redactFn(value);
+            result[key] = classification.redactFn(value)
           }
         }
-        continue;
+        continue
       }
 
       if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-        result[key] = RedactionUtils.filterObject(
-          value as Record<string, unknown>,
-          allowSensitive,
-        );
+        result[key] = RedactionUtils.filterObject(value as Record<string, unknown>, allowSensitive)
       } else {
-        result[key] = value;
+        result[key] = value
       }
     }
 
-    return result;
+    return result
   },
 
   /**
@@ -307,12 +304,10 @@ export const RedactionUtils = {
    * @returns True if the field should never be logged.
    */
   isForbidden(fieldName: string): boolean {
-    const lowerName = fieldName.toLowerCase();
+    const lowerName = fieldName.toLowerCase()
     return LoggingClassifications.some(
-      (c) =>
-        c.type === LoggingFieldType.Forbidden &&
-        c.field.toLowerCase() === lowerName,
-    );
+      (c) => c.type === LoggingFieldType.Forbidden && c.field.toLowerCase() === lowerName,
+    )
   },
 
   /**
@@ -322,14 +317,12 @@ export const RedactionUtils = {
    * @returns True if the field should be redacted before logging.
    */
   isSensitive(fieldName: string): boolean {
-    const lowerName = fieldName.toLowerCase();
+    const lowerName = fieldName.toLowerCase()
     return LoggingClassifications.some(
-      (c) =>
-        c.type === LoggingFieldType.Sensitive &&
-        c.field.toLowerCase() === lowerName,
-    );
+      (c) => c.type === LoggingFieldType.Sensitive && c.field.toLowerCase() === lowerName,
+    )
   },
-} as const;
+} as const
 
 /**
  * Safe logger wrapper that automatically redacts sensitive fields.
@@ -337,7 +330,7 @@ export const RedactionUtils = {
  * @public
  */
 export class SafeLogger {
-  private allowSensitive: boolean;
+  private allowSensitive: boolean
 
   /**
    * Creates a safe logger instance.
@@ -345,7 +338,7 @@ export class SafeLogger {
    * @param allowSensitive - If true, log sensitive fields (redacted). Default false.
    */
   constructor(allowSensitive: boolean = false) {
-    this.allowSensitive = allowSensitive;
+    this.allowSensitive = allowSensitive
   }
 
   /**
@@ -360,8 +353,8 @@ export class SafeLogger {
     obj: Record<string, unknown>,
     logger: (msg: string) => void = console.log,
   ): void {
-    const filtered = RedactionUtils.filterObject(obj, this.allowSensitive);
-    logger(`${label}: ${JSON.stringify(filtered)}`);
+    const filtered = RedactionUtils.filterObject(obj, this.allowSensitive)
+    logger(`${label}: ${JSON.stringify(filtered)}`)
   }
 
   /**
@@ -379,12 +372,8 @@ export class SafeLogger {
     logger: (msg: string) => void = console.error,
   ): void {
     const message =
-      err instanceof Error
-        ? err.message
-        : typeof err === 'string'
-          ? err
-          : 'Unknown error';
-    const filtered = context ? RedactionUtils.filterObject(context, this.allowSensitive) : {};
-    logger(`${label}: ${message} ${JSON.stringify(filtered)}`);
+      err instanceof Error ? err.message : typeof err === 'string' ? err : 'Unknown error'
+    const filtered = context ? RedactionUtils.filterObject(context, this.allowSensitive) : {}
+    logger(`${label}: ${message} ${JSON.stringify(filtered)}`)
   }
 }

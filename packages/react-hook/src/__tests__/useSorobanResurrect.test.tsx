@@ -12,15 +12,17 @@ const mockCancel = vi.fn()
 vi.mock('@soroban-resurrect/sdk', () => ({
   isProcessingState: (state: string) =>
     state !== 'idle' && state !== 'success' && state !== 'error',
-  SorobanResurrect: vi.fn().mockImplementation(() => ({
-    onStateChange: mockOnStateChange,
-    reset: mockReset,
-    detectArchivedKeys: mockDetectArchivedKeys,
-    submitWithRestore: mockSubmitWithRestore,
-    cancel: mockCancel,
-    config: { rpcUrl: 'https://test' },
-    state: 'idle',
-  })),
+  SorobanResurrect: vi.fn().mockImplementation(function () {
+    return {
+      onStateChange: mockOnStateChange,
+      reset: mockReset,
+      detectArchivedKeys: mockDetectArchivedKeys,
+      submitWithRestore: mockSubmitWithRestore,
+      cancel: mockCancel,
+      config: { rpcUrl: 'https://test' },
+      state: 'idle',
+    }
+  }),
 }))
 
 const testConfig = { rpcUrl: 'https://soroban-testnet.stellar.org' }

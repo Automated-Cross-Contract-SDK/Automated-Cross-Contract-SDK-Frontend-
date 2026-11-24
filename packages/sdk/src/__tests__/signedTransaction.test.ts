@@ -29,15 +29,12 @@ function buildTransaction(source = Keypair.random()): {
 describe('verifySignedTransaction', () => {
   it('accepts a legitimate signature without changing the transaction', () => {
     const { transaction, source } = buildTransaction()
-    const signed = TransactionBuilder.fromXDR(
-      transaction.toXDR(),
-      Networks.TESTNET,
-    ) as Transaction
+    const signed = TransactionBuilder.fromXDR(transaction.toXDR(), Networks.TESTNET) as Transaction
     signed.sign(source)
 
-    expect(
-      verifySignedTransaction(transaction, signed.toXDR(), Networks.TESTNET),
-    ).toBeInstanceOf(Transaction)
+    expect(verifySignedTransaction(transaction, signed.toXDR(), Networks.TESTNET)).toBeInstanceOf(
+      Transaction,
+    )
   })
 
   it('rejects fee-bump envelopes with a dedicated typed error', () => {
@@ -60,10 +57,10 @@ describe('verifySignedTransaction', () => {
 
   it('rejects a wallet response with mutated operations', () => {
     const { transaction } = buildTransaction()
-    const mutated = new TransactionBuilder(
-      new Account(transaction.source, transaction.sequence),
-      { fee: transaction.fee, networkPassphrase: Networks.TESTNET },
-    )
+    const mutated = new TransactionBuilder(new Account(transaction.source, transaction.sequence), {
+      fee: transaction.fee,
+      networkPassphrase: Networks.TESTNET,
+    })
       .addOperation(
         Operation.payment({
           destination: Keypair.random().publicKey(),
@@ -89,10 +86,7 @@ describe('verifySignedTransaction', () => {
 
   it('warns through the injected logger when signing with hardware', async () => {
     const { transaction, source } = buildTransaction()
-    const signed = TransactionBuilder.fromXDR(
-      transaction.toXDR(),
-      Networks.TESTNET,
-    ) as Transaction
+    const signed = TransactionBuilder.fromXDR(transaction.toXDR(), Networks.TESTNET) as Transaction
     signed.sign(source)
     const wallet: WalletAdapter = {
       capabilities: { hardware: true },
@@ -104,9 +98,8 @@ describe('verifySignedTransaction', () => {
 
     await signAndVerifyTransaction(transaction, wallet, Networks.TESTNET, { logger })
 
-    expect(logger.warn).toHaveBeenCalledWith(
-      expect.stringContaining('Hardware wallet signing'),
-      { wallet: 'hardware' },
-    )
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Hardware wallet signing'), {
+      wallet: 'hardware',
+    })
   })
 })

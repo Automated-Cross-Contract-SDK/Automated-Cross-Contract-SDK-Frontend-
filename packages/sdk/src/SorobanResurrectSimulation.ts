@@ -11,7 +11,7 @@ import {
 import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
 import type { ISorobanRpcClient } from './RpcClient.js'
 import { runWithSignal, throwIfAborted, type AbortSignalOptions } from './AbortUtils.js'
-import { IncompleteFootprintError,readSimulationFootprint } from './SimulationFootprint.js'
+import { IncompleteFootprintError, readSimulationFootprint } from './SimulationFootprint.js'
 
 /**
  * Handles transaction simulation and archived-entry detection for a single
@@ -157,10 +157,7 @@ export class SorobanResurrectSimulator {
    * @param transaction - The transaction to check.
    * @returns `true` if restoration is required before submission.
    */
-  async needsRestore(
-    transaction: Transaction,
-    options: AbortSignalOptions = {},
-  ): Promise<boolean> {
+  async needsRestore(transaction: Transaction, options: AbortSignalOptions = {}): Promise<boolean> {
     const keys = await this.detectArchivedKeys(transaction, options)
     return keys.length > 0
   }

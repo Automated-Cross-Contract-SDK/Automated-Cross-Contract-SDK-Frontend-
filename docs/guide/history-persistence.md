@@ -55,10 +55,10 @@ await sdk.ready
 
 ## What leaves memory
 
-| Mode | Fields written per entry |
-| --- | --- |
-| `'minimal'` (**recommended**) | `id`, `timestamp`, `status`, `attemptCount`, `lastAttemptAt`, `transactionHash` |
-| `'full'` (default) | `id`, `timestamp`, `transactionXdr` (full envelope), `result` (full `ResurrectResult`), `status`, `attemptCount`, `lastAttemptAt` |
+| Mode                          | Fields written per entry                                                                                                          |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `'minimal'` (**recommended**) | `id`, `timestamp`, `status`, `attemptCount`, `lastAttemptAt`, `transactionHash`                                                   |
+| `'full'` (default)            | `id`, `timestamp`, `transactionXdr` (full envelope), `result` (full `ResurrectResult`), `status`, `attemptCount`, `lastAttemptAt` |
 
 Full XDR discloses contract ids, ledger keys, amounts and counterparties. Prefer
 `'minimal'`; minimal records are not rehydrated into the live history — read
@@ -114,7 +114,11 @@ const unb64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0))
 const serializer = {
   async serialize(plain: string) {
     const iv = crypto.getRandomValues(new Uint8Array(12))
-    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(plain))
+    const ct = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv },
+      key,
+      new TextEncoder().encode(plain),
+    )
     return `${b64(iv.buffer)}.${b64(ct)}`
   },
   async deserialize(stored: string) {

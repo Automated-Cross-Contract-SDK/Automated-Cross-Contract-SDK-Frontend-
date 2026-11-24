@@ -79,13 +79,13 @@ async function submit(transaction, wallet) {
 A complete Vue example lives in `examples/vue-wallet`. It wires the composable
 to a wallet connection and renders every UI state the flow can produce:
 
-| State            | Trigger                                                       | UI shown                                              |
-| ---------------- | ------------------------------------------------------------- | ----------------------------------------------------- |
-| `idle`           | Initial render                                                | Connect wallet button                                 |
-| `loading`        | Wallet connect / restore in progress                          | Spinner + disabled controls                           |
-| `rejected`       | User dismisses the wallet prompt                              | Rejection notice with a retry action                  |
-| `restored`       | A previously submitted transaction is restored                | Success banner with the restored transaction hash     |
-| `failed`         | Wallet or RPC error, or a failed `ResurrectResult`            | Error message with the failure reason and retry       |
+| State      | Trigger                                            | UI shown                                          |
+| ---------- | -------------------------------------------------- | ------------------------------------------------- |
+| `idle`     | Initial render                                     | Connect wallet button                             |
+| `loading`  | Wallet connect / restore in progress               | Spinner + disabled controls                       |
+| `rejected` | User dismisses the wallet prompt                   | Rejection notice with a retry action              |
+| `restored` | A previously submitted transaction is restored     | Success banner with the restored transaction hash |
+| `failed`   | Wallet or RPC error, or a failed `ResurrectResult` | Error message with the failure reason and retry   |
 
 The example exposes a single stable interface, `useWalletConnection`, so the
 flow can be reused and tested independently of the UI:

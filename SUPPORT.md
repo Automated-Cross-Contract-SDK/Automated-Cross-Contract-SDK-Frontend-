@@ -7,21 +7,21 @@ compatible.
 
 ## Package status
 
-| Package | Status | Scope |
-| --- | --- | --- |
-| `@soroban-resurrect/sdk` | Active, supported | Core restore workflow and public SDK API. |
-| `@soroban-resurrect/react-hook` | Active, supported | React integration. |
-| `@soroban-resurrect/vue-hook` | Active, supported | Vue integration. |
-| `@soroban-resurrect/svelte-hook` | Active, supported | Svelte integration. |
-| `@soroban-resurrect/adapter-albedo` | Active, supported | Albedo wallet integration, subject to Albedo's API. |
-| `@soroban-resurrect/adapter-freighter` | Active, supported | Freighter wallet integration, subject to Freighter's API. |
-| `@soroban-resurrect/adapter-lobstr` | Active, supported | Lobstr wallet integration, subject to Lobstr's API. |
-| `@soroban-resurrect/adapter-rabet` | Active, supported | Rabet wallet integration, subject to Rabet's API. |
-| `@soroban-resurrect/adapter-walletconnect` | Active, supported | WalletConnect integration, subject to WalletConnect's API. |
-| `@soroban-resurrect/adapter-walletkit` | Active, supported | Stellar Wallets Kit integration, subject to its API. |
-| `@soroban-resurrect/adapter-xbull` | Active, supported | xBull wallet integration, subject to xBull's API. |
-| `create-soroban-resurrect` | Active, supported | Project scaffolding and its generated template. |
-| `@soroban-resurrect/testing` | Preview, best-effort | Test utilities; not a production runtime dependency or stable application API. |
+| Package                                    | Status               | Scope                                                                          |
+| ------------------------------------------ | -------------------- | ------------------------------------------------------------------------------ |
+| `@soroban-resurrect/sdk`                   | Active, supported    | Core restore workflow and public SDK API.                                      |
+| `@soroban-resurrect/react-hook`            | Active, supported    | React integration.                                                             |
+| `@soroban-resurrect/vue-hook`              | Active, supported    | Vue integration.                                                               |
+| `@soroban-resurrect/svelte-hook`           | Active, supported    | Svelte integration.                                                            |
+| `@soroban-resurrect/adapter-albedo`        | Active, supported    | Albedo wallet integration, subject to Albedo's API.                            |
+| `@soroban-resurrect/adapter-freighter`     | Active, supported    | Freighter wallet integration, subject to Freighter's API.                      |
+| `@soroban-resurrect/adapter-lobstr`        | Active, supported    | Lobstr wallet integration, subject to Lobstr's API.                            |
+| `@soroban-resurrect/adapter-rabet`         | Active, supported    | Rabet wallet integration, subject to Rabet's API.                              |
+| `@soroban-resurrect/adapter-walletconnect` | Active, supported    | WalletConnect integration, subject to WalletConnect's API.                     |
+| `@soroban-resurrect/adapter-walletkit`     | Active, supported    | Stellar Wallets Kit integration, subject to its API.                           |
+| `@soroban-resurrect/adapter-xbull`         | Active, supported    | xBull wallet integration, subject to xBull's API.                              |
+| `create-soroban-resurrect`                 | Active, supported    | Project scaffolding and its generated template.                                |
+| `@soroban-resurrect/testing`               | Preview, best-effort | Test utilities; not a production runtime dependency or stable application API. |
 
 The support list is reviewed when packages are added, archived, or transferred.
 An adapter may be marked best-effort or retired if its upstream wallet is

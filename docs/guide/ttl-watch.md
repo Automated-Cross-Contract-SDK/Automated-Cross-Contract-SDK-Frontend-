@@ -374,11 +374,11 @@ sequenceDiagram
 
 **Reconciling by status:**
 
-| `result.status` | Actions that may have occurred              | Reconciliation                                              |
-| --------------- | ------------------------------------------- | ----------------------------------------------------------- |
-| `aborted`       | Nothing signed or submitted.                | Safe to retry with a new estimate.                          |
-| `failed`        | Depends on the stage — see below.           | Re-query TTL before retrying.                               |
-| `submitted`     | Transaction included; `transactionHash` set. | None; the extension is applied.                             |
+| `result.status` | Actions that may have occurred               | Reconciliation                     |
+| --------------- | -------------------------------------------- | ---------------------------------- |
+| `aborted`       | Nothing signed or submitted.                 | Safe to retry with a new estimate. |
+| `failed`        | Depends on the stage — see below.            | Re-query TTL before retrying.      |
+| `submitted`     | Transaction included; `transactionHash` set. | None; the extension is applied.    |
 
 For a `failed` result, distinguish the stage from the error:
 

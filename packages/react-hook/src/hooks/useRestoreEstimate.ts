@@ -1,16 +1,17 @@
-import { useCallback, useRef, useState } from 'react';
-import type { RestoreCostEstimate } from '@soroban-resurrect/sdk';
-import { useResolvedResurrect } from './useResolvedResurrect.js';
+import { useCallback, useRef, useState } from 'react'
+import type { RestoreCostEstimate } from '@soroban-resurrect/sdk'
+import type { Transaction } from '@stellar/stellar-sdk'
+import { useResolvedResurrect, type ResolvedResurrectOptions } from '../useResolvedResurrect.js'
 
-export interface UseRestoreEstimateOptions {
+export interface UseRestoreEstimateOptions extends ResolvedResurrectOptions {
   /**
    * Optional callback invoked whenever an estimate resolves successfully.
    */
-  onSuccess?: (estimate: RestoreCostEstimate) => void;
+  onSuccess?: (estimate: RestoreCostEstimate) => void
   /**
    * Optional callback invoked whenever an estimate fails.
    */
-  onError?: (error: string) => void;
+  onError?: (error: string) => void
 }
 
 export interface UseRestoreEstimateResult {
@@ -18,23 +19,23 @@ export interface UseRestoreEstimateResult {
    * Estimate the restore cost for a transaction. Resolves with the
    * `RestoreCostEstimate` produced by `estimateRestoreCost`.
    */
-  estimateFor: (tx: unknown) => Promise<RestoreCostEstimate>;
+  estimateFor: (tx: Transaction) => Promise<RestoreCostEstimate>
   /**
    * The most recent successful estimate. Survives failed calls.
    */
-  estimate: RestoreCostEstimate | null;
+  estimate: RestoreCostEstimate | null
   /**
    * True only while a call is in flight.
    */
-  isEstimating: boolean;
+  isEstimating: boolean
   /**
    * The most recent error message, or null when there is none.
    */
-  error: string | null;
+  error: string | null
   /**
    * Clear the current estimate and error state.
    */
-  reset: () => void;
+  reset: () => void
 }
 
 /**
@@ -46,49 +47,50 @@ export interface UseRestoreEstimateResult {
 export function useRestoreEstimate(
   options: UseRestoreEstimateOptions = {},
 ): UseRestoreEstimateResult {
-  const resurrect = useResolvedResurrect();
-  const [estimate, setEstimate] = useState<RestoreCostEstimate | null>(null);
-  const [isEstimating, setIsEstimating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const resurrect = useResolvedResurrect(options)
+  const [estimate, setEstimate] = useState<RestoreCostEstimate | null>(null)
+  const [isEstimating, setIsEstimating] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   // Track the latest in-flight call so concurrent calls do not leak state.
-  const callIdRef = useRef(0);
-  const optionsRef = useRef(options);
-  optionsRef.current = options;
+  const callIdRef = useRef(0)
+  const optionsRef = useRef(options)
+  optionsRef.current = options
 
   const estimateFor = useCallback(
-    async (tx: unknown): Promise<RestoreCostEstimate> => {
-      const callId = ++callIdRef.current;
-      setIsEstimating(true);
-      setError(null);
+    async (tx: Transaction): Promise<RestoreCostEstimate> => {
+      const callId = ++callIdRef.current
+      setIsEstimating(true)
+      setError(null)
 
       try {
-        const result = await resurrect.estimateRestoreCost(tx as never);
+        if (!resurrect) throw new Error('SorobanResurrect is not initialized yet')
+        const result = await resurrect.estimateRestoreCost(tx)
         if (callId === callIdRef.current) {
-          setEstimate(result);
-          setIsEstimating(false);
+          setEstimate(result)
+          setIsEstimating(false)
         }
-        optionsRef.current.onSuccess?.(result);
-        return result;
+        optionsRef.current.onSuccess?.(result)
+        return result
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = err instanceof Error ? err.message : String(err)
         if (callId === callIdRef.current) {
-          setError(message);
-          setIsEstimating(false);
+          setError(message)
+          setIsEstimating(false)
         }
-        optionsRef.current.onError?.(message);
-        throw err;
+        optionsRef.current.onError?.(message)
+        throw err
       }
     },
     [resurrect],
-  );
+  )
 
   const reset = useCallback(() => {
-    callIdRef.current += 1;
-    setEstimate(null);
-    setError(null);
-    setIsEstimating(false);
-  }, []);
+    callIdRef.current += 1
+    setEstimate(null)
+    setError(null)
+    setIsEstimating(false)
+  }, [])
 
-  return { estimateFor, estimate, isEstimating, error, reset };
+  return { estimateFor, estimate, isEstimating, error, reset }
 }

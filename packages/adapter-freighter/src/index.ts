@@ -1,13 +1,20 @@
-import {
-  isConnected as freighterIsConnected,
-  requestAccess,
-  getAddress,
-  getNetwork as freighterGetNetwork,
-  signTransaction as freighterSignTransaction,
-  signAuthEntry as freighterSignAuthEntry,
-} from '@stellar/freighter-api'
+import * as walletApiModule from '@stellar/freighter-api'
 import { WalletError, type WalletAdapter, type WalletCapabilities } from '@soroban-resurrect/sdk'
 import { asStellarPublicKey, asXdrBase64 } from '@soroban-resurrect/sdk'
+
+// @stellar/freighter-api is CommonJS: native ESM (Node/SSR) only exposes it through
+// `default`, while bundlers expose named exports.
+const walletApi: typeof walletApiModule =
+  ('default' in walletApiModule && (walletApiModule.default as typeof walletApiModule)) ||
+  walletApiModule
+const {
+  isConnected: freighterIsConnected,
+  requestAccess,
+  getAddress,
+  getNetwork: freighterGetNetwork,
+  signTransaction: freighterSignTransaction,
+  signAuthEntry: freighterSignAuthEntry,
+} = walletApi
 
 /** Network options accepted when signing with Freighter. */
 export interface FreighterSignOptions {

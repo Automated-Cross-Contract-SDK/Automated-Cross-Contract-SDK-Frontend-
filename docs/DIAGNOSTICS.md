@@ -15,58 +15,64 @@ The SDK emits structured events for workflow stages that can be observed without
 ```typescript
 interface DiagnosticEvent {
   // Stable, immutable event name
-  name: 'restore.started' | 'restore.completed' | 'restore.failed' | 'restore.step' | 'network.error' | 'auth.required';
-  
+  name:
+    | 'restore.started'
+    | 'restore.completed'
+    | 'restore.failed'
+    | 'restore.step'
+    | 'network.error'
+    | 'auth.required'
+
   // Workflow-level correlation ID (see Correlation IDs)
-  workflowId: string;
-  
+  workflowId: string
+
   // Event-level timestamp
-  timestamp: number; // milliseconds since epoch
-  
+  timestamp: number // milliseconds since epoch
+
   // Safe metadata (no secrets, addresses, XDR)
   metadata: {
-    stage?: 'initialization' | 'recovery' | 'validation' | 'finalization';
-    errorCode?: string; // e.g., 'AUTH_FAILED', 'NETWORK_TIMEOUT'
-    durationMs?: number; // for completion events
-    stepName?: string; // for restore.step events
-  };
+    stage?: 'initialization' | 'recovery' | 'validation' | 'finalization'
+    errorCode?: string // e.g., 'AUTH_FAILED', 'NETWORK_TIMEOUT'
+    durationMs?: number // for completion events
+    stepName?: string // for restore.step events
+  }
 }
 ```
 
 ### Listening to Events
 
 ```typescript
-import { SDK } from '@sdk/core';
+import { SDK } from '@sdk/core'
 
-const sdk = new SDK();
+const sdk = new SDK()
 
 // Subscribe to all diagnostic events
 sdk.on('diagnostic', (event: DiagnosticEvent) => {
-  console.log(`${event.name} [${event.workflowId}]:`, event.metadata);
-  
+  console.log(`${event.name} [${event.workflowId}]:`, event.metadata)
+
   // Safe to use in logging, metrics, error tracking
   // No sensitive data included
-});
+})
 
 // Or filter by event type
 sdk.on('restore.failed', (event: DiagnosticEvent) => {
   logger.error(`Restore failed: ${event.metadata.errorCode}`, {
     workflowId: event.workflowId,
     errorCode: event.metadata.errorCode,
-  });
-});
+  })
+})
 ```
 
 ### Event Types & Meanings
 
-| Event | When Fired | Metadata |
-|---|---|---|
-| `restore.started` | Restore workflow begins | `stage: 'initialization'` |
-| `restore.step` | Each major step completes | `stepName`, `durationMs`, `stage` |
-| `restore.completed` | Workflow succeeds | `stage: 'finalization'`, `durationMs` |
-| `restore.failed` | Workflow fails | `errorCode`, `stage` |
-| `network.error` | Network request fails | `errorCode` (e.g., `'TIMEOUT'`, `'UNAVAILABLE'`) |
-| `auth.required` | User action needed | (depends on auth type) |
+| Event               | When Fired                | Metadata                                         |
+| ------------------- | ------------------------- | ------------------------------------------------ |
+| `restore.started`   | Restore workflow begins   | `stage: 'initialization'`                        |
+| `restore.step`      | Each major step completes | `stepName`, `durationMs`, `stage`                |
+| `restore.completed` | Workflow succeeds         | `stage: 'finalization'`, `durationMs`            |
+| `restore.failed`    | Workflow fails            | `errorCode`, `stage`                             |
+| `network.error`     | Network request fails     | `errorCode` (e.g., `'TIMEOUT'`, `'UNAVAILABLE'`) |
+| `auth.required`     | User action needed        | (depends on auth type)                           |
 
 ---
 
@@ -86,23 +92,21 @@ Example: `workflow_a1b2c3d4e5f6g7h8`
 ### Accessing Workflow ID
 
 ```typescript
-import { SDK } from '@sdk/core';
+import { SDK } from '@sdk/core'
 
-const sdk = new SDK();
+const sdk = new SDK()
 
 // Get workflow ID when restore starts
 sdk.on('restore.started', (event) => {
-  const workflowId = event.workflowId;
-  
+  const workflowId = event.workflowId
+
   // Log alongside application context
-  app.log('Restore started', { workflowId, userId: user.id });
-});
+  app.log('Restore started', { workflowId, userId: user.id })
+})
 
 // Or access from restore function return value
-const result = await sdk.restore({
-  /* options */
-});
-console.log('Workflow ID:', result.workflowId);
+const result = await sdk.restore({/* options */})
+console.log('Workflow ID:', result.workflowId)
 ```
 
 ### Using in Logs
@@ -114,15 +118,15 @@ app.log('user_action', {
   userId: user.id,
   workflowId: event.workflowId, // ← Include this
   timestamp: new Date().toISOString(),
-});
+})
 
 // Correlate with SDK logs
 sdk.on('restore.completed', (event) => {
   app.log('restore_success', {
     workflowId: event.workflowId, // ← Same ID
     durationMs: event.metadata.durationMs,
-  });
-});
+  })
+})
 ```
 
 ### In Support Requests
@@ -147,14 +151,14 @@ Generate a redacted report for support requests without exposing secrets.
 ### Creating a Snapshot
 
 ```typescript
-import { SDK } from '@sdk/core';
+import { SDK } from '@sdk/core'
 
-const sdk = new SDK();
+const sdk = new SDK()
 
 // Create snapshot (safe to share with support)
-const snapshot = sdk.getDiagnosticSnapshot();
+const snapshot = sdk.getDiagnosticSnapshot()
 
-console.log(snapshot);
+console.log(snapshot)
 ```
 
 ### Snapshot Contents
@@ -185,6 +189,7 @@ console.log(snapshot);
 ### What's Redacted
 
 The snapshot **intentionally excludes**:
+
 - Wallet addresses ❌
 - Transaction XDR ❌
 - Private keys or secrets ❌
@@ -194,8 +199,8 @@ The snapshot **intentionally excludes**:
 ### Sharing with Support
 
 ```typescript
-const snapshot = sdk.getDiagnosticSnapshot();
-const report = JSON.stringify(snapshot, null, 2);
+const snapshot = sdk.getDiagnosticSnapshot()
+const report = JSON.stringify(snapshot, null, 2)
 
 // Safe to email or paste in support ticket
 // No secrets included
@@ -233,7 +238,7 @@ function RestoreUI() {
     sdk.on('restore.started', (event) => {
       setStatus('restoring');
       setWorkflowId(event.workflowId);
-      
+
       // Log for debugging
       console.log('Restore started:', event.workflowId);
     });
@@ -262,10 +267,10 @@ function RestoreUI() {
 ### Logging/Monitoring
 
 ```typescript
-import { SDK } from '@sdk/core';
-import { logger } from './logging';
+import { SDK } from '@sdk/core'
+import { logger } from './logging'
 
-const sdk = new SDK();
+const sdk = new SDK()
 
 // Send events to monitoring service
 sdk.on('diagnostic', (event) => {
@@ -274,21 +279,21 @@ sdk.on('diagnostic', (event) => {
     workflowId: event.workflowId,
     metadata: event.metadata,
     timestamp: event.timestamp,
-  });
-});
+  })
+})
 
 // Metrics: track restore duration
 sdk.on('restore.completed', (event) => {
-  logger.metric('restore_duration_ms', event.metadata.durationMs || 0);
-});
+  logger.metric('restore_duration_ms', event.metadata.durationMs || 0)
+})
 
 // Alerting: notify on failures
 sdk.on('restore.failed', (event) => {
   logger.alert('SDK restore failed', {
     workflowId: event.workflowId,
     errorCode: event.metadata.errorCode,
-  });
-});
+  })
+})
 ```
 
 ---
@@ -318,18 +323,20 @@ sdk.on('restore.failed', (event) => {
 ### "No diagnostic events received"
 
 1. Ensure you're listening to the right event:
+
    ```typescript
-   sdk.on('diagnostic', (event) => console.log(event));
+   sdk.on('diagnostic', (event) => console.log(event))
    ```
 
 2. Check SDK version (2.1.0+):
+
    ```typescript
-   console.log(sdk.version);
+   console.log(sdk.version)
    ```
 
 3. Verify diagnostics are enabled (default: enabled):
    ```typescript
-   const sdk = new SDK({ diagnostics: true });
+   const sdk = new SDK({ diagnostics: true })
    ```
 
 ### "Snapshot is empty"

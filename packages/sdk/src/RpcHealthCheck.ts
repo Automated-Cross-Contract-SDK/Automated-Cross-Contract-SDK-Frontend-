@@ -5,7 +5,7 @@
  * returning typed results suitable for support tooling and diagnostic dashboards.
  */
 
-import type { RpcUrl } from './branded-types.js';
+import type { RpcUrl } from './branded-types.js'
 
 /**
  * Result of a single RPC method availability check.
@@ -14,16 +14,16 @@ import type { RpcUrl } from './branded-types.js';
  */
 export interface RpcMethodCheckResult {
   /** Name of the RPC method (e.g., 'simulateTransaction'). */
-  method: string;
+  method: string
 
   /** Whether the method is available (responded without error). */
-  available: boolean;
+  available: boolean
 
   /** Error message if the check failed (not full error, summary only). */
-  error?: string;
+  error?: string
 
   /** Response time in milliseconds (if available). */
-  responseTimeMs?: number;
+  responseTimeMs?: number
 }
 
 /**
@@ -33,19 +33,19 @@ export interface RpcMethodCheckResult {
  */
 export interface RpcEndpointCheckResult {
   /** The RPC endpoint URL that was checked. */
-  endpoint: string;
+  endpoint: string
 
   /** Whether the endpoint is reachable (no connection error). */
-  reachable: boolean;
+  reachable: boolean
 
   /** HTTP status code if the endpoint responded. */
-  statusCode?: number;
+  statusCode?: number
 
   /** Error message if unreachable (e.g., connection timeout). */
-  error?: string;
+  error?: string
 
   /** Response time in milliseconds (if reachable). */
-  responseTimeMs?: number;
+  responseTimeMs?: number
 }
 
 /**
@@ -55,25 +55,25 @@ export interface RpcEndpointCheckResult {
  */
 export interface RpcHealthCheckResult {
   /** Timestamp when the check was performed (ISO 8601). */
-  timestamp: string;
+  timestamp: string
 
   /** Overall health status. */
-  healthy: boolean;
+  healthy: boolean
 
   /** Endpoint reachability check. */
-  endpoint: RpcEndpointCheckResult;
+  endpoint: RpcEndpointCheckResult
 
   /** Results for required Soroban RPC methods. */
-  requiredMethods: RpcMethodCheckResult[];
+  requiredMethods: RpcMethodCheckResult[]
 
   /** Optional additional methods to check. */
-  optionalMethods?: RpcMethodCheckResult[];
+  optionalMethods?: RpcMethodCheckResult[]
 
   /** Recommendations for next steps (if any issues detected). */
-  recommendations?: string[];
+  recommendations?: string[]
 
   /** Summary message. */
-  summary: string;
+  summary: string
 }
 
 /**
@@ -89,19 +89,19 @@ export async function checkRpcEndpointReachability(
   rpcUrl: string | RpcUrl,
   timeoutMs: number = 5000,
 ): Promise<RpcEndpointCheckResult> {
-  const endpoint = String(rpcUrl);
-  const startTime = Date.now();
+  const endpoint = String(rpcUrl)
+  const startTime = Date.now()
 
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
 
     const response = await fetch(endpoint, {
       method: 'HEAD',
       signal: controller.signal,
-    }).catch(() => undefined);
+    }).catch(() => undefined)
 
-    clearTimeout(timeoutId);
+    clearTimeout(timeoutId)
 
     if (!response) {
       return {
@@ -109,7 +109,7 @@ export async function checkRpcEndpointReachability(
         reachable: false,
         error: 'No response (connection timeout or refused)',
         responseTimeMs: Date.now() - startTime,
-      };
+      }
     }
 
     return {
@@ -117,16 +117,15 @@ export async function checkRpcEndpointReachability(
       reachable: true,
       statusCode: response.status,
       responseTimeMs: Date.now() - startTime,
-    };
+    }
   } catch (err) {
-    const errorMsg =
-      err instanceof Error ? err.message : 'Unknown network error';
+    const errorMsg = err instanceof Error ? err.message : 'Unknown network error'
     return {
       endpoint,
       reachable: false,
       error: errorMsg,
       responseTimeMs: Date.now() - startTime,
-    };
+    }
   }
 }
 
@@ -147,11 +146,11 @@ export async function checkRpcMethod(
   method: string,
   timeoutMs: number = 5000,
 ): Promise<RpcMethodCheckResult> {
-  const startTime = Date.now();
+  const startTime = Date.now()
 
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
 
     const body =
       method === 'getLedgerEntries' || method === 'getLatestLedger'
@@ -166,7 +165,7 @@ export async function checkRpcMethod(
             id: 1,
             method,
             params: [],
-          });
+          })
 
     const response = await fetch(String(rpcUrl), {
       method: 'POST',
@@ -174,12 +173,12 @@ export async function checkRpcMethod(
       body,
       signal: controller.signal,
     }).catch((err) => {
-      throw new Error(`Fetch failed: ${err.message}`);
-    });
+      throw new Error(`Fetch failed: ${err.message}`)
+    })
 
-    clearTimeout(timeoutId);
+    clearTimeout(timeoutId)
 
-    const responseText = await response.text();
+    const responseText = await response.text()
 
     if (!response.ok && response.status !== 400) {
       return {
@@ -187,43 +186,43 @@ export async function checkRpcMethod(
         available: false,
         error: `HTTP ${response.status}`,
         responseTimeMs: Date.now() - startTime,
-      };
+      }
     }
 
     try {
-      const json = JSON.parse(responseText);
+      const json = JSON.parse(responseText)
 
-      const hasError = json.error || responseText.includes('methodNotFound');
+      const hasError = json.error || responseText.includes('methodNotFound')
       if (hasError) {
         return {
           method,
           available: false,
           error: json.error?.message || 'Method not found or unsupported',
           responseTimeMs: Date.now() - startTime,
-        };
+        }
       }
 
       return {
         method,
         available: true,
         responseTimeMs: Date.now() - startTime,
-      };
+      }
     } catch (parseErr) {
       return {
         method,
         available: false,
         error: 'Invalid JSON response',
         responseTimeMs: Date.now() - startTime,
-      };
+      }
     }
   } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+    const errorMsg = err instanceof Error ? err.message : 'Unknown error'
     return {
       method,
       available: false,
       error: errorMsg,
       responseTimeMs: Date.now() - startTime,
-    };
+    }
   }
 }
 
@@ -252,7 +251,7 @@ export async function checkRpcHealth(
   optionalMethods: string[] = [],
   timeoutMs: number = 5000,
 ): Promise<RpcHealthCheckResult> {
-  const timestamp = new Date().toISOString();
+  const timestamp = new Date().toISOString()
 
   const requiredMethods = [
     'getLatestLedger',
@@ -261,61 +260,59 @@ export async function checkRpcHealth(
     'simulateTransaction',
     'sendTransaction',
     'getLedgerEntries',
-  ];
+  ]
 
-  const endpointCheck = await checkRpcEndpointReachability(rpcUrl, timeoutMs);
+  const endpointCheck = await checkRpcEndpointReachability(rpcUrl, timeoutMs)
 
-  let requiredResults: RpcMethodCheckResult[] = [];
-  let optionalResults: RpcMethodCheckResult[] = [];
-  let healthy = false;
+  let requiredResults: RpcMethodCheckResult[] = []
+  let optionalResults: RpcMethodCheckResult[] = []
+  let healthy = false
 
   if (endpointCheck.reachable) {
     requiredResults = await Promise.all(
       requiredMethods.map((m) => checkRpcMethod(rpcUrl, m, timeoutMs)),
-    );
+    )
 
     if (optionalMethods.length > 0) {
       optionalResults = await Promise.all(
         optionalMethods.map((m) => checkRpcMethod(rpcUrl, m, timeoutMs)),
-      );
+      )
     }
 
-    const allRequiredAvailable = requiredResults.every((r) => r.available);
-    healthy = allRequiredAvailable;
+    const allRequiredAvailable = requiredResults.every((r) => r.available)
+    healthy = allRequiredAvailable
   }
 
-  const recommendations: string[] = [];
+  const recommendations: string[] = []
 
   if (!endpointCheck.reachable) {
     recommendations.push(
       `Endpoint is unreachable: ${endpointCheck.error}. Check network connectivity and RPC URL.`,
-    );
+    )
   } else if (endpointCheck.statusCode && endpointCheck.statusCode >= 500) {
     recommendations.push(
       `RPC endpoint returning server error (HTTP ${endpointCheck.statusCode}). Try again in a moment.`,
-    );
+    )
   }
 
-  const unavailableMethods = requiredResults.filter((r) => !r.available);
+  const unavailableMethods = requiredResults.filter((r) => !r.available)
   if (unavailableMethods.length > 0) {
-    const methodNames = unavailableMethods.map((r) => r.method).join(', ');
+    const methodNames = unavailableMethods.map((r) => r.method).join(', ')
     recommendations.push(
       `Required methods unavailable: ${methodNames}. Update SDK or contact RPC provider.`,
-    );
+    )
   }
 
-  const slowMethods = requiredResults.filter(
-    (r) => r.responseTimeMs && r.responseTimeMs > 5000,
-  );
+  const slowMethods = requiredResults.filter((r) => r.responseTimeMs && r.responseTimeMs > 5000)
   if (slowMethods.length > 0) {
     recommendations.push(
       `Some RPC methods are slow (>5s). Network latency or RPC congestion may affect performance.`,
-    );
+    )
   }
 
   const summary = healthy
     ? 'RPC endpoint is healthy and all required methods are available.'
-    : 'RPC endpoint has issues detected. See recommendations and required method results.';
+    : 'RPC endpoint has issues detected. See recommendations and required method results.'
 
   return {
     timestamp,
@@ -325,5 +322,5 @@ export async function checkRpcHealth(
     ...(optionalResults.length > 0 ? { optionalMethods: optionalResults } : {}),
     ...(recommendations.length > 0 ? { recommendations } : {}),
     summary,
-  };
+  }
 }

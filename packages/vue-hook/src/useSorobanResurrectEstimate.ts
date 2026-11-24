@@ -1,11 +1,4 @@
-import {
-  ref,
-  watch,
-  onMounted,
-  toValue,
-  type Ref,
-  type MaybeRefOrGetter,
-} from 'vue'
+import { ref, watch, onMounted, toValue, type Ref, type MaybeRefOrGetter } from 'vue'
 import { RESTORE_FEE_MULTIPLIER } from '@soroban-resurrect/sdk'
 import { rpc, type Transaction } from '@stellar/stellar-sdk'
 import { resolveResurrect, type ResolveResurrectOptions } from './resolveResurrect.js'

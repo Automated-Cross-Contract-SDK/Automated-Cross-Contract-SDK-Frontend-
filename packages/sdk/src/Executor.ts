@@ -24,10 +24,7 @@ import {
 } from './types.js'
 import type { ResurrectErrorCode } from './errors.js'
 import { IncompleteFootprintError } from './SimulationFootprint.js'
-import {
-  OriginalTransactionExpiredError,
-  ResurrectError,
-} from './errors.js'
+import { OriginalTransactionExpiredError, ResurrectError } from './errors.js'
 import {
   isRestoreResponse,
   isSuccessResponse,
@@ -131,11 +128,7 @@ async function validateWalletNetwork(
 }
 
 function walletErrorMessage(error: unknown): string {
-  if (
-    error instanceof Error &&
-    'code' in error &&
-    error.code === 'USER_REJECTED'
-  ) {
+  if (error instanceof Error && 'code' in error && error.code === 'USER_REJECTED') {
     return 'Signature request declined'
   }
   return error instanceof Error ? error.message : String(error)
@@ -444,13 +437,22 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
 
       throwIfAborted(signal)
       onSubmittingRestore?.()
-      const restoreResult = await runWithSignal(() => server.sendTransaction(signedRestoreTx), signal)
+      const restoreResult = await runWithSignal(
+        () => server.sendTransaction(signedRestoreTx),
+        signal,
+      )
       restoreTxHash = asTxHash(restoreResult.hash)
       onRestoreSubmitted?.(restoreTxHash)
 
-      const restoreStatus = await waitForTransaction(server, restoreTxHash, pollInterval, pollTimeout, {
-        signal,
-      })
+      const restoreStatus = await waitForTransaction(
+        server,
+        restoreTxHash,
+        pollInterval,
+        pollTimeout,
+        {
+          signal,
+        },
+      )
 
       if (restoreStatus.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
         const err = 'Restore transaction failed'
@@ -493,11 +495,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
           }
         }
         if (!replacementBounds) {
-          const result = expiredRebuildResult(
-            originallyExpired,
-            archivedKeys.length,
-            restoreTxHash,
-          )
+          const result = expiredRebuildResult(originallyExpired, archivedKeys.length, restoreTxHash)
           onRestoreFailed?.(result.error ?? 'Original transaction time bounds have expired')
           return result
         }
@@ -523,9 +521,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
         )
         throwIfAborted(signal)
         onSigningOriginal?.()
-        const originalWalletOptions = signal
-          ? { networkPassphrase, signal }
-          : { networkPassphrase }
+        const originalWalletOptions = signal ? { networkPassphrase, signal } : { networkPassphrase }
         const signedOriginalXdr = await runWithSignal(
           () => wallet.signTransaction(asXdrBase64(preparedTx.toXDR()), originalWalletOptions),
           signal,
@@ -546,10 +542,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
           }
         }
 
-        originalResult = await runWithSignal(
-          () => server.sendTransaction(signedOriginalTx),
-          signal,
-        )
+        originalResult = await runWithSignal(() => server.sendTransaction(signedOriginalTx), signal)
 
         if (!isTxBadSeqError(originalResult) || sequenceRetries >= maxSequenceRetries) {
           break
@@ -824,7 +817,10 @@ async function waitForTransactionWithCallbacks(
     await new Promise<void>((resolve) => runtime.setTimeout(resolve, jitter))
   }
 
-  throw new ResurrectError('CONFIRMATION_TIMEOUT', `Transaction ${hash} did not complete within ${pollTimeoutMs}ms`)
+  throw new ResurrectError(
+    'CONFIRMATION_TIMEOUT',
+    `Transaction ${hash} did not complete within ${pollTimeoutMs}ms`,
+  )
 }
 
 /** Parameters for {@link restoreKeys}. */
@@ -915,10 +911,7 @@ export async function restoreKeys(params: RestoreKeysParams): Promise<ResurrectR
       .setTimeout(30)
       .build()
 
-    const simResponse = await runWithSignal(
-      () => server.simulateTransaction(placeholderTx),
-      signal,
-    )
+    const simResponse = await runWithSignal(() => server.simulateTransaction(placeholderTx), signal)
     if (isErrorResponse(simResponse)) {
       return {
         success: false,

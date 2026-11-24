@@ -70,7 +70,11 @@ describe('WalletConnectAdapter', () => {
     session.namespaces.stellar.methods = []
     expect(
       () =>
-        new WalletConnectAdapter({ client: { request: vi.fn() }, session, networkPassphrase: TESTNET }),
+        new WalletConnectAdapter({
+          client: { request: vi.fn() },
+          session,
+          networkPassphrase: TESTNET,
+        }),
     ).toThrow(/stellar_signXDR/)
   })
 

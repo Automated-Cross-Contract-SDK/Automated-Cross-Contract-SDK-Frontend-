@@ -7,11 +7,7 @@ import {
   type Ref,
   type MaybeRefOrGetter,
 } from 'vue'
-import type {
-  LedgerEntryTTLInfo,
-  ResurrectResult,
-  WalletAdapter,
-} from '@soroban-resurrect/sdk'
+import type { LedgerEntryTTLInfo, ResurrectResult, WalletAdapter } from '@soroban-resurrect/sdk'
 import type { Transaction, xdr } from '@stellar/stellar-sdk'
 import { resolveResurrect, type ResolveResurrectOptions } from './resolveResurrect.js'
 
@@ -54,10 +50,7 @@ export interface UseSorobanResurrectWatcherReturn {
    * Trigger a TTL extension. Uses `options.onExtend` when provided, otherwise
    * `submitWithRestore({ transaction, wallet })`. Re-polls on success.
    */
-  extend: (
-    transaction?: Transaction,
-    wallet?: WalletAdapter,
-  ) => Promise<ResurrectResult | null>
+  extend: (transaction?: Transaction, wallet?: WalletAdapter) => Promise<ResurrectResult | null>
 }
 
 /**
@@ -77,11 +70,7 @@ export function useSorobanResurrectWatcher(
   keys: MaybeRefOrGetter<xdr.LedgerKey[]>,
   options: UseSorobanResurrectWatcherOptions,
 ): UseSorobanResurrectWatcherReturn {
-  const {
-    intervalMs = 30_000,
-    ledgersThreshold = 100_000,
-    autoStart = true,
-  } = options
+  const { intervalMs = 30_000, ledgersThreshold = 100_000, autoStart = true } = options
 
   const resurrect = resolveResurrect(options)
 
@@ -99,10 +88,7 @@ export function useSorobanResurrectWatcher(
     const instance = resurrect.value
     if (!instance) return
     try {
-      const entries = await instance.getExpiringSoonEntries(
-        toValue(keys),
-        ledgersThreshold,
-      )
+      const entries = await instance.getExpiringSoonEntries(toValue(keys), ledgersThreshold)
       if (disposed) return
       expiringSoon.value = entries
       lastCheckedAt.value = Date.now()

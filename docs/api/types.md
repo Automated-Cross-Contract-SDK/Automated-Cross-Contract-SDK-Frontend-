@@ -34,26 +34,26 @@ interface SorobanResurrectConfig {
 }
 ```
 
-| Field                     | Description                                                                 |
-| -------------------------- | ------------------------------------------------------------------------------ |
-| `rpcUrl`                   | URL of the Soroban RPC endpoint.                                               |
-| `networkPassphrase`        | Network passphrase (defaults to Testnet).                                      |
-| `pollIntervalMs`           | Polling interval in ms when waiting for transaction confirmation.              |
-| `pollTimeoutMs`             | Timeout in ms when waiting for transaction confirmation.                       |
-| `simulationTimeoutMs`      | Maximum time in ms for simulation; defaults to `rpcTimeoutMs` (30 seconds unless configured). |
-| `walletSigningTimeoutMs`   | Maximum time in ms for each wallet signature; defaults to 120 seconds.         |
-| `restoreConfirmationTimeoutMs` | Maximum time in ms to wait for restore confirmation; defaults to `pollTimeoutMs`. |
-| `originalSubmissionTimeoutMs` | Maximum time in ms to submit the original transaction; defaults to `rpcTimeoutMs` (30 seconds unless configured). |
-| `restoreFeeMultiplier`     | Multiplier applied to `minResourceFee` when building a restore transaction.    |
-| `maxRestoreFeeStroops`     | Upper bound on the restore fee; accepts a non-negative safe integer or decimal integer string. |
-| `maxSequenceRetries`       | Number of times a restore transaction is retried after a sequence-number failure. |
-| `archiveDetectionMethod`   | Method for detecting archived keys: `'simulation'` (default) or `'direct'`.    |
-| `archiveDetectionChunkSize` | Ledger keys per `getLedgerEntries` request during `'direct'` detection.       |
-| `archiveDetectionConcurrency` | Chunk requests kept in flight at once during `'direct'` detection.          |
-| `maxBatchSize` | Maximum items accepted by `detectArchivedKeysBatch`, `submitBatchWithRestore`, and `restoreKeys`. Oversized batches fail with `BATCH_SIZE_EXCEEDED`. |
-| `restoreTxMemo` | Optional Stellar memo attached to restore transactions. Only text and none memo types are accepted; text is limited to 28 UTF-8 bytes. |
-| `restoreTxMemoText` | Convenience text memo for restore transactions, limited to 28 UTF-8 bytes (not 28 characters). May also be overridden per `submitWithRestore` call. |
-| `logger` | Optional logger. Hardware-signing warnings are sent through its `warn` method. |
+| Field                          | Description                                                                                                                                          |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rpcUrl`                       | URL of the Soroban RPC endpoint.                                                                                                                     |
+| `networkPassphrase`            | Network passphrase (defaults to Testnet).                                                                                                            |
+| `pollIntervalMs`               | Polling interval in ms when waiting for transaction confirmation.                                                                                    |
+| `pollTimeoutMs`                | Timeout in ms when waiting for transaction confirmation.                                                                                             |
+| `simulationTimeoutMs`          | Maximum time in ms for simulation; defaults to `rpcTimeoutMs` (30 seconds unless configured).                                                        |
+| `walletSigningTimeoutMs`       | Maximum time in ms for each wallet signature; defaults to 120 seconds.                                                                               |
+| `restoreConfirmationTimeoutMs` | Maximum time in ms to wait for restore confirmation; defaults to `pollTimeoutMs`.                                                                    |
+| `originalSubmissionTimeoutMs`  | Maximum time in ms to submit the original transaction; defaults to `rpcTimeoutMs` (30 seconds unless configured).                                    |
+| `restoreFeeMultiplier`         | Multiplier applied to `minResourceFee` when building a restore transaction.                                                                          |
+| `maxRestoreFeeStroops`         | Upper bound on the restore fee; accepts a non-negative safe integer or decimal integer string.                                                       |
+| `maxSequenceRetries`           | Number of times a restore transaction is retried after a sequence-number failure.                                                                    |
+| `archiveDetectionMethod`       | Method for detecting archived keys: `'simulation'` (default) or `'direct'`.                                                                          |
+| `archiveDetectionChunkSize`    | Ledger keys per `getLedgerEntries` request during `'direct'` detection.                                                                              |
+| `archiveDetectionConcurrency`  | Chunk requests kept in flight at once during `'direct'` detection.                                                                                   |
+| `maxBatchSize`                 | Maximum items accepted by `detectArchivedKeysBatch`, `submitBatchWithRestore`, and `restoreKeys`. Oversized batches fail with `BATCH_SIZE_EXCEEDED`. |
+| `restoreTxMemo`                | Optional Stellar memo attached to restore transactions. Only text and none memo types are accepted; text is limited to 28 UTF-8 bytes.               |
+| `restoreTxMemoText`            | Convenience text memo for restore transactions, limited to 28 UTF-8 bytes (not 28 characters). May also be overridden per `submitWithRestore` call.  |
+| `logger`                       | Optional logger. Hardware-signing warnings are sent through its `warn` method.                                                                       |
 
 The memo limit is measured after UTF-8 encoding. For example, fourteen `é`
 characters use 28 bytes and fit, while fifteen use 30 bytes and are rejected
@@ -90,11 +90,11 @@ transport failure during submission can occur after the server accepted the
 transaction, retries resend the same signed transaction bytes rather than
 rebuilding or re-signing it.
 
-| Option | Default when `retry` is supplied | Meaning |
-| --- | ---: | --- |
-| `maxRetries` | `3` | Number of additional RPC attempts; `0` disables retries for this request. |
-| `baseDelayMs` | `250` | Initial exponential-backoff delay. |
-| `maxDelayMs` | `5000` | Maximum delay between attempts. |
+| Option        | Default when `retry` is supplied | Meaning                                                                   |
+| ------------- | -------------------------------: | ------------------------------------------------------------------------- |
+| `maxRetries`  |                              `3` | Number of additional RPC attempts; `0` disables retries for this request. |
+| `baseDelayMs` |                            `250` | Initial exponential-backoff delay.                                        |
+| `maxDelayMs`  |                           `5000` | Maximum delay between attempts.                                           |
 
 ### Lifecycle events
 
@@ -224,13 +224,13 @@ because simulation-only detection may not perform a separate ledger query.
 
 One result from `queryLedgerTTL`, `queryLedgerEntryTTL`, or a contract scan.
 
-| Field | Meaning |
-| --- | --- |
-| `status` | `'live'` when the ledger returned a TTL, otherwise `'unavailable'`. |
-| `unavailableReason` | `'missing'`, `'expired'`, `'unsupported'`, `'rpc_error'`, or `'ttl_unavailable'`. |
-| `isArchived` | `true` only for confirmed missing or expired entries; RPC failures and unsupported keys are never treated as archived. |
-| `liveUntilLedger` / `ttlLedgers` | Expiration sequence and remaining ledgers when available. |
-| `entryType` | `'contractData'`, `'contractCode'`, or `'other'`. |
+| Field                            | Meaning                                                                                                                |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `status`                         | `'live'` when the ledger returned a TTL, otherwise `'unavailable'`.                                                    |
+| `unavailableReason`              | `'missing'`, `'expired'`, `'unsupported'`, `'rpc_error'`, or `'ttl_unavailable'`.                                      |
+| `isArchived`                     | `true` only for confirmed missing or expired entries; RPC failures and unsupported keys are never treated as archived. |
+| `liveUntilLedger` / `ttlLedgers` | Expiration sequence and remaining ledgers when available.                                                              |
+| `entryType`                      | `'contractData'`, `'contractCode'`, or `'other'`.                                                                      |
 
 Chunk failures are also returned in `failedChunks` and summarized by `hasErrors`.
 This lets callers distinguish a confirmed missing key from an RPC failure without
@@ -294,26 +294,24 @@ if (isResurrectFailure(result)) {
 }
 ```
 
-| Code | Meaning |
-| --- | --- |
-| `NETWORK_ERROR` | RPC transport or configured wallet network failed. |
-| `RPC_TIMEOUT` | An individual RPC call exceeded its timeout. |
-| `TIMEOUT` | Transaction polling did not reach a terminal status before its deadline. |
-| `SIMULATION_FAILED` | Soroban transaction simulation returned an error. |
-| `SIGNING_FAILED` | A wallet rejected or failed a signing request. |
-| `WALLET_NOT_CONNECTED` | The wallet is disconnected. |
-| `RESTORE_TX_PARSE_FAILED` / `RESTORE_TX_FAILED` | Restore XDR parsing or on-chain restore failed. |
-| `ORIGINAL_TX_PARSE_FAILED` / `ORIGINAL_TX_FAILED` | Original XDR parsing or on-chain submission failed. |
-| `RESTORE_FEE_CAP_EXCEEDED` | The restore fee exceeded `maxRestoreFeeStroops`. |
-| `UNSUPPORTED_WALLET_CAPABILITY` | The wallet lacks a capability required by the selected workflow. |
-| `INVALID_INPUT` | Caller-provided configuration or operation input is invalid. |
-| `UNEXPECTED_SIMULATION_RESPONSE` | The RPC returned an unsupported simulation response. |
-| `UNKNOWN_ERROR` | An otherwise unclassified exception occurred. |
+| Code                                              | Meaning                                                                  |
+| ------------------------------------------------- | ------------------------------------------------------------------------ |
+| `NETWORK_ERROR`                                   | RPC transport or configured wallet network failed.                       |
+| `RPC_TIMEOUT`                                     | An individual RPC call exceeded its timeout.                             |
+| `TIMEOUT`                                         | Transaction polling did not reach a terminal status before its deadline. |
+| `SIMULATION_FAILED`                               | Soroban transaction simulation returned an error.                        |
+| `SIGNING_FAILED`                                  | A wallet rejected or failed a signing request.                           |
+| `WALLET_NOT_CONNECTED`                            | The wallet is disconnected.                                              |
+| `RESTORE_TX_PARSE_FAILED` / `RESTORE_TX_FAILED`   | Restore XDR parsing or on-chain restore failed.                          |
+| `ORIGINAL_TX_PARSE_FAILED` / `ORIGINAL_TX_FAILED` | Original XDR parsing or on-chain submission failed.                      |
+| `RESTORE_FEE_CAP_EXCEEDED`                        | The restore fee exceeded `maxRestoreFeeStroops`.                         |
+| `UNSUPPORTED_WALLET_CAPABILITY`                   | The wallet lacks a capability required by the selected workflow.         |
+| `INVALID_INPUT`                                   | Caller-provided configuration or operation input is invalid.             |
+| `UNEXPECTED_SIMULATION_RESPONSE`                  | The RPC returned an unsupported simulation response.                     |
+| `UNKNOWN_ERROR`                                   | An otherwise unclassified exception occurred.                            |
 
-Exception-based APIs throw `ResurrectError` (with `code` and `message`) or a
-category-specific subclass such as `NetworkError`, `SigningError`,
-`ResurrectTimeoutError`, and `InvalidInputError`. `ResurrectErrorCode` is also
-exported as a runtime constant object and as a TypeScript union. Existing code
+Exception-based APIs throw `ResurrectError` (with `code` and `message`).
+`ResurrectErrorCode` is exported as a TypeScript union. Existing code
 that reads `success`, `error`, or `errorCode` continues to work; failure
 `errorCode` is now required in the type system so consumers can switch without
 an optional-field check.
@@ -349,22 +347,22 @@ const SorobanResurrectNetwork = {
 }
 ```
 
-| Helper                          | RPC URL                              | Passphrase                          |
-| ------------------------------- | ------------------------------------ | ----------------------------------- |
-| `SorobanResurrectNetwork.testnet()`   | `https://soroban-testnet.stellar.org` | `Test SDF Network ; September 2015` |
-| `SorobanResurrectNetwork.mainnet()`   | `https://soroban-mainnet.stellar.org` | `Public Global Stellar Network ; September 2015` |
-| `SorobanResurrectNetwork.futurenet()` | `https://rpc-futurenet.stellar.org`   | `Test SDF Future Network ; October 2022` |
-| `SorobanResurrectNetwork.create(rpcUrl, passphrase)` | caller-supplied | caller-supplied |
-| `SorobanResurrectNetwork.custom(rpcUrl, passphrase)` | caller-supplied | caller-supplied |
+| Helper                                               | RPC URL                               | Passphrase                                       |
+| ---------------------------------------------------- | ------------------------------------- | ------------------------------------------------ |
+| `SorobanResurrectNetwork.testnet()`                  | `https://soroban-testnet.stellar.org` | `Test SDF Network ; September 2015`              |
+| `SorobanResurrectNetwork.mainnet()`                  | `https://soroban-mainnet.stellar.org` | `Public Global Stellar Network ; September 2015` |
+| `SorobanResurrectNetwork.futurenet()`                | `https://rpc-futurenet.stellar.org`   | `Test SDF Future Network ; October 2022`         |
+| `SorobanResurrectNetwork.create(rpcUrl, passphrase)` | caller-supplied                       | caller-supplied                                  |
+| `SorobanResurrectNetwork.custom(rpcUrl, passphrase)` | caller-supplied                       | caller-supplied                                  |
 
 `create()` and `custom()` are equivalent — both build a network from an explicit
 RPC URL and passphrase. Use `custom()` when pointing at a local or third-party
 RPC; use `create()` when you already have both values in hand.
 
 > **Futurenet caveat:** Futurenet's passphrase (`Test SDF Future Network ; October 2022`)
-is **not** interchangeable with Testnet's. Signing a Futurenet transaction with the
-Testnet passphrase (or vice versa) produces an invalid signature. Always take the
-passphrase from the preset rather than hard-coding it.
+> is **not** interchangeable with Testnet's. Signing a Futurenet transaction with the
+> Testnet passphrase (or vice versa) produces an invalid signature. Always take the
+> passphrase from the preset rather than hard-coding it.
 
 ## `NetworkChangedEvent`
 
@@ -378,10 +376,10 @@ interface NetworkChangedEvent {
 }
 ```
 
-| Field               | Description                                      |
-| ------------------- | ------------------------------------------------ |
-| `rpcUrl`             | The RPC endpoint active after the switch.         |
-| `networkPassphrase` | The passphrase active after the switch.           |
+| Field               | Description                               |
+| ------------------- | ----------------------------------------- |
+| `rpcUrl`            | The RPC endpoint active after the switch. |
+| `networkPassphrase` | The passphrase active after the switch.   |
 
 ### What survives a switch
 
@@ -392,14 +390,14 @@ rejected; finish or cancel the operation before switching. The SDK retains the i
 listeners, and historical transaction records, while resetting network-specific
 state and stopping active TTL watchers:
 
-| Concern            | After `switchNetwork()`                                                                 |
-| ------------------ | --------------------------------------------------------------------------------------- |
-| Event listeners    | **Preserved.** Subscriptions remain attached to the same SDK instance.                   |
-| Restore history    | **Preserved.** Historical records remain readable; they are not replayed on switch.      |
-| TTL watchers       | **Stopped.** Start a new watch after switching to monitor the new network.               |
-| Archive cache      | **Reset.** Simulation and latest-ledger caches are cleared for the new network.          |
-| Workflow state     | **Reset.** State returns to `idle`, with prior archived keys and errors cleared.          |
-| In-flight operation | **Switch rejected.** The active operation must settle before the network can change.   |
+| Concern             | After `switchNetwork()`                                                              |
+| ------------------- | ------------------------------------------------------------------------------------ |
+| Event listeners     | **Preserved.** Subscriptions remain attached to the same SDK instance.               |
+| Restore history     | **Preserved.** Historical records remain readable; they are not replayed on switch.  |
+| TTL watchers        | **Stopped.** Start a new watch after switching to monitor the new network.           |
+| Archive cache       | **Reset.** Simulation and latest-ledger caches are cleared for the new network.      |
+| Workflow state      | **Reset.** State returns to `idle`, with prior archived keys and errors cleared.     |
+| In-flight operation | **Switch rejected.** The active operation must settle before the network can change. |
 
 ## `WalletAdapter`
 
@@ -422,21 +420,16 @@ Union of the wallet identifiers the SDK ships adapters for. Pass one of these to
 [`createAdapter`](#createadapter) to get a ready-to-use `WalletAdapter`.
 
 ```typescript
-type KnownWallet =
-  | 'freighter'
-  | 'xbull'
-  | 'albedo'
-  | 'ledger'
-  | 'trezor'
+type KnownWallet = 'freighter' | 'xbull' | 'albedo' | 'ledger' | 'trezor'
 ```
 
-| Value       | Adapter                  | Notes                                                                 |
-| ----------- | ------------------------ | --------------------------------------------------------------------- |
-| `freighter` | `FreighterWalletAdapter` | Browser extension; injected `window.freighterApi`.                    |
-| `xbull`     | `XBullWalletAdapter`     | Browser extension; injected `window.xBullSDK`.                        |
-| `albedo`    | `AlbedoWalletAdapter`    | Web-based signer; no extension required.                              |
-| `ledger`    | `LedgerWalletAdapter`    | Hardware; requires a transport and a manifest — see below.            |
-| `trezor`    | `TrezorWalletAdapter`    | Hardware; requires a transport and a manifest — see below.            |
+| Value       | Adapter                  | Notes                                                      |
+| ----------- | ------------------------ | ---------------------------------------------------------- |
+| `freighter` | `FreighterWalletAdapter` | Browser extension; injected `window.freighterApi`.         |
+| `xbull`     | `XBullWalletAdapter`     | Browser extension; injected `window.xBullSDK`.             |
+| `albedo`    | `AlbedoWalletAdapter`    | Web-based signer; no extension required.                   |
+| `ledger`    | `LedgerWalletAdapter`    | Hardware; requires a transport and a manifest — see below. |
+| `trezor`    | `TrezorWalletAdapter`    | Hardware; requires a transport and a manifest — see below. |
 
 `SUPPORTED_WALLETS` is the runtime array of every `KnownWallet` value, in the
 order shown above. Use it to render a wallet picker without hard-coding the list:
@@ -481,12 +474,12 @@ interface WalletCapabilities {
 }
 ```
 
-| Flag              | Meaning                                                                 | SDK behaviour that depends on it                                                                 |
-| ----------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `signTransaction` | The adapter can sign a full transaction.                                | Required by `submitWithRestore`; if `false`, the workflow throws before submitting.              |
-| `signAuthEntry`   | The adapter can sign a Soroban auth entry.                              | Enables the auth-entry signing path; skipped when `false`.                                       |
-| `hardware`        | The adapter signs on a physical device.                                 | Switches the workflow to hardware UX: longer timeouts and signing prompts that wait for the device. |
-| `blindSigning`    | The device can sign a payload it cannot fully display.                  | When `false`, the SDK warns before requesting a signature that would be blind-signed.            |
+| Flag              | Meaning                                                | SDK behaviour that depends on it                                                                    |
+| ----------------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `signTransaction` | The adapter can sign a full transaction.               | Required by `submitWithRestore`; if `false`, the workflow throws before submitting.                 |
+| `signAuthEntry`   | The adapter can sign a Soroban auth entry.             | Enables the auth-entry signing path; skipped when `false`.                                          |
+| `hardware`        | The adapter signs on a physical device.                | Switches the workflow to hardware UX: longer timeouts and signing prompts that wait for the device. |
+| `blindSigning`    | The device can sign a payload it cannot fully display. | When `false`, the SDK warns before requesting a signature that would be blind-signed.               |
 
 ### Hardware setup (Ledger and Trezor)
 
@@ -750,12 +743,12 @@ const account = await getExpiringEntriesForAccount(accountId, {
 
 ### When to use scanning vs. `detectArchivedKeys`
 
-| | `getExpiringEntriesFor*` | `detectArchivedKeys` |
-| --- | --- | --- |
-| Input | Contract/account id plus the keys you supply | A transaction footprint |
-| Transaction | None — read-only | None — read-only |
-| Answers | "What is archived or expiring soon?" | "Which keys in this transaction are archived?" |
-| Use when | You want a proactive, pre-transaction view of a contract or account | You already have a transaction and want to know if it needs a restore first |
+|             | `getExpiringEntriesFor*`                                            | `detectArchivedKeys`                                                        |
+| ----------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Input       | Contract/account id plus the keys you supply                        | A transaction footprint                                                     |
+| Transaction | None — read-only                                                    | None — read-only                                                            |
+| Answers     | "What is archived or expiring soon?"                                | "Which keys in this transaction are archived?"                              |
+| Use when    | You want a proactive, pre-transaction view of a contract or account | You already have a transaction and want to know if it needs a restore first |
 
 Use the scan functions to build a dashboard or a pre-flight check. Use
 `detectArchivedKeys` when you have a specific transaction in hand and want to know

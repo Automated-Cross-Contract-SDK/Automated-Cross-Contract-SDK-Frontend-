@@ -31,7 +31,10 @@ describe('configuration resolution', () => {
     ['rpcTimeoutMs', { rpcUrl, rpcTimeoutMs: Number.POSITIVE_INFINITY }],
     ['maxRestoreFeeStroops', { rpcUrl, maxRestoreFeeStroops: '1.5' }],
     ['restoreFeeMultiplier', { rpcUrl, restoreFeeMultiplier: 0.5 }],
-    ['archiveDetectionFallback', { rpcUrl, archiveDetectionMethod: 'direct', archiveDetectionFallback: true }],
+    [
+      'archiveDetectionFallback',
+      { rpcUrl, archiveDetectionMethod: 'direct', archiveDetectionFallback: true },
+    ],
   ])('rejects invalid %s with a field-specific error', (_field, config) => {
     expect(() => validateConfigShape(config as never)).toThrow(`config.${_field}`)
   })
@@ -73,13 +76,10 @@ describe('request-specific configuration overrides', () => {
   })
 
   it('preserves legacy top-level memo precedence and validates overrides', () => {
-    const effective = resolveSubmitConfig(
-      { rpcUrl, restoreTxMemoText: 'instance' } as never,
-      {
-        configOverrides: { restoreTxMemoText: 'nested' },
-        restoreTxMemoText: 'legacy',
-      },
-    )
+    const effective = resolveSubmitConfig({ rpcUrl, restoreTxMemoText: 'instance' } as never, {
+      configOverrides: { restoreTxMemoText: 'nested' },
+      restoreTxMemoText: 'legacy',
+    })
 
     expect(effective.restoreTxMemoText).toBe('legacy')
     expect(() =>

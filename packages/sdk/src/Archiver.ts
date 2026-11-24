@@ -26,10 +26,7 @@ function tryGetLedgerKeyEntryType(key: xdr.LedgerKey): ArchivedLedgerEntry['entr
   }
 }
 
-function compareArchivedEntries(
-  a: ArchivedLedgerEntry,
-  b: ArchivedLedgerEntry,
-): number {
+function compareArchivedEntries(a: ArchivedLedgerEntry, b: ArchivedLedgerEntry): number {
   return a.keyBase64 < b.keyBase64 ? -1 : a.keyBase64 > b.keyBase64 ? 1 : 0
 }
 

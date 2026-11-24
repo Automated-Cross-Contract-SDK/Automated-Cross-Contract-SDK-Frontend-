@@ -54,12 +54,12 @@ You only use the documented public API surface (see the [API Reference](./README
 
 Deprecated APIs keep working for the remainder of the current major version but emit a `console.warn` (once per process) and are removed in the next major. Each deprecation below lists its replacement.
 
-| Deprecated | Since | Replacement | Removal |
-| --- | --- | --- | --- |
-| `SorobanResurrectConfig.rpcUrl` | 0.1.0 | `SorobanResurrectConfig.rpc.serverUrl` | 1.0 |
-| `SorobanResurrectConfig.networkPassphrase` | 0.1.0 | `SorobanResurrectConfig.network.passphrase` | 1.0 |
-| `SorobanResurrect.submit()` | 0.1.0 | `SorobanResurrect.submitWithRestore()` | 1.0 |
-| `useSorobanResurrect().status` | 0.1.0 | `useSorobanResurrect().state` | 1.0 |
+| Deprecated                                 | Since | Replacement                                 | Removal |
+| ------------------------------------------ | ----- | ------------------------------------------- | ------- |
+| `SorobanResurrectConfig.rpcUrl`            | 0.1.0 | `SorobanResurrectConfig.rpc.serverUrl`      | 1.0     |
+| `SorobanResurrectConfig.networkPassphrase` | 0.1.0 | `SorobanResurrectConfig.network.passphrase` | 1.0     |
+| `SorobanResurrect.submit()`                | 0.1.0 | `SorobanResurrect.submitWithRestore()`      | 1.0     |
+| `useSorobanResurrect().status`             | 0.1.0 | `useSorobanResurrect().state`               | 1.0     |
 
 ### Migrating off a deprecated API
 
@@ -80,9 +80,11 @@ When a future major version introduces breaking changes, a new dated section wil
 ## Upgrading to vX.0 (from vY.x)
 
 ### Breaking Changes
+
 - <change> — <why, and what to do instead>
 
 ### Migration Steps
+
 1. ...
 ```
 

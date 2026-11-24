@@ -11,9 +11,9 @@ npm install @your-scope/your-package
 ## Basic usage
 
 ```ts
-import { createClient } from '@your-scope/your-package';
+import { createClient } from '@your-scope/your-package'
 
-const client = createClient({ /* options */ });
+const client = createClient({/* options */})
 ```
 
 `@stellar/stellar-sdk` (`^12.0.0`) and `react` (`^18.0.0`, for the hook package) are peer dependencies — install them alongside the SDK.
@@ -103,11 +103,11 @@ console.log('Soroban RPC ready:', status.latestLedger)
 
 `checkSorobanRpcReadiness` resolves to a `SorobanRpcReadiness` object:
 
-| Field          | Type      | Description                                              |
-| -------------- | --------- | -------------------------------------------------------- |
-| `ready`        | `boolean` | `true` when the endpoint responded with a valid ledger.  |
-| `latestLedger` | `number?` | Latest ledger sequence reported by the endpoint.         |
-| `reason`       | `string?` | Human-readable failure reason when `ready` is `false`.    |
+| Field          | Type      | Description                                             |
+| -------------- | --------- | ------------------------------------------------------- |
+| `ready`        | `boolean` | `true` when the endpoint responded with a valid ledger. |
+| `latestLedger` | `number?` | Latest ledger sequence reported by the endpoint.        |
+| `reason`       | `string?` | Human-readable failure reason when `ready` is `false`.  |
 
 It returns `ready: false` (rather than throwing) for unreachable endpoints,
 timeouts, and malformed responses, so it is safe to call in CI and scripts.
@@ -122,7 +122,7 @@ timeouts, and malformed responses, so it is safe to call in CI and scripts.
 
 ## Quick Start (Direct SDK)
 
-```typescript
+````typescript
 import { SorobanResurrect } from '@soroban-resurrect/sdk'
 import { TransactionBuilder, Account, Operation, Networks } from '@stellar/stellar-sdk'
 
@@ -184,13 +184,13 @@ export const client = createClient({
   // requirements above; otherwise keep it in memory.
   persistHistory: false,
 });
-```
+````
 
 ## Quick Start (Plain JavaScript)
 
 No framework required — this example runs directly in the browser. It connects
 a wallet, builds a transaction, and demonstrates both the restore and
-no-restore paths. See [`examples/plain-js`](https://github.com/soroban-resurrect/soroban-resurrect/tree/main/examples/plain-js)
+no-restore paths. See [`examples/plain-js`](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/tree/main/examples/plain-js)
 for the full runnable project.
 
 ```html
@@ -230,8 +230,7 @@ for the full runnable project.
       const wallet = {
         isConnected: async () => publicKey !== null,
         getPublicKey: async () => publicKey,
-        signTransaction: async (txXdr, opts) =>
-          window.freighter.signTransaction(txXdr, opts),
+        signTransaction: async (txXdr, opts) => window.freighter.signTransaction(txXdr, opts),
       }
 
       document.getElementById('connect').addEventListener('click', async () => {
@@ -294,15 +293,15 @@ the SDK instead of handling keys yourself — the SDK builds the transaction and
 the wallet prompts the user to sign:
 
 ```ts
-import { client } from './sdk';
+import { client } from './sdk'
 
 async function submitPayment(destination: string, amount: string) {
   const result = await client.submit({
     operation: { type: 'payment', destination, amount },
     // The wallet owns the secret key and shows its own approval prompt.
     sign: (envelope) => wallet.signTransaction(envelope),
-  });
-  return result;
+  })
+  return result
 }
 ```
 
@@ -316,75 +315,24 @@ the network rejects the transaction, or the request times out. Surface each case
 distinctly instead of a generic error:
 
 ```ts
-import { client } from './sdk';
+import { client } from './sdk'
 
 try {
-  const result = await submitPayment(destination, amount);
-  showSuccess(result.hash);
+  const result = await submitPayment(destination, amount)
+  showSuccess(result.hash)
 } catch (err) {
   if (err.code === 'USER_REJECTED') {
     // The user declined the wallet prompt — not an error to alarm them about.
-    showNotice('Signature cancelled. Nothing was submitted.');
+    showNotice('Signature cancelled. Nothing was submitted.')
   } else if (err.code === 'NETWORK_ERROR' || err.code === 'TIMEOUT') {
     // Safe to retry; the transaction may not have been submitted.
-    showRetry('Could not reach the network. Please try again.');
+    showRetry('Could not reach the network. Please try again.')
   } else {
     // The network rejected the transaction (e.g. insufficient balance).
-    showError(err.message);
+    showError(err.message)
   }
 }
 ```
-
-## Production-style React application
-
-For a realistic, production-shaped React app — routing, wallet lifecycle,
-user feedback, fee consent, cancellation, and typed error handling — see
-[`examples/react-app`](https://github.com/soroban-resurrect/soroban-resurrect/tree/main/examples/react-app).
-The example is a small Vite + React + TypeScript project that wires the
-`@soroban-resurrect/react-hook` provider into a multi-route app and shows how
-the stable SDK surface is used end to end.
-
-What the example demonstrates:
-
-- **Routing** — `react-router-dom` routes for a dashboard, a withdraw flow, and
-  a transaction history view, all sharing one provider instance.
-- **Wallet lifecycle** — connect, disconnect, and reconnect flows with a
-  `WalletAdapter` implementation, including handling of a wallet that becomes
-  unavailable mid-session.
-- **User feedback** — a status banner driven by the hook's `state`
-  (`idle` → `simulating` → `awaiting-consent` → `signing` → `submitting` →
-  `confirming` → `success` / `error` / `cancelled`).
-- **Fee consent** — before a restore is submitted, the app surfaces the
-  estimated restore cost from `estimateRestoreCost` and requires explicit user
-  confirmation.
-- **Cancellation** — an `AbortController` is created per submission and aborted
-  when the user cancels or navigates away, so `submitWithRestore` resolves with
-  `errorCode === 'ABORTED'`.
-- **Typed error handling** — a `switch` on `result.errorCode` (e.g. `ABORTED`,
-  `WALLET_REJECTED`, `SIMULATION_FAILED`, `RESTORE_FAILED`) with user-facing
-  copy for each case.
-
-Run it locally:
-
-```bash
-cd examples/react-app
-npm install
-npm run dev
-```
-
-Run its tests:
-
-```bash
-cd examples/react-app
-npm test
-```
-
-The example's tests cover the happy path (no restore needed), the restore path
-with fee consent, user cancellation, and wallet-rejection error handling. The
-interfaces it relies on — `SorobanResurrectProvider`, `useSorobanResurrectContext`,
-`submitWithRestore`, `estimateRestoreCost`, `needsRestore`, and the
-`AbortSignalOptions` type — are the same stable entry points documented above,
-so the example remains compatible across supported package releases.
 
 ## Choosing an approach
 

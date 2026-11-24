@@ -1,14 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type {
-  LedgerEntryTTLInfo,
-  ResurrectResult,
-  WalletAdapter,
-} from '@soroban-resurrect/sdk'
+import type { LedgerEntryTTLInfo, ResurrectResult, WalletAdapter } from '@soroban-resurrect/sdk'
 import type { Transaction, xdr } from '@stellar/stellar-sdk'
-import {
-  useResolvedResurrect,
-  type ResolvedResurrectOptions,
-} from './useResolvedResurrect.js'
+import { useResolvedResurrect, type ResolvedResurrectOptions } from './useResolvedResurrect.js'
 
 /** Lifecycle status of the watcher. */
 export type RestoreWatchStatus = 'idle' | 'watching' | 'stopped' | 'error'
@@ -92,11 +85,7 @@ export function useRestoreWatcher(
   keys: xdr.LedgerKey[],
   options: UseRestoreWatcherOptions = {},
 ): UseRestoreWatcherReturn {
-  const {
-    intervalMs = 30_000,
-    ledgersThreshold = 100_000,
-    autoStart = true,
-  } = options
+  const { intervalMs = 30_000, ledgersThreshold = 100_000, autoStart = true } = options
 
   const resurrect = useResolvedResurrect(options)
 
@@ -115,12 +104,10 @@ export function useRestoreWatcher(
   const extensionControllersRef = useRef(new Set<AbortController>())
 
   const poll = useCallback(async () => {
-    if (!mountedRef.current) return
+    // `resurrect` is null until the provider's effect runs; polling restarts then.
+    if (!mountedRef.current || !resurrect) return
     try {
-      const entries = await resurrect.getExpiringSoonEntries(
-        keysRef.current,
-        ledgersThreshold,
-      )
+      const entries = await resurrect.getExpiringSoonEntries(keysRef.current, ledgersThreshold)
       if (!mountedRef.current) return
       setExpiringSoon(entries)
       setLastCheckedAt(Date.now())
@@ -167,10 +154,7 @@ export function useRestoreWatcher(
   }, [])
 
   const extend = useCallback(
-    async (
-      transaction?: Transaction,
-      wallet?: WalletAdapter,
-    ): Promise<ResurrectResult | null> => {
+    async (transaction?: Transaction, wallet?: WalletAdapter): Promise<ResurrectResult | null> => {
       if (!mountedRef.current) return null
       setError(null)
       const controller = new AbortController()
@@ -185,6 +169,7 @@ export function useRestoreWatcher(
             'useRestoreWatcher.extend: provide `onExtend`, or pass a transaction and wallet.',
           )
         }
+        if (!resurrect) throw new Error('SorobanResurrect is not initialized yet')
         extensionControllersRef.current.add(controller)
         const result = await resurrect.submitWithRestore({
           transaction,

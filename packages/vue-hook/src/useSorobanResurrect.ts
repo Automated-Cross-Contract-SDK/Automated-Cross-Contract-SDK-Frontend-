@@ -39,7 +39,7 @@ export interface UseSorobanResurrectReturn {
    */
   archivedKeys: ComputedRef<ArchivedLedgerEntry[]>
   /** Result of the most recent `submitWithRestore` call, success or failure. */
-  lastResult: ReturnType<typeof ref<ResurrectResult | null>>
+  lastResult: ShallowRef<ResurrectResult | null>
   /** Estimated restore cost for the current workflow, when available. */
   feeEstimate: ComputedRef<number | null>
   /** Submit a transaction with automatic archive restoration. */
@@ -82,7 +82,7 @@ export function useSorobanResurrect(
 ): UseSorobanResurrectReturn {
   const resurrect = shallowRef<SorobanResurrect | null>(null)
   const state = ref<RestoreStateInfo>({ state: 'idle', message: '' })
-  const lastResult = ref<ResurrectResult | null>(null)
+  const lastResult = shallowRef<ResurrectResult | null>(null)
   const eventUnsubscribers = new Set<() => void>()
   const activeSubmissions = new Set<AbortController>()
 

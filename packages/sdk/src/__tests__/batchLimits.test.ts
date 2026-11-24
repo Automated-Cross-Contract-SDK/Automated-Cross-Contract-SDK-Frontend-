@@ -25,14 +25,10 @@ describe('batch request bounds', () => {
   })
 
   it('returns ordered partial results when one item fails', async () => {
-    const results = await settleBatchWithConcurrency(
-      [0, 1, 2],
-      2,
-      async (item) => {
-        if (item === 1) throw new Error('request failed')
-        return item
-      },
-    )
+    const results = await settleBatchWithConcurrency([0, 1, 2], 2, async (item) => {
+      if (item === 1) throw new Error('request failed')
+      return item
+    })
 
     expect(results[0]).toEqual({ status: 'fulfilled', value: 0 })
     expect(results[1].status).toBe('rejected')

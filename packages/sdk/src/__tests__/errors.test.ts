@@ -31,19 +31,20 @@ describe('typed SDK errors', () => {
   it('preserves an existing structured error code when normalizing', () => {
     const error = new ResurrectTimeoutError('expired')
     expect(getResurrectErrorCode(error)).toBe(ResurrectErrorCode.TIMEOUT)
-    expect(getResurrectErrorCode({ code: ResurrectErrorCode.RPC_TIMEOUT }))
-      .toBe(ResurrectErrorCode.RPC_TIMEOUT)
-    expect(getResurrectErrorCode(new Error('unexpected')))
-      .toBe(ResurrectErrorCode.UNKNOWN_ERROR)
+    expect(getResurrectErrorCode({ code: ResurrectErrorCode.RPC_TIMEOUT })).toBe(
+      ResurrectErrorCode.RPC_TIMEOUT,
+    )
+    expect(getResurrectErrorCode(new Error('unexpected'))).toBe(ResurrectErrorCode.UNKNOWN_ERROR)
   })
 
   it('normalizes rejected signing operations without replacing structured errors', async () => {
-    await expect(wrapSigningError(async () => Promise.reject(new Error('user declined'))))
-      .rejects.toMatchObject({
-        name: 'SigningError',
-        code: ResurrectErrorCode.SIGNING_FAILED,
-        message: 'user declined',
-      })
+    await expect(
+      wrapSigningError(async () => Promise.reject(new Error('user declined'))),
+    ).rejects.toMatchObject({
+      name: 'SigningError',
+      code: ResurrectErrorCode.SIGNING_FAILED,
+      message: 'user declined',
+    })
 
     const structured = new ResurrectTimeoutError('expired')
     await expect(wrapSigningError(async () => Promise.reject(structured))).rejects.toBe(structured)

@@ -6,10 +6,7 @@ import {
   type WalletAdapter,
 } from '@soroban-resurrect/sdk'
 import type { Transaction } from '@stellar/stellar-sdk'
-import {
-  useResolvedResurrect,
-  type ResolvedResurrectOptions,
-} from './useResolvedResurrect.js'
+import { useResolvedResurrect, type ResolvedResurrectOptions } from './useResolvedResurrect.js'
 
 /** Options for the `useSorobanResurrectSubmit` hook. */
 export interface UseSorobanResurrectSubmitOptions extends ResolvedResurrectOptions {
@@ -72,7 +69,7 @@ export function useSorobanResurrectSubmit(
   const resurrect = useResolvedResurrect(options)
 
   const [state, setState] = useState<RestoreStateInfo>(
-    () => resurrect.stateInfo ?? { state: 'idle', message: '' },
+    () => resurrect?.stateInfo ?? { state: 'idle', message: '' },
   )
   const [result, setResult] = useState<ResurrectResult | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -86,8 +83,8 @@ export function useSorobanResurrectSubmit(
 
   useEffect(() => {
     mountedRef.current = true
-    setState(resurrect.stateInfo ?? { state: 'idle', message: '' })
-    const unsub = resurrect.onStateChange((info) => {
+    setState(resurrect?.stateInfo ?? { state: 'idle', message: '' })
+    const unsub = resurrect?.onStateChange((info) => {
       if (mountedRef.current) setState(info)
     })
     return () => {
@@ -95,7 +92,7 @@ export function useSorobanResurrectSubmit(
       requestIdRef.current++
       for (const controller of controllersRef.current) controller.abort()
       controllersRef.current.clear()
-      unsub()
+      unsub?.()
     }
   }, [resurrect])
 
@@ -111,6 +108,7 @@ export function useSorobanResurrectSubmit(
 
       let outcome: ResurrectResult
       try {
+        if (!resurrect) throw new Error('SorobanResurrect is not initialized yet')
         outcome = await resurrect.submitWithRestore({
           transaction,
           wallet,
@@ -123,7 +121,7 @@ export function useSorobanResurrectSubmit(
         controllersRef.current.delete(controller)
       }
 
-      const errText = outcome.success ? null : outcome.error ?? 'Unknown error'
+      const errText = outcome.success ? null : (outcome.error ?? 'Unknown error')
       if (mountedRef.current && requestId === requestIdRef.current) {
         setResult(outcome)
         setError(errText)
@@ -154,7 +152,7 @@ export function useSorobanResurrectSubmit(
     cancel()
     setResult(null)
     setError(null)
-    resurrect.reset()
+    resurrect?.reset()
   }, [cancel, resurrect])
 
   return {

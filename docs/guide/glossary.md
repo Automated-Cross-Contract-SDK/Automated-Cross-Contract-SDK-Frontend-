@@ -45,7 +45,7 @@ guidance.
 ## Simulation preamble
 
 Before submitting a transaction, the SDK **simulates** it against the network.
-The simulation returns a *preamble* describing the resources the transaction
+The simulation returns a _preamble_ describing the resources the transaction
 will consume (footprint, instructions, read/write bytes, and fees). The SDK uses
 this preamble to build the final transaction with accurate resource limits and
 fees. If simulation reports archived entries, the SDK can schedule a restore

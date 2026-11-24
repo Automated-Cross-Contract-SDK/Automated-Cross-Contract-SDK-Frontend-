@@ -44,10 +44,15 @@ import type { AbortSignalOptions } from './AbortUtils.js'
 import { runWithSignal, throwIfAborted } from './AbortUtils.js'
 import { createFailureGuidance } from './FailureGuidance.js'
 import { assertBatchSize } from './batchLimits.js'
-import { DEFAULT_NETWORK_PASSPHRASE,MAX_BATCH_SIZE,POLL_INTERVAL_MS,POLL_TIMEOUT_MS } from './constants.js'
-import { ResurrectError,OriginalTransactionExpiredError } from './errors.js'
+import {
+  DEFAULT_NETWORK_PASSPHRASE,
+  MAX_BATCH_SIZE,
+  POLL_INTERVAL_MS,
+  POLL_TIMEOUT_MS,
+} from './constants.js'
+import { ResurrectError, OriginalTransactionExpiredError } from './errors.js'
 import { calculateRestoreFee } from './feeCalculation.js'
-import { configForWalletRestore,validateRestoreMemoConfig } from './memoValidation.js'
+import { configForWalletRestore, validateRestoreMemoConfig } from './memoValidation.js'
 
 /**
  * Handles all transaction execution concerns for a `SorobanResurrect` instance:
@@ -240,8 +245,7 @@ export class SorobanResurrectExecutor {
     simulationResponse?: rpc.Api.SimulateTransactionRestoreResponse,
     options: AbortSignalOptions = {},
   ): Promise<Transaction> {
-    const response =
-      simulationResponse ?? (await this._simulator.simulate(transaction, options))
+    const response = simulationResponse ?? (await this._simulator.simulate(transaction, options))
 
     if (!isRestoreResponse(response)) {
       throw new Error('No archived keys detected — restore transaction not needed')
@@ -332,10 +336,7 @@ export class SorobanResurrectExecutor {
 
       stateMgr.setState('submitting_restore', 'Submitting restore transaction...')
       opts?.onSubmittingRestore?.()
-      const sendResult = await runWithSignal(
-        () => this._server.sendTransaction(signedTx),
-        signal,
-      )
+      const sendResult = await runWithSignal(() => this._server.sendTransaction(signedTx), signal)
       restoreHash = asTxHash(sendResult.hash)
       emitter.emit('restoreSubmitted', restoreHash)
       opts?.onRestoreSubmitted?.(restoreHash)
@@ -726,11 +727,7 @@ export class SorobanResurrectExecutor {
     })
 
     if (
-      items.some(
-        (item) =>
-          item.restoreTxMemo !== undefined ||
-          item.restoreTxMemoText !== undefined,
-      )
+      items.some((item) => item.restoreTxMemo !== undefined || item.restoreTxMemoText !== undefined)
     ) {
       const results: ResurrectResult[] = []
       for (const item of items) {
@@ -792,7 +789,9 @@ export class SorobanResurrectExecutor {
       const memo = resolveRestoreMemo(undefined, config)
       return JSON.stringify(memo ? [memo.type, memo.value] : ['none'])
     }
-    if (restoreConfigs.some((config) => memoSignature(config) !== memoSignature(restoreConfigs[0]))) {
+    if (
+      restoreConfigs.some((config) => memoSignature(config) !== memoSignature(restoreConfigs[0]))
+    ) {
       throw new ResurrectError(
         'INVALID_RESTORE_MEMO',
         'submitBatchWithRestore builds one shared restore transaction; all items must use the same restore memo configuration.',

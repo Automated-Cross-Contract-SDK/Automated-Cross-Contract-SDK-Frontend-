@@ -1,6 +1,7 @@
 # SDK Observability: Metrics, Health Checks, and Privacy-Safe Logging
 
 This guide covers three observability features for production deployments:
+
 1. **Metrics hooks** — Framework-neutral callbacks for monitoring
 2. **RPC health checks** — Diagnostic endpoints for support tooling
 3. **Privacy-safe logging** — Redaction utilities for sensitive data
@@ -61,29 +62,29 @@ All metrics callbacks receive **safe metadata only** — no wallet addresses, ke
 ```typescript
 interface MetricsOutcomeMetadata {
   // Unique correlation ID for this workflow
-  workflowId?: string;
+  workflowId?: string
 
   // Final stage reached (e.g., 'finalization', 'original_submission')
-  stage?: MetricsStage;
+  stage?: MetricsStage
 
   // Machine-readable outcome code:
   // 'SUCCESS', 'NO_RESTORE_NEEDED', 'RESTORE_FAILED', 'ORIGINAL_FAILED', etc.
-  outcomeCode?: MetricsOutcomeCode;
+  outcomeCode?: MetricsOutcomeCode
 
   // Total workflow duration in milliseconds
-  durationMs?: number;
+  durationMs?: number
 
   // Number of transient retries
-  retries?: number;
+  retries?: number
 
   // Number of archived ledger entries (if applicable)
-  archivedKeysCount?: number;
+  archivedKeysCount?: number
 
   // Estimated restore fee in stroops (safe integer, not address-specific)
-  estimatedRestoreFeeStoops?: number;
+  estimatedRestoreFeeStoops?: number
 
   // Custom low-cardinality labels (not addresses or hashes)
-  customLabels?: Record<string, string | number | boolean>;
+  customLabels?: Record<string, string | number | boolean>
 }
 ```
 
@@ -91,33 +92,33 @@ interface MetricsOutcomeMetadata {
 
 Metrics track these stages in the restore workflow:
 
-| Stage | Meaning |
-|---|---|
-| `initialization` | SDK startup and config validation |
-| `simulation` | Transaction simulation for archived keys |
-| `restore_preparation` | Building restore transaction |
-| `restore_submission` | Signing and submitting restore tx |
-| `restore_confirmation` | Waiting for restore tx to finalize |
-| `original_submission` | Signing and submitting original tx |
-| `original_confirmation` | Waiting for original tx to finalize |
-| `finalization` | Cleanup and result assembly |
+| Stage                   | Meaning                                  |
+| ----------------------- | ---------------------------------------- |
+| `initialization`        | SDK startup and config validation        |
+| `simulation`            | Transaction simulation for archived keys |
+| `restore_preparation`   | Building restore transaction             |
+| `restore_submission`    | Signing and submitting restore tx        |
+| `restore_confirmation`  | Waiting for restore tx to finalize       |
+| `original_submission`   | Signing and submitting original tx       |
+| `original_confirmation` | Waiting for original tx to finalize      |
+| `finalization`          | Cleanup and result assembly              |
 
 ### Outcome Codes
 
-| Code | Meaning |
-|---|---|
-| `SUCCESS` | Both restore and original tx succeeded |
-| `NO_RESTORE_NEEDED` | Simulation showed no archived keys |
-| `SIMULATION_FAILED` | Pre-flight check rejected the transaction |
+| Code                | Meaning                                        |
+| ------------------- | ---------------------------------------------- |
+| `SUCCESS`           | Both restore and original tx succeeded         |
+| `NO_RESTORE_NEEDED` | Simulation showed no archived keys             |
+| `SIMULATION_FAILED` | Pre-flight check rejected the transaction      |
 | `RESTORE_SUBMITTED` | Restore tx sent (user aborted before original) |
 | `RESTORE_CONFIRMED` | Restore finalized but original never submitted |
-| `RESTORE_TIMEOUT` | Restore confirmation took too long |
-| `RESTORE_FAILED` | Restore tx failed on-chain |
-| `ORIGINAL_FAILED` | Restore succeeded, but original tx failed |
-| `NETWORK_ERROR` | RPC connection or network timeout |
-| `INVALID_CONFIG` | Bad config (wrong network, bad RPC URL, etc.) |
-| `ABORTED_BY_USER` | User called `.abort()` on the workflow |
-| `UNKNOWN_ERROR` | Unexpected error |
+| `RESTORE_TIMEOUT`   | Restore confirmation took too long             |
+| `RESTORE_FAILED`    | Restore tx failed on-chain                     |
+| `ORIGINAL_FAILED`   | Restore succeeded, but original tx failed      |
+| `NETWORK_ERROR`     | RPC connection or network timeout              |
+| `INVALID_CONFIG`    | Bad config (wrong network, bad RPC URL, etc.)  |
+| `ABORTED_BY_USER`   | User called `.abort()` on the workflow         |
+| `UNKNOWN_ERROR`     | Unexpected error                               |
 
 ### Cardinality Constraints
 
@@ -147,48 +148,44 @@ Hooks receive only safe metadata:
 #### With Datadog
 
 ```typescript
-import { StatsdClient } from 'node-dogstatsd';
+import { StatsdClient } from 'node-dogstatsd'
 
-const statsd = new StatsdClient();
+const statsd = new StatsdClient()
 
 const metricsHook: MetricsHook = {
   onOutcome: (metadata) => {
     statsd.histogram('soroban.workflow.duration_ms', metadata.durationMs || 0, {
       stage: metadata.stage,
       outcome: metadata.outcomeCode,
-    });
+    })
   },
-};
+}
 ```
 
 #### With Prometheus
 
 ```typescript
-import prom from 'prom-client';
+import prom from 'prom-client'
 
 const workflowCounter = new prom.Counter({
   name: 'soroban_workflows_total',
   help: 'Total workflows completed',
   labelNames: ['stage', 'outcome'],
-});
+})
 
 const durationHistogram = new prom.Histogram({
   name: 'soroban_workflow_duration_seconds',
   help: 'Workflow duration',
   labelNames: ['outcome'],
-});
+})
 
 const metricsHook: MetricsHook = {
   onOutcome: (metadata) => {
-    workflowCounter
-      .labels(metadata.stage || '', metadata.outcomeCode || '')
-      .inc();
+    workflowCounter.labels(metadata.stage || '', metadata.outcomeCode || '').inc()
 
-    durationHistogram
-      .labels(metadata.outcomeCode || '')
-      .observe((metadata.durationMs || 0) / 1000);
+    durationHistogram.labels(metadata.outcomeCode || '').observe((metadata.durationMs || 0) / 1000)
   },
-};
+}
 ```
 
 ---
@@ -200,22 +197,22 @@ The SDK provides non-mutating diagnostics to test RPC endpoint reachability and 
 ### Basic Usage
 
 ```typescript
-import { checkRpcHealth } from '@sdk/core';
+import { checkRpcHealth } from '@sdk/core'
 
 // Comprehensive check
-const result = await checkRpcHealth('https://soroban-testnet.stellar.org');
+const result = await checkRpcHealth('https://soroban-testnet.stellar.org')
 
-console.log(result.healthy ? '✓ Healthy' : '✗ Issues detected');
-console.log(result.summary);
-console.log(result.recommendations);
+console.log(result.healthy ? '✓ Healthy' : '✗ Issues detected')
+console.log(result.summary)
+console.log(result.recommendations)
 
 // Check specific endpoint only
-const endpointResult = await checkRpcEndpointReachability(rpcUrl);
-console.log(`Latency: ${endpointResult.responseTimeMs}ms`);
+const endpointResult = await checkRpcEndpointReachability(rpcUrl)
+console.log(`Latency: ${endpointResult.responseTimeMs}ms`)
 
 // Check specific method
-const methodResult = await checkRpcMethod(rpcUrl, 'simulateTransaction');
-console.log(`Method available: ${methodResult.available}`);
+const methodResult = await checkRpcMethod(rpcUrl, 'simulateTransaction')
+console.log(`Method available: ${methodResult.available}`)
 ```
 
 ### Health Check Result
@@ -223,25 +220,25 @@ console.log(`Method available: ${methodResult.available}`);
 ```typescript
 interface RpcHealthCheckResult {
   // ISO 8601 timestamp
-  timestamp: string;
+  timestamp: string
 
   // Overall health status
-  healthy: boolean;
+  healthy: boolean
 
   // Endpoint reachability (HTTP HEAD request)
-  endpoint: RpcEndpointCheckResult;
+  endpoint: RpcEndpointCheckResult
 
   // Required Soroban methods: getLatestLedger, getTransaction, simulateTransaction, etc.
-  requiredMethods: RpcMethodCheckResult[];
+  requiredMethods: RpcMethodCheckResult[]
 
   // Optional additional methods checked (if provided)
-  optionalMethods?: RpcMethodCheckResult[];
+  optionalMethods?: RpcMethodCheckResult[]
 
   // Actionable recommendations (if issues detected)
-  recommendations?: string[];
+  recommendations?: string[]
 
   // Summary message
-  summary: string;
+  summary: string
 }
 ```
 
@@ -280,8 +277,8 @@ interface RpcHealthCheckResult {
 Include health check results when reporting issues:
 
 ```typescript
-const health = await checkRpcHealth(config.rpcUrl);
-console.log('Please share this with support:', JSON.stringify(health, null, 2));
+const health = await checkRpcHealth(config.rpcUrl)
+console.log('Please share this with support:', JSON.stringify(health, null, 2))
 ```
 
 #### Startup Validation
@@ -289,9 +286,9 @@ console.log('Please share this with support:', JSON.stringify(health, null, 2));
 Fail fast if RPC is unhealthy:
 
 ```typescript
-const health = await checkRpcHealth(rpcUrl, [], 5000);
+const health = await checkRpcHealth(rpcUrl, [], 5000)
 if (!health.healthy) {
-  throw new Error(`RPC unavailable: ${health.summary}`);
+  throw new Error(`RPC unavailable: ${health.summary}`)
 }
 ```
 
@@ -301,11 +298,11 @@ Periodically check RPC health and alert on failures:
 
 ```typescript
 setInterval(async () => {
-  const health = await checkRpcHealth(rpcUrl);
+  const health = await checkRpcHealth(rpcUrl)
   if (!health.healthy) {
-    alerting.notify(`RPC health degraded: ${health.recommendations?.[0]}`);
+    alerting.notify(`RPC health degraded: ${health.recommendations?.[0]}`)
   }
-}, 60000); // Check every minute
+}, 60000) // Check every minute
 ```
 
 ---
@@ -317,6 +314,7 @@ The SDK provides redaction utilities and field classification to help you log sa
 ### What You Can Log
 
 ✅ **Always safe:**
+
 - Workflow IDs (opaque, no information)
 - Stage names (`simulation`, `restore_submission`, etc.)
 - Error codes (`SIMULATE_FAILED`, `RESTORE_TIMEOUT`, etc.)
@@ -326,6 +324,7 @@ The SDK provides redaction utilities and field classification to help you log sa
 ### What You Must Redact
 
 ⚠️ **Sensitive (redact as hash only):**
+
 - Wallet address: log as `GA...abc3` (first 2 + last 4 chars)
 - Public key: log as `PK...xyz7`
 - Contract ID: log as `...abcd` (last 4 chars)
@@ -334,6 +333,7 @@ The SDK provides redaction utilities and field classification to help you log sa
 ### What You Must Never Log
 
 ❌ **Forbidden (even redacted):**
+
 - Private keys or secrets
 - Transaction XDR or full transaction objects
 - Authorization preimages or signatures
@@ -343,11 +343,11 @@ The SDK provides redaction utilities and field classification to help you log sa
 ### Using Redaction Utilities
 
 ```typescript
-import { RedactionUtils, SafeLogger } from '@sdk/core';
+import { RedactionUtils, SafeLogger } from '@sdk/core'
 
 // Redact individual values
-const address = 'GABC...xyz123';
-const safe = RedactionUtils.hashAddress(address);
+const address = 'GABC...xyz123'
+const safe = RedactionUtils.hashAddress(address)
 // safe = "GA...z123"
 
 // Filter objects automatically
@@ -356,13 +356,13 @@ const result = {
   address: 'GABC...xyz',
   privateKey: 'S...', // FORBIDDEN
   durationMs: 150,
-};
+}
 
-const safeForLogging = RedactionUtils.filterObject(result);
+const safeForLogging = RedactionUtils.filterObject(result)
 // Returns: { workflowId: 'wf_abc123', durationMs: 150 }
 
 // With sensitive fields redacted
-const withRedacted = RedactionUtils.filterObject(result, true);
+const withRedacted = RedactionUtils.filterObject(result, true)
 // Returns: { workflowId: 'wf_abc123', address: 'GA...xyz', durationMs: 150 }
 ```
 
@@ -371,21 +371,21 @@ const withRedacted = RedactionUtils.filterObject(result, true);
 Use `SafeLogger` to automatically filter and redact log objects:
 
 ```typescript
-const logger = new SafeLogger(false); // false = don't log sensitive fields
+const logger = new SafeLogger(false) // false = don't log sensitive fields
 
 logger.info('Workflow started', {
   workflowId: 'wf_123',
   address: 'GABC...xyz',
   stage: 'initialization',
-});
+})
 // Output: Workflow started: {"workflowId":"wf_123","stage":"initialization"}
 
-const loggerWithRedacted = new SafeLogger(true);
+const loggerWithRedacted = new SafeLogger(true)
 loggerWithRedacted.info('Result', {
   workflowId: 'wf_456',
   address: 'GABC...uvw',
   durationMs: 250,
-});
+})
 // Output: Result: {"workflowId":"wf_456","address":"GA...uvw","durationMs":250}
 ```
 
@@ -394,12 +394,12 @@ loggerWithRedacted.info('Result', {
 The SDK defines privacy classification for common fields:
 
 ```typescript
-import { LoggingClassifications, LoggingFieldType } from '@sdk/core';
+import { LoggingClassifications, LoggingFieldType } from '@sdk/core'
 
 // Check if a field is safe to log
 LoggingClassifications.forEach((classification) => {
-  console.log(`${classification.field}: ${classification.type}`);
-});
+  console.log(`${classification.field}: ${classification.type}`)
+})
 
 // Output:
 // privateKey: forbidden
@@ -441,7 +441,7 @@ try {
 logger.info('Processing', {
   walletAddress: user.publicKey,
   amount: '100',
-});
+})
 ```
 
 #### ✅ Good: Redact addresses
@@ -450,7 +450,7 @@ logger.info('Processing', {
 logger.info('Processing', {
   walletAddressHash: RedactionUtils.hashAddress(user.publicKey),
   amount: '100',
-});
+})
 ```
 
 ---
@@ -460,6 +460,7 @@ logger.info('Processing', {
 ### "My metrics system isn't receiving events"
 
 Check that:
+
 1. `metricsHook` is passed to `SorobanResurrect` config
 2. The hook method (`onOutcome`, `onRecovery`, etc.) matches the event type
 3. No exceptions are thrown in the hook callback
@@ -487,9 +488,9 @@ Check that:
 
 ```typescript
 interface MetricsHook {
-  onOutcome?(metadata: MetricsOutcomeMetadata): void | Promise<void>;
-  onRecovery?(metadata: MetricsRecoveryMetadata): void | Promise<void>;
-  onProgress?(stage: MetricsStage, progressMetadata?: Record<string, any>): void | Promise<void>;
+  onOutcome?(metadata: MetricsOutcomeMetadata): void | Promise<void>
+  onRecovery?(metadata: MetricsRecoveryMetadata): void | Promise<void>
+  onProgress?(stage: MetricsStage, progressMetadata?: Record<string, any>): void | Promise<void>
 }
 ```
 
@@ -510,18 +511,26 @@ checkRpcMethod(rpcUrl: string, method: string, timeoutMs?: number): Promise<RpcM
 
 ```typescript
 class RedactionUtils {
-  static hashAddress(address: string): string;
-  static hashSuffix(hexString: string, chars?: number): string;
-  static redactXdr(_txXdr: string): string;
-  static filterObject(obj: Record<string, unknown>, allowSensitive?: boolean): Record<string, unknown>;
-  static isForbidden(fieldName: string): boolean;
-  static isSensitive(fieldName: string): boolean;
+  static hashAddress(address: string): string
+  static hashSuffix(hexString: string, chars?: number): string
+  static redactXdr(_txXdr: string): string
+  static filterObject(
+    obj: Record<string, unknown>,
+    allowSensitive?: boolean,
+  ): Record<string, unknown>
+  static isForbidden(fieldName: string): boolean
+  static isSensitive(fieldName: string): boolean
 }
 
 class SafeLogger {
-  constructor(allowSensitive?: boolean);
-  info(label: string, obj: Record<string, unknown>, logger?: (msg: string) => void): void;
-  error(label: string, err: unknown, context?: Record<string, unknown>, logger?: (msg: string) => void): void;
+  constructor(allowSensitive?: boolean)
+  info(label: string, obj: Record<string, unknown>, logger?: (msg: string) => void): void
+  error(
+    label: string,
+    err: unknown,
+    context?: Record<string, unknown>,
+    logger?: (msg: string) => void,
+  ): void
 }
 ```
 
@@ -529,6 +538,6 @@ class SafeLogger {
 
 ## Related Docs
 
-- [Diagnostics](./diagnostics.md) — Transaction failure diagnostics parsing
+- [Diagnostics](../DIAGNOSTICS.md) — Transaction failure diagnostics parsing
 - [Testing](./testing.md) — Unit testing with mocks and fixtures
 - [API Reference](../api/sdk.md) — Complete SDK API

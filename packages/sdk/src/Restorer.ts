@@ -33,9 +33,13 @@ import {
   throwIfAborted,
   type AbortSignalOptions,
 } from './AbortUtils.js'
-import { isRestoreResponse,extractArchivedKeys } from './Archiver.js'
-import { RestoreFeeExceededError,ResurrectError,OriginalTransactionExpiredError } from './errors.js'
-import { evaluateRestoreFootprint,restoreSizeGuidance } from './footprintGuard.js'
+import { isRestoreResponse, extractArchivedKeys } from './Archiver.js'
+import {
+  RestoreFeeExceededError,
+  ResurrectError,
+  OriginalTransactionExpiredError,
+} from './errors.js'
+import { evaluateRestoreFootprint, restoreSizeGuidance } from './footprintGuard.js'
 import { validateRestoreMemoConfig } from './memoValidation.js'
 
 /** Number of ledgers after simulation for which a restore preamble remains valid. */
@@ -174,7 +178,9 @@ export async function buildRestoreTransaction(params: BuildRestoreTxParams): Pro
   throwIfAborted(signal)
 
   if (!Number.isInteger(latestLedger) || latestLedger < 0) {
-    throw new Error('Cannot build restore transaction: simulation latestLedger must be a non-negative integer')
+    throw new Error(
+      'Cannot build restore transaction: simulation latestLedger must be a non-negative integer',
+    )
   }
 
   const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
@@ -255,7 +261,9 @@ export async function assertRestoreTransactionFresh(
 ): Promise<void> {
   const expectedLedgerBounds = expectedTransaction.ledgerBounds
   if (!expectedLedgerBounds) {
-    throw new Error('Restore transaction is missing ledger bounds; rebuild it with a fresh simulation')
+    throw new Error(
+      'Restore transaction is missing ledger bounds; rebuild it with a fresh simulation',
+    )
   }
 
   const signedBounds = signedTransaction.ledgerBounds
@@ -264,7 +272,9 @@ export async function assertRestoreTransactionFresh(
     signedBounds.minLedger !== expectedLedgerBounds.minLedger ||
     signedBounds.maxLedger !== expectedLedgerBounds.maxLedger
   ) {
-    throw new Error('Signed restore transaction changed its ledger bounds; rebuild and sign it again')
+    throw new Error(
+      'Signed restore transaction changed its ledger bounds; rebuild and sign it again',
+    )
   }
 
   const maxTime = Number(signedTransaction.timeBounds?.maxTime ?? 0)
@@ -442,7 +452,10 @@ export async function waitForTransaction(
     await delayWithSignal(jitter, signal)
   }
 
-  throw new ResurrectError('CONFIRMATION_TIMEOUT', `Transaction ${hash} did not complete within ${pollTimeoutMs}ms`)
+  throw new ResurrectError(
+    'CONFIRMATION_TIMEOUT',
+    `Transaction ${hash} did not complete within ${pollTimeoutMs}ms`,
+  )
 }
 
 function createAbortError(): Error {
@@ -704,7 +717,10 @@ async function pollTransactionAdaptive(
     await delayWithSignal(delay, signal)
   }
 
-  throw new ResurrectError('CONFIRMATION_TIMEOUT', `Transaction ${hash} did not complete within ${timeoutMs}ms`)
+  throw new ResurrectError(
+    'CONFIRMATION_TIMEOUT',
+    `Transaction ${hash} did not complete within ${timeoutMs}ms`,
+  )
 }
 
 /**

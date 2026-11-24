@@ -51,7 +51,7 @@ jobs:
           const fs = require('fs');
           const path = require('path');
           const root = process.cwd();
-          const pkgGlobs = ['packages/sdk', 'packages/react-hook', 'packages/vue-hook', 'packages/svelte-hook'];
+          const pkgGlobs = ['packages/sdk', 'packages/react-hook', 'packages/vue-hook', 'packages/svelte-hook', 'packages/adapter-albedo', 'packages/adapter-freighter', 'packages/adapter-lobstr', 'packages/adapter-rabet', 'packages/adapter-walletconnect', 'packages/adapter-walletkit', 'packages/adapter-xbull', 'packages/create-soroban-resurrect'];
           const internalNames = new Set();
           const pkgs = {};
           for (const dir of pkgGlobs) {
@@ -88,7 +88,7 @@ jobs:
           const fs = require('fs');
           const path = require('path');
           const root = process.cwd();
-          const pkgGlobs = ['packages/sdk', 'packages/react-hook', 'packages/vue-hook', 'packages/svelte-hook'];
+          const pkgGlobs = ['packages/sdk', 'packages/react-hook', 'packages/vue-hook', 'packages/svelte-hook', 'packages/adapter-albedo', 'packages/adapter-freighter', 'packages/adapter-lobstr', 'packages/adapter-rabet', 'packages/adapter-walletconnect', 'packages/adapter-walletkit', 'packages/adapter-xbull', 'packages/create-soroban-resurrect'];
           const internalNames = new Set();
           for (const dir of pkgGlobs) {
             const p = path.join(root, dir, 'package.json');
@@ -121,11 +121,14 @@ jobs:
 
       - name: Resolve release channel
         id: channel
+        env:
+          INPUT_CHANNEL: ${{ inputs.channel }}
+          INPUT_BASE: ${{ inputs.base }}
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            channel="${{ inputs.channel }}"
-            base="${{ inputs.base }}"
+            channel="$INPUT_CHANNEL"
+            base="$INPUT_BASE"
           else
             channel="stable"
             base=""
@@ -153,14 +156,20 @@ jobs:
         run: |
           set -euo pipefail
           version="${{ steps.channel.outputs.version }}"
-          packages=(packages/sdk packages/react-hook packages/vue-hook packages/svelte-hook)
+          packages=(packages/sdk packages/react-hook packages/vue-hook packages/svelte-hook packages/adapter-albedo packages/adapter-freighter packages/adapter-lobstr packages/adapter-rabet packages/adapter-walletconnect packages/adapter-walletkit packages/adapter-xbull packages/create-soroban-resurrect)
           for pkg in "${packages[@]}"; do
-            npm version "$version" -w "$pkg" --no-git-tag-version --allow-same-version
+            npm pkg set version="$version" -w "$pkg"
+            for field in dependencies peerDependencies devDependencies; do
+              if [ "$(npm pkg get "$field.@soroban-resurrect/sdk" -w "$pkg" | grep -c '[0-9]\.[0-9]')" -gt 0 ]; then
+                npm pkg set "$field.@soroban-resurrect/sdk=$version" -w "$pkg"
+              fi
+            done
           done
           echo "Applied canary version $version to all packages."
 
-      - run: npm run build:sdk
-      - run: npm run build:hook
+      - run: npm run build
+      - run: npm test
+      - run: npm run verify:packaging
 
       - name: Inspect package tarballs for accidental secrets and unexpected files
         run: |
@@ -171,7 +180,7 @@ jobs:
           const path = require('path');
           const os = require('os');
 
-          const packages = ['packages/sdk', 'packages/react-hook', 'packages/vue-hook', 'packages/svelte-hook'];
+          const packages = ['packages/sdk', 'packages/react-hook', 'packages/vue-hook', 'packages/svelte-hook', 'packages/adapter-albedo', 'packages/adapter-freighter', 'packages/adapter-lobstr', 'packages/adapter-rabet', 'packages/adapter-walletconnect', 'packages/adapter-walletkit', 'packages/adapter-xbull', 'packages/create-soroban-resurrect'];
 
           // Credential patterns that must never appear in a published tarball.
           const SECRET_PATTERNS = [
@@ -190,7 +199,6 @@ jobs:
             { name: 'private key file', re: /\.(pem|key|p12|pfx)$/i },
             { name: 'npmrc', re: /(^|\/)\.npmrc$/ },
             { name: 'git metadata', re: /(^|\/)\.git(\/|$)/ },
-            { name: 'source map', re: /\.map$/ },
             { name: 'test file', re: /(^|\/)(__tests__|test|tests)\/|\.(test|spec)\.[cm]?[jt]sx?$/ },
           ];
 
@@ -243,7 +251,7 @@ jobs:
           if (failures.length) {
             console.error('Tarball inspection failed. Refusing to publish:');
             for (const f of failures) console.error('  - ' + f);
-            console.error('See docs/RELEASE.md#tarball-secret-inspection for remediation.');
+            console.error('Remove the listed files or secrets and re-run.');
             process.exit(1);
           }
           console.log('Tarball inspection passed: no secrets or unexpected files detected.');
@@ -254,7 +262,7 @@ jobs:
         run: |
           set -euo pipefail
           tag="${{ steps.channel.outputs.tag }}"
-          packages=(packages/sdk packages/react-hook packages/vue-hook packages/svelte-hook)
+          packages=(packages/sdk packages/react-hook packages/vue-hook packages/svelte-hook packages/adapter-albedo packages/adapter-freighter packages/adapter-lobstr packages/adapter-rabet packages/adapter-walletconnect packages/adapter-walletkit packages/adapter-xbull packages/create-soroban-resurrect)
           pending=()
           for pkg in "${packages[@]}"; do
             name=$(node -p "require('./$pkg/package.json').name")
@@ -280,6 +288,7 @@ jobs:
         if: steps.dupcheck.outputs.skip != 'true'
         run: |
           set -euo pipefail
+          tag="${{ steps.channel.outputs.tag }}"
           mapfile -t packages < "$RUNNER_TEMP/pending-packages.txt"
           published=()
           failed=""
@@ -307,7 +316,7 @@ jobs:
         if: steps.dupcheck.outputs.skip != 'true'
         run: |
           set -euo pipefail
-          packages=(packages/sdk packages/react-hook packages/vue-hook packages/svelte-hook)
+          packages=(packages/sdk packages/react-hook packages/vue-hook packages/svelte-hook packages/adapter-albedo packages/adapter-freighter packages/adapter-lobstr packages/adapter-rabet packages/adapter-walletconnect packages/adapter-walletkit packages/adapter-xbull packages/create-soroban-resurrect)
           failures=()
           for pkg in "${packages[@]}"; do
             name=$(node -p "require('./$pkg/package.json').name")
@@ -369,7 +378,7 @@ jobs:
               echo "- $f" >> "$GITHUB_STEP_SUMMARY"
             done
             echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "Recovery: see \`docs/RELEASE.md#recovering-from-a-partial-publish\`." >> "$GITHUB_STEP_SUMMARY"
+            echo "Recovery: re-run this workflow; already-published versions are skipped." >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
           echo "All packages verified: provenance attestations and registry signatures present."

@@ -1,1 +1,18 @@
-{}
+{
+  "@soroban-resurrect/adapter-albedo": 532,
+  "@soroban-resurrect/adapter-freighter": 1008,
+  "@soroban-resurrect/adapter-lobstr": 545,
+  "@soroban-resurrect/adapter-rabet": 693,
+  "@soroban-resurrect/adapter-walletconnect": 1111,
+  "@soroban-resurrect/adapter-walletkit": 567,
+  "@soroban-resurrect/adapter-xbull": 546,
+  "@soroban-resurrect/react-hook": 3007,
+  "@soroban-resurrect/react-hook/native": 3007,
+  "@soroban-resurrect/react-hook/standalone": 524,
+  "@soroban-resurrect/react-hook/context": 1013,
+  "@soroban-resurrect/sdk": 37465,
+  "@soroban-resurrect/svelte-hook": 1238,
+  "@soroban-resurrect/svelte-hook/store": 1238,
+  "@soroban-resurrect/vue-hook": 2295,
+  "@soroban-resurrect/vue-hook/composable": 856
+}

@@ -115,6 +115,8 @@ describe('parseTransactionFailure', () => {
       diagnosticEvents: [xdr.DiagnosticEvent.fromXDR(DIAG_ERROR_XDR, 'base64')],
     })
 
-    expect(parsed?.diagnosticMessages.some((message) => message.includes('require_auth'))).toBe(true)
+    expect(parsed?.diagnosticMessages.some((message) => message.includes('require_auth'))).toBe(
+      true,
+    )
   })
 })

@@ -240,18 +240,14 @@ export async function signAuthorizationEntries(
  *
  * @throws If the transaction contains no `InvokeHostFunction` operation.
  */
-export function attachAuthorizationEntries(
-  options: AttachAuthorizationOptions,
-): Transaction {
+export function attachAuthorizationEntries(options: AttachAuthorizationOptions): Transaction {
   const { transaction, authEntries } = options
 
   const ops = transaction.operations
   const invokeIdx = ops.findIndex((op) => op.type === 'invokeHostFunction')
 
   if (invokeIdx === -1) {
-    throw new Error(
-      'attachAuthorizationEntries: transaction has no InvokeHostFunction operation',
-    )
+    throw new Error('attachAuthorizationEntries: transaction has no InvokeHostFunction operation')
   }
 
   // Access the underlying XDR envelope to mutate the auth list
@@ -327,8 +323,7 @@ export function requiresAddressAuthorization(
   authEntries: xdr.SorobanAuthorizationEntry[],
 ): boolean {
   return authEntries.some(
-    (entry) =>
-      entry.credentials().switch().name !== 'sorobanCredentialsSourceAccount',
+    (entry) => entry.credentials().switch().name !== 'sorobanCredentialsSourceAccount',
   )
 }
 
@@ -342,8 +337,7 @@ export function getAddressAuthEntries(
   authEntries: xdr.SorobanAuthorizationEntry[],
 ): xdr.SorobanAuthorizationEntry[] {
   return authEntries.filter(
-    (entry) =>
-      entry.credentials().switch().name !== 'sorobanCredentialsSourceAccount',
+    (entry) => entry.credentials().switch().name !== 'sorobanCredentialsSourceAccount',
   )
 }
 
@@ -355,12 +349,9 @@ export function getAddressAuthEntries(
  * Narrowing type guard: does this wallet implement CAP-0046 per-entry
  * authorization signing (`signAuthEntry`)?
  */
-export function supportsAuthEntrySigning(
-  wallet: unknown,
-): wallet is AuthorizationWalletAdapter {
+export function supportsAuthEntrySigning(wallet: unknown): wallet is AuthorizationWalletAdapter {
   return (
-    wallet != null &&
-    typeof (wallet as { signAuthEntry?: unknown }).signAuthEntry === 'function'
+    wallet != null && typeof (wallet as { signAuthEntry?: unknown }).signAuthEntry === 'function'
   )
 }
 
@@ -481,9 +472,7 @@ function attachSignedAuthEntries(
       ? envelope.v0().tx().operations()
       : envelope.v1().tx().operations()
 
-  const invokeIdx = rawOps.findIndex(
-    (op) => op.body().switch().name === 'invokeHostFunction',
-  )
+  const invokeIdx = rawOps.findIndex((op) => op.body().switch().name === 'invokeHostFunction')
   if (invokeIdx === -1) {
     throw new Error(
       'ensureAddressAuthorization: transaction has no InvokeHostFunction operation to attach auth entries to',
@@ -495,7 +484,9 @@ function attachSignedAuthEntries(
 
   const rebuilt = TransactionBuilder.fromXDR(envelope.toXDR('base64'), networkPassphrase)
   if (!(rebuilt instanceof Transaction)) {
-    throw new Error('ensureAddressAuthorization: failed to rebuild transaction after attaching auth entries')
+    throw new Error(
+      'ensureAddressAuthorization: failed to rebuild transaction after attaching auth entries',
+    )
   }
   return rebuilt
 }

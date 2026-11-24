@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useMemo } from 'react'
 import { SorobanResurrectProvider, useSorobanResurrectContext } from '@soroban-resurrect/react-hook'
+import { asStellarPublicKey, asXdrBase64 } from '@soroban-resurrect/sdk'
 import { TransactionBuilder, Operation, Networks, nativeToScVal, rpc } from '@stellar/stellar-sdk'
 import { ProgressIndicator } from './components/ProgressIndicator.js'
 import { ErrorDisplay } from './components/ErrorDisplay.js'
@@ -77,7 +78,9 @@ function NetworkSelector({
       </select>
 
       {networkId === 'custom' && (
-        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 480 }}>
+        <div
+          style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 480 }}
+        >
           <input
             aria-label="Custom RPC URL"
             placeholder="RPC URL (https://...)"
@@ -161,7 +164,7 @@ function WalletButton() {
 
   return (
     <div className="sr-wallet">
-      {!walletConnected ? (
+      {status !== 'connected' ? (
         <button className="sr-btn" onClick={connectWallet}>
           Connect Freighter Wallet
         </button>
@@ -214,11 +217,11 @@ function WithdrawButton({ networkPassphrase }: { networkPassphrase: string }) {
       const stellar = getStellarWallet()
       const wallet = {
         isConnected: async () => true,
-        getPublicKey: async () => stellar.getPublicKey(),
+        getPublicKey: async () => asStellarPublicKey(await stellar.getPublicKey()),
         signTransaction: async (
           tx: string,
           opts?: { networkPassphrase?: string; network?: string },
-        ) => stellar.signTransaction(tx, opts),
+        ) => asXdrBase64(await stellar.signTransaction(tx, opts)),
       }
 
       const tx = await buildSampleTransaction()
@@ -255,19 +258,20 @@ function WithdrawButton({ networkPassphrase }: { networkPassphrase: string }) {
 
   return (
     <div className="sr-app">
-      <h2>Soroban-Resurrect Demo</h2>
       <p className="sr-tagline">
         Submit a contract call that transparently restores any archived state it touches.
       </p>
 
       <div className="sr-card">
-        <WalletButton />
-
         <div className="sr-actions">
           <button className="sr-btn" onClick={handleCheckArchived} disabled={isProcessing}>
             Check Archived Keys
           </button>
-          <button className="sr-btn sr-btn--primary" onClick={handleWithdraw} disabled={isProcessing}>
+          <button
+            className="sr-btn sr-btn--primary"
+            onClick={handleWithdraw}
+            disabled={isProcessing}
+          >
             {isProcessing ? 'Processing...' : 'Submit Withdraw'}
           </button>
           {(state.state !== 'idle' || lastResult || errorMessage) && (

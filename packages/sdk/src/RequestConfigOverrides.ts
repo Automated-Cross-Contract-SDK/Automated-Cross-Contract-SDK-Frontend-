@@ -51,7 +51,9 @@ export function resolveSubmitConfig(
   const suppliedOverrides: unknown = options.configOverrides
   if (
     suppliedOverrides !== undefined &&
-    (typeof suppliedOverrides !== 'object' || suppliedOverrides === null || Array.isArray(suppliedOverrides))
+    (typeof suppliedOverrides !== 'object' ||
+      suppliedOverrides === null ||
+      Array.isArray(suppliedOverrides))
   ) {
     throw new Error('Invalid configOverrides: expected an object.')
   }
@@ -59,14 +61,18 @@ export function resolveSubmitConfig(
   const overrides = (suppliedOverrides ?? {}) as SubmitWithRestoreConfigOverrides
   for (const field of Object.keys(overrides)) {
     if (!SUPPORTED_CONFIG_OVERRIDES.has(field)) {
-      throw new Error(`Invalid configOverrides.${field}: this setting cannot be overridden per request.`)
+      throw new Error(
+        `Invalid configOverrides.${field}: this setting cannot be overridden per request.`,
+      )
     }
   }
 
   const effectiveConfig: SorobanResurrectConfig = {
     ...config,
-    pollIntervalMs: overrides.pollIntervalMs === undefined ? config.pollIntervalMs : overrides.pollIntervalMs,
-    pollTimeoutMs: overrides.pollTimeoutMs === undefined ? config.pollTimeoutMs : overrides.pollTimeoutMs,
+    pollIntervalMs:
+      overrides.pollIntervalMs === undefined ? config.pollIntervalMs : overrides.pollIntervalMs,
+    pollTimeoutMs:
+      overrides.pollTimeoutMs === undefined ? config.pollTimeoutMs : overrides.pollTimeoutMs,
     restoreFeeMultiplier:
       overrides.restoreFeeMultiplier === undefined
         ? config.restoreFeeMultiplier

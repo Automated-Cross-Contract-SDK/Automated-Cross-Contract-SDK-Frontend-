@@ -32,11 +32,9 @@ describe('useSorobanResurrectNetwork', () => {
   })
 
   it('respects initialNetwork', () => {
-    const { result } = renderHook(() =>
-      useSorobanResurrectNetwork({ initialNetwork: 'mainnet' }),
-    )
+    const { result } = renderHook(() => useSorobanResurrectNetwork({ initialNetwork: 'mainnet' }))
     expect(result.current.network).toBe('mainnet')
-    expect(result.current.current.displayName).toBe('Mainnet')
+    expect(result.current.current.displayName).toBe('Soroban Mainnet')
     expect(SorobanResurrectNetwork.create).toHaveBeenCalledWith('mainnet', undefined)
   })
 

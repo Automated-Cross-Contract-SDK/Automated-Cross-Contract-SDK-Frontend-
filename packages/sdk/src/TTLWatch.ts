@@ -393,19 +393,9 @@ export function watchTTL(
         ...config,
         ...configForWalletRestore(config, wallet),
       } as ResolvedSorobanResurrectConfig
-      const restoreTx = await buildRestoreTxForKeys(
-        server,
-        publicKey,
-        keysToRestore,
-        restoreConfig,
-      )
+      const restoreTx = await buildRestoreTxForKeys(server, publicKey, keysToRestore, restoreConfig)
       const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
-      const signedTx = await signAndVerifyTransaction(
-        restoreTx,
-        wallet,
-        networkPassphrase,
-        config,
-      )
+      const signedTx = await signAndVerifyTransaction(restoreTx, wallet, networkPassphrase, config)
 
       await assertRestoreTransactionFresh(server, signedTx, restoreTx)
 

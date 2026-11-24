@@ -97,8 +97,8 @@ const archivedKeys = await sr.detectArchivedKeys(positionTx)
 //    restore tx is a separate `restoreFootprint` operation, so its fee is
 //    independent of the original transaction's fee.
 const restoreTx = await sr.buildRestoreTx(walletPublicKey, positionTx)
-const restoreFee = restoreTx.fee          // stroops, as a string
-const originalFee = positionTx.fee        // stroops, as a string
+const restoreFee = restoreTx.fee // stroops, as a string
+const originalFee = positionTx.fee // stroops, as a string
 
 // 4. Present the review to the user: what is restored, and the total cost
 //    (restore fee + original fee) they are about to authorize.
@@ -145,5 +145,5 @@ network (or a deterministic test double), see:
 The playground above is a single snippet. For a realistic application structure
 that wires the SDK into a full UI — routing, wallet lifecycle, user feedback, fee
 consent, cancellation, and typed error handling — see the
-[React example app](/examples/react-app). It is the recommended starting point
+[basic React example](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/tree/main/examples/basic). It is the recommended starting point
 when you are moving from a prototype to a production integration.

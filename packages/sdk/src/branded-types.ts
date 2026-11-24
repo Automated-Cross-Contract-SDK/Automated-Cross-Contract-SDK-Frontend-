@@ -275,7 +275,12 @@ export function asHexString(value: string): HexString {
  * ```
  */
 export function isHexString(value: unknown): value is HexString {
-  return typeof value === 'string' && value.length > 0 && /^[0-9a-f]+$/.test(value) && value.length % 2 === 0
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    /^[0-9a-f]+$/.test(value) &&
+    value.length % 2 === 0
+  )
 }
 
 // ---------------------------------------------------------------------------

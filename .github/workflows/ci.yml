@@ -45,3 +45,23 @@ jobs:
       - name: Build
         if: ${{ !cancelled() }}
         run: npm run build
+
+      - name: Type tests
+        if: ${{ !cancelled() }}
+        run: npm run test:types
+
+      - name: Format
+        if: ${{ !cancelled() }}
+        run: npm run format
+
+      - name: Verify packages
+        if: ${{ !cancelled() }}
+        run: npm run verify:packaging
+
+      - name: Bundle budgets
+        if: ${{ !cancelled() }}
+        run: npm run check:bundle
+
+      - name: Docs
+        if: ${{ !cancelled() }}
+        run: npm run docs:build

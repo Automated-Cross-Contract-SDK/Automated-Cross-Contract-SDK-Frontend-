@@ -113,10 +113,7 @@ export class WalletKitAdapter implements WalletAdapter {
     }
   }
 
-  async signTransaction(
-    tx: string,
-    opts?: { networkPassphrase?: string; network?: string },
-  ) {
+  async signTransaction(tx: string, opts?: { networkPassphrase?: string; network?: string }) {
     try {
       const { signedTxXdr } = await this.kit.signTransaction(tx, {
         address: this.address,

@@ -89,7 +89,9 @@ function discoverEntries() {
   const entries = []
   for (const dir of readdirSync(PACKAGES_DIR).sort()) {
     const pkgDir = path.join(PACKAGES_DIR, dir)
-    if (!existsSync(path.join(pkgDir, 'package.json'))) continue
+    const manifestPath = path.join(pkgDir, 'package.json')
+    if (!existsSync(manifestPath)) continue
+    if (JSON.parse(readFileSync(manifestPath, 'utf8')).private) continue
     entries.push(...entryPoints(pkgDir))
   }
   return entries

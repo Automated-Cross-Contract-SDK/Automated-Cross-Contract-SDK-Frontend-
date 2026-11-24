@@ -24,16 +24,18 @@ const PROCESSING_STATES = [
 ]
 
 vi.mock('@soroban-resurrect/sdk', () => ({
-  SorobanResurrect: vi.fn().mockImplementation((config: unknown) => ({
-    config,
-    onStateChange: mockOnStateChange,
-    reset: mockReset,
-    detectArchivedKeys: mockDetectArchivedKeys,
-    estimateRestoreFee: vi.fn().mockResolvedValue('100'),
-    submitWithRestore: mockSubmitWithRestore,
-    dispose: mockDispose,
-    on: mockOn,
-  })),
+  SorobanResurrect: vi.fn().mockImplementation(function (config: unknown) {
+    return {
+      config,
+      onStateChange: mockOnStateChange,
+      reset: mockReset,
+      detectArchivedKeys: mockDetectArchivedKeys,
+      estimateRestoreFee: vi.fn().mockResolvedValue('100'),
+      submitWithRestore: mockSubmitWithRestore,
+      dispose: mockDispose,
+      on: mockOn,
+    }
+  }),
   isProcessingState: (state: string) => PROCESSING_STATES.includes(state),
 }))
 

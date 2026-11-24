@@ -129,7 +129,6 @@ export type ResurrectErrorCode =
 
   /** An RPC call failed at the transport level, or the circuit breaker is open. */
   | 'NETWORK_ERROR'
-
   | 'UNKNOWN_ERROR'
   | 'RESTORE_FEE_CAP_EXCEEDED'
 

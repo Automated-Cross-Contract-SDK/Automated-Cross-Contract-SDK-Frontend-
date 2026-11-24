@@ -2,10 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { Networks } from '@stellar/stellar-sdk'
 import { SorobanResurrect } from '../SorobanResurrect.js'
 import type { ISorobanRpcClient } from '../RpcClient.js'
-import {
-  MIN_RESTORE_PROTOCOL_VERSION,
-  checkNetworkCapabilities,
-} from '../NetworkCapabilities.js'
+import { MIN_RESTORE_PROTOCOL_VERSION, checkNetworkCapabilities } from '../NetworkCapabilities.js'
 
 function makeClient(overrides: Partial<ISorobanRpcClient> = {}): ISorobanRpcClient {
   return {
@@ -16,9 +13,10 @@ function makeClient(overrides: Partial<ISorobanRpcClient> = {}): ISorobanRpcClie
     getLedgerEntries: vi.fn(),
     getLatestLedger: vi.fn(),
     getNetwork: vi.fn().mockResolvedValue({ passphrase: Networks.TESTNET }),
-    getVersionInfo: vi
-      .fn()
-      .mockResolvedValue({ version: 'stellar-rpc/23.0.0', protocolVersion: MIN_RESTORE_PROTOCOL_VERSION }),
+    getVersionInfo: vi.fn().mockResolvedValue({
+      version: 'stellar-rpc/23.0.0',
+      protocolVersion: MIN_RESTORE_PROTOCOL_VERSION,
+    }),
     ...overrides,
   } as unknown as ISorobanRpcClient
 }
@@ -40,7 +38,9 @@ describe('checkNetworkCapabilities', () => {
     const report = await checkNetworkCapabilities(
       makeClient({
         getNetwork: vi.fn().mockResolvedValue({ passphrase: Networks.PUBLIC }),
-        getVersionInfo: vi.fn().mockResolvedValue({ protocolVersion: MIN_RESTORE_PROTOCOL_VERSION - 1 }),
+        getVersionInfo: vi
+          .fn()
+          .mockResolvedValue({ protocolVersion: MIN_RESTORE_PROTOCOL_VERSION - 1 }),
       }),
       Networks.TESTNET,
     )

@@ -134,9 +134,9 @@ The SDK logs a warning through the configured `logger` before asking a
 hardware wallet to sign: transaction details may not be fully verifiable on
 the device.
 
-| Device | Signing prompt and display limits |
-| --- | --- |
-| Ledger Stellar app | This adapter sends the transaction hash to `signHash`; it does not send the operation or memo fields for the device to display. Users must verify transaction details in the trusted application before approving. |
+| Device                    | Signing prompt and display limits                                                                                                                                                                                                    |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Ledger Stellar app        | This adapter sends the transaction hash to `signHash`; it does not send the operation or memo fields for the device to display. Users must verify transaction details in the trusted application before approving.                   |
 | Trezor via Trezor Connect | The adapter passes the transaction envelope to Trezor Connect, which presents the fields supported by the installed firmware. The complete Soroban restore footprint and ledger keys are not guaranteed to be inspectable on-device. |
 
 Prompts and supported fields vary with device app/firmware versions.

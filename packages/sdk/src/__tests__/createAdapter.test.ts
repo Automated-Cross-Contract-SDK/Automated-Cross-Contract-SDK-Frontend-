@@ -44,31 +44,38 @@ describe('createAdapter (#243)', () => {
     )
   })
 
-  it.each(['freighter', 'albedo', 'lobstr', 'xbull', 'rabet', 'walletconnect', 'walletkit'] as const)(
-    'returns a working adapter for "%s" via lazy import',
-    async (name) => {
-      const exportName = {
-        freighter: 'FreighterAdapter',
-        albedo: 'AlbedoAdapter',
-        lobstr: 'LobstrAdapter',
-        xbull: 'XBullAdapter',
-        rabet: 'RabetAdapter',
-        walletconnect: 'WalletConnectAdapter',
-        walletkit: 'WalletKitAdapter',
-      }[name]
-      const importer: AdapterImporter = vi.fn().mockResolvedValue(noopWalletModule(exportName))
+  it.each([
+    'freighter',
+    'albedo',
+    'lobstr',
+    'xbull',
+    'rabet',
+    'walletconnect',
+    'walletkit',
+  ] as const)('returns a working adapter for "%s" via lazy import', async (name) => {
+    const exportName = {
+      freighter: 'FreighterAdapter',
+      albedo: 'AlbedoAdapter',
+      lobstr: 'LobstrAdapter',
+      xbull: 'XBullAdapter',
+      rabet: 'RabetAdapter',
+      walletconnect: 'WalletConnectAdapter',
+      walletkit: 'WalletKitAdapter',
+    }[name]
+    const importer: AdapterImporter = vi.fn().mockResolvedValue(noopWalletModule(exportName))
 
-      const adapter = await createAdapter(name, { foo: 1 }, importer)
+    const adapter = await createAdapter(name, { foo: 1 }, importer)
 
-      expect(importer).toHaveBeenCalledWith(`@soroban-resurrect/adapter-${name}`)
-      expect(typeof adapter.isConnected).toBe('function')
-      expect(typeof adapter.signTransaction).toBe('function')
-      expect((adapter as unknown as { opts: unknown }).opts).toEqual({ foo: 1 })
-    },
-  )
+    expect(importer).toHaveBeenCalledWith(`@soroban-resurrect/adapter-${name}`)
+    expect(typeof adapter.isConnected).toBe('function')
+    expect(typeof adapter.signTransaction).toBe('function')
+    expect((adapter as unknown as { opts: unknown }).opts).toEqual({ foo: 1 })
+  })
 
   it('is case-insensitive on the wallet name', async () => {
-    const importer: AdapterImporter = vi.fn().mockResolvedValue(noopWalletModule('FreighterAdapter'))
+    const importer: AdapterImporter = vi
+      .fn()
+      .mockResolvedValue(noopWalletModule('FreighterAdapter'))
     const adapter = await createAdapter('FREIGHTER', undefined, importer)
     expect(adapter).toBeDefined()
   })

@@ -45,7 +45,9 @@ function errorMessage(error: unknown): string {
 }
 
 function asObject(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : undefined
+  return typeof value === 'object' && value !== null
+    ? (value as Record<string, unknown>)
+    : undefined
 }
 
 /**
@@ -75,7 +77,8 @@ export async function checkNetworkCapabilities(
   if (!client.getNetwork) {
     network = {
       status: 'unknown',
-      message: 'RPC client does not expose getNetwork(); add this method to verify its network passphrase.',
+      message:
+        'RPC client does not expose getNetwork(); add this method to verify its network passphrase.',
     }
   } else {
     try {
@@ -84,13 +87,17 @@ export async function checkNetworkCapabilities(
       if (typeof passphrase !== 'string' || passphrase.length === 0) {
         network = {
           status: 'unknown',
-          message: 'RPC getNetwork() returned no passphrase; check that the endpoint supports the Soroban RPC API.',
+          message:
+            'RPC getNetwork() returned no passphrase; check that the endpoint supports the Soroban RPC API.',
         }
       } else {
         rpcNetworkPassphrase = passphrase
         network =
           passphrase === configuredNetworkPassphrase
-            ? { status: 'supported', message: 'RPC network passphrase matches the configured network.' }
+            ? {
+                status: 'supported',
+                message: 'RPC network passphrase matches the configured network.',
+              }
             : {
                 status: 'unsupported',
                 message:
@@ -143,7 +150,8 @@ export async function checkNetworkCapabilities(
       } else {
         restoreProtocol = {
           status: 'unknown',
-          message: 'RPC getVersionInfo() returned no valid protocolVersion; protocol support could not be verified.',
+          message:
+            'RPC getVersionInfo() returned no valid protocolVersion; protocol support could not be verified.',
         }
       }
     } catch (error) {

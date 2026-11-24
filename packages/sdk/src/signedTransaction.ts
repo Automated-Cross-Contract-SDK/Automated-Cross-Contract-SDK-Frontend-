@@ -1,8 +1,4 @@
-import {
-  FeeBumpTransaction,
-  Transaction,
-  TransactionBuilder,
-} from '@stellar/stellar-sdk'
+import { FeeBumpTransaction, Transaction, TransactionBuilder } from '@stellar/stellar-sdk'
 import type { WalletAdapter } from './types.js'
 import type { SorobanResurrectConfig } from './types.js'
 import { ResurrectError } from './errors.js'
@@ -18,8 +14,7 @@ function sameOperations(expected: Transaction, actual: Transaction): boolean {
   return (
     expectedOperations.length === actualOperations.length &&
     expectedOperations.every(
-      (operation, index) =>
-        operation.toXDR('base64') === actualOperations[index].toXDR('base64'),
+      (operation, index) => operation.toXDR('base64') === actualOperations[index].toXDR('base64'),
     )
   )
 }

@@ -82,7 +82,9 @@ function validateFeeCap(value: unknown): void {
 
 function validateInteger(field: string, value: unknown, minimum: number): void {
   if (typeof value !== 'number' || !Number.isInteger(value) || value < minimum) {
-    throw new Error(`Invalid config.${field}: must be an integer greater than or equal to ${minimum}`)
+    throw new Error(
+      `Invalid config.${field}: must be an integer greater than or equal to ${minimum}`,
+    )
   }
 }
 
@@ -121,7 +123,9 @@ export function validateConfigShape(config: SorobanResurrectConfig): void {
   try {
     rpcUrl = new URL(config.rpcUrl)
   } catch {
-    throw new Error(`Invalid config.rpcUrl: config.rpcUrl must be a valid URL (received "${config.rpcUrl}")`)
+    throw new Error(
+      `Invalid config.rpcUrl: config.rpcUrl must be a valid URL (received "${config.rpcUrl}")`,
+    )
   }
   if (rpcUrl.protocol !== 'http:' && rpcUrl.protocol !== 'https:') {
     throw new Error(`Invalid config.rpcUrl: expected an http(s) URL, received "${rpcUrl.protocol}"`)
@@ -254,9 +258,7 @@ export function validateConfigShape(config: SorobanResurrectConfig): void {
   for (const field of ['archiveDetectionChunkSize', 'archiveDetectionConcurrency'] as const) {
     const value = config[field]
     if (value !== undefined && (!Number.isInteger(value) || value < 1)) {
-      throw new Error(
-        `Invalid ${field}: ${JSON.stringify(value)}. Must be a positive integer.`,
-      )
+      throw new Error(`Invalid ${field}: ${JSON.stringify(value)}. Must be a positive integer.`)
     }
   }
 
@@ -283,12 +285,21 @@ export function validateConfigShape(config: SorobanResurrectConfig): void {
   if (config.restoreSizeWarnRatio !== undefined) {
     const ratio = config.restoreSizeWarnRatio
     if (typeof ratio !== 'number' || !Number.isFinite(ratio) || ratio <= 0 || ratio > 1) {
-      throw new Error('Invalid config.restoreSizeWarnRatio: must be a number greater than 0 and at most 1')
+      throw new Error(
+        'Invalid config.restoreSizeWarnRatio: must be a number greater than 0 and at most 1',
+      )
     }
   }
 
   if (config.runtime !== undefined) {
-    const methods = ['now', 'random', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] as const
+    const methods = [
+      'now',
+      'random',
+      'setTimeout',
+      'clearTimeout',
+      'setInterval',
+      'clearInterval',
+    ] as const
     for (const method of methods) {
       if (typeof config.runtime?.[method] !== 'function') {
         throw new Error(`config.runtime.${method} must be a function`)
@@ -402,7 +413,8 @@ function resolveEffectiveSettings(config: SorobanResurrectConfig): EffectiveSoro
     maxRestoreFeeStroops: config.maxRestoreFeeStroops ?? String(MAX_RESTORE_FEE_STROOPS),
     maxSequenceRetries: config.maxSequenceRetries ?? MAX_SEQUENCE_RETRIES,
     archiveDetectionChunkSize: config.archiveDetectionChunkSize ?? ARCHIVE_DETECTION_CHUNK_SIZE,
-    archiveDetectionConcurrency: config.archiveDetectionConcurrency ?? ARCHIVE_DETECTION_CONCURRENCY,
+    archiveDetectionConcurrency:
+      config.archiveDetectionConcurrency ?? ARCHIVE_DETECTION_CONCURRENCY,
     archiveDetectionFallback:
       config.archiveDetectionFallback ?? config.archiveDetectionMethod !== 'direct',
     rpcTimeoutMs: config.rpcTimeoutMs ?? RPC_TIMEOUT_MS,

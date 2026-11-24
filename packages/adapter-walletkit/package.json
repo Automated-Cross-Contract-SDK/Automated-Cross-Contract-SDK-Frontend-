@@ -28,16 +28,27 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
     "lint": "eslint 'src/**/*.{ts,tsx}'"
   },
   "peerDependencies": {
     "@creit.tech/stellar-wallets-kit": ">=1.0.0",
-    "@soroban-resurrect/sdk": "^0.1.0"
+    "@soroban-resurrect/sdk": "0.1.0"
   },
   "devDependencies": {
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "@soroban-resurrect/sdk": "0.1.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-.git",
+    "directory": "packages/adapter-walletkit"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

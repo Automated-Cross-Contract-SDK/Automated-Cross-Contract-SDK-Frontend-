@@ -17,11 +17,7 @@ cached for a few seconds (it's polled frequently during TTL checks and
 restore confirmation) and every call is logged.
 
 ```typescript
-import {
-  createRpcClient,
-  SorobanResurrect,
-  type ISorobanRpcClient,
-} from '@soroban-resurrect/sdk'
+import { createRpcClient, SorobanResurrect, type ISorobanRpcClient } from '@soroban-resurrect/sdk'
 import type { rpc } from '@stellar/stellar-sdk'
 
 function withCachingAndLogging(client: ISorobanRpcClient): ISorobanRpcClient {
@@ -130,7 +126,7 @@ import { SorobanResurrect } from '@soroban-resurrect/sdk'
 import { vi } from 'vitest'
 
 const mockClient: ISorobanRpcClient = {
-  simulateTransaction: vi.fn().mockResolvedValue({ /* ... */ }),
+  simulateTransaction: vi.fn().mockResolvedValue({/* ... */}),
   sendTransaction: vi.fn(),
   getTransaction: vi.fn(),
   getAccount: vi.fn(),

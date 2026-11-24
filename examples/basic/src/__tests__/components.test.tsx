@@ -28,7 +28,9 @@ describe('ProgressIndicator', () => {
 
 describe('ErrorDisplay', () => {
   it('classifies a wallet error and lists recovery hints', () => {
-    render(<ErrorDisplay message="Freighter wallet not found. Please install the Freighter extension." />)
+    render(
+      <ErrorDisplay message="Freighter wallet not found. Please install the Freighter extension." />,
+    )
     expect(screen.getByText('Wallet not detected')).toBeInTheDocument()
     expect(screen.getByText(/freighter\.app/i)).toBeInTheDocument()
   })

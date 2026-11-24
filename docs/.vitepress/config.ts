@@ -1,5 +1,4 @@
 import { defineConfig } from 'vitepress'
-import { DOC_VERSIONS, DEFAULT_VERSION } from './versions'
 
 export default defineConfig({
   title: 'Soroban-Resurrect',
@@ -25,20 +24,6 @@ export default defineConfig({
       { text: 'Roadmap', link: '/roadmap' },
     ],
 
-    // Documentation version selector, driven by the version registry in
-    // `./versions.ts`. Each entry corresponds to a published package release.
-    // The active version is indicated by the `activeMatch`/`text` of the
-    // current entry; `DEFAULT_VERSION` is the fallback selection.
-    versions: {
-      defaultVersion: DEFAULT_VERSION,
-      options: DOC_VERSIONS.map((v) => ({
-        text: v.label,
-        link: `/versions/${v.id}/`,
-        note: v.note,
-        packageVersion: v.packageVersion,
-      })),
-    },
-
     sidebar: {
       '/guide/': [
         {
@@ -50,7 +35,10 @@ export default defineConfig({
             { text: 'Restore Fees and Limits', link: '/guide/restore-fees' },
             { text: 'History Persistence', link: '/guide/history-persistence' },
             { text: 'Troubleshooting', link: '/guide/troubleshooting' },
-            { text: 'Upgrading Between Major Versions', link: '/guide/migration' },
+            {
+              text: 'Upgrading Between Major Versions',
+              link: 'https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/blob/main/MIGRATION.md',
+            },
             { text: 'Local Development', link: '/guide/local-development' },
             { text: 'Local Package Development', link: '/guide/local-package-development' },
             { text: 'Production Deployment', link: '/guide/production-deployment' },

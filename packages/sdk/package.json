@@ -28,6 +28,10 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "react-native": {
+        "import": "./dist/native.js",
+        "types": "./dist/index.d.ts"
+      },
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
     }
@@ -36,7 +40,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "npm run clean && tsup",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
     "lint": "eslint 'src/**/*.{ts,tsx}'",
@@ -45,9 +49,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@stellar/stellar-sdk": "12.3.0",
-    "@xstate/fsm": "2.0.1",
-    "@soroban-resurrect/core": "0.1.0"
+    "@stellar/stellar-sdk": "12.3.0"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "5.0.5",
@@ -55,5 +57,10 @@
     "tsup": "9.0.0",
     "typescript": "~6.0.3",
     "vitest": "5.0.5"
-  }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "sideEffects": false,
+  "react-native": "./dist/native.js"
 }

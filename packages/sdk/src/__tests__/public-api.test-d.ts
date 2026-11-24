@@ -191,7 +191,9 @@ test('SorobanResurrectConfig and result types keep their shape', () => {
   expectTypeOf<AbortSignalOptions['signal']>().toEqualTypeOf<AbortSignal | undefined>()
   expectTypeOf<Parameters<SorobanResurrect['submitWithRestore']>[0]>().toHaveProperty('signal')
   expectTypeOf<Parameters<SorobanResurrect['retry']>[2]>().toMatchTypeOf<AbortSignalOptions>()
-  expectTypeOf<Parameters<SorobanResurrect['sendTransaction']>[2]>().toMatchTypeOf<AbortSignalOptions>()
+  expectTypeOf<
+    Parameters<SorobanResurrect['sendTransaction']>[2]
+  >().toMatchTypeOf<AbortSignalOptions>()
   expectTypeOf<
     Parameters<SorobanResurrect['submitBatchWithRestore']>[1]
   >().toMatchTypeOf<AbortSignalOptions>()
@@ -267,9 +269,7 @@ test('scan / multisig / history / TTL public types exist', () => {
 })
 
 test('recovery policies and lifecycle types are stable public types', () => {
-  expectTypeOf<ConfirmationPolicy>().toEqualTypeOf<
-    'wait-for-finality' | 'return-on-submission'
-  >()
+  expectTypeOf<ConfirmationPolicy>().toEqualTypeOf<'wait-for-finality' | 'return-on-submission'>()
   expectTypeOf<ConfirmationTimeoutBehavior>().toEqualTypeOf<'error' | 'return-pending'>()
   expectTypeOf<SubmitRetryOptions>().toHaveProperty('maxRetries')
   expectTypeOf<SubmitLifecycleEvent['phase']>().toMatchTypeOf<string>()

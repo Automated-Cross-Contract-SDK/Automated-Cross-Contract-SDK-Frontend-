@@ -6,7 +6,7 @@ const instances: unknown[] = []
 const mockDispose = vi.fn()
 
 vi.mock('@soroban-resurrect/sdk', () => ({
-  SorobanResurrect: vi.fn().mockImplementation((config: unknown) => {
+  SorobanResurrect: vi.fn().mockImplementation(function (config: unknown) {
     const inst = { config, marker: 'sdk-instance', dispose: mockDispose }
     instances.push(inst)
     return inst

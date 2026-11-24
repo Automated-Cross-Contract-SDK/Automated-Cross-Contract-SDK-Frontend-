@@ -95,7 +95,7 @@ export default function TTLWatchExample({ wallet, keys }: Props) {
         <View style={styles.banner}>
           <Text style={styles.bannerText}>
             {expiring.length} entr{expiring.length === 1 ? 'y' : 'ies'} expiring soon (min{' '}
-            {Math.min(...expiring.map((e) => e.ttlLedgers))} ledgers left)
+            {Math.min(...expiring.map((e) => e.ttlLedgers ?? 0))} ledgers left)
           </Text>
           <TouchableOpacity style={styles.button} onPress={extend} disabled={extending}>
             <Text style={styles.buttonText}>{extending ? 'Extending…' : 'Extend now'}</Text>

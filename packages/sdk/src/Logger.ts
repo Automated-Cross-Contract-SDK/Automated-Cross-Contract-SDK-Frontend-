@@ -192,7 +192,9 @@ export class LoggingRpcClient implements ISorobanRpcClient {
 
   getVersionInfo(): Promise<unknown> {
     if (!this.delegate.getVersionInfo) {
-      return Promise.reject(new Error('The wrapped RPC client does not implement getVersionInfo().'))
+      return Promise.reject(
+        new Error('The wrapped RPC client does not implement getVersionInfo().'),
+      )
     }
     return this.timed('getVersionInfo', () => this.delegate.getVersionInfo!())
   }

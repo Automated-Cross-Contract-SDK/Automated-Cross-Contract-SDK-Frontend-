@@ -122,7 +122,9 @@ function makeIntegrationServer(callLog: string[]) {
     }),
     getAccount: vi.fn().mockImplementation(async () => {
       callLog.push('getAccount')
-      return callLog.filter((c) => c === 'getAccount').length === 1 ? restoreAccount : rebuildAccount
+      return callLog.filter((c) => c === 'getAccount').length === 1
+        ? restoreAccount
+        : rebuildAccount
     }),
     sendTransaction: vi
       .fn()
