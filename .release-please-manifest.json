@@ -1,14 +1,14 @@
 {
-  "packages/sdk": "0.1.0",
-  "packages/react-hook": "0.1.0",
-  "packages/vue-hook": "0.1.0",
-  "packages/svelte-hook": "0.1.0",
-  "packages/adapter-albedo": "0.1.0",
-  "packages/adapter-freighter": "0.1.0",
-  "packages/adapter-lobstr": "0.1.0",
-  "packages/adapter-rabet": "0.1.0",
-  "packages/adapter-walletconnect": "0.1.0",
-  "packages/adapter-walletkit": "0.1.0",
-  "packages/adapter-xbull": "0.1.0",
-  "packages/create-soroban-resurrect": "0.1.0"
+  "packages/sdk": "0.2.0",
+  "packages/react-hook": "0.2.0",
+  "packages/vue-hook": "0.2.0",
+  "packages/svelte-hook": "0.2.0",
+  "packages/adapter-albedo": "0.2.0",
+  "packages/adapter-freighter": "0.2.0",
+  "packages/adapter-lobstr": "0.2.0",
+  "packages/adapter-rabet": "0.2.0",
+  "packages/adapter-walletconnect": "0.2.0",
+  "packages/adapter-walletkit": "0.2.0",
+  "packages/adapter-xbull": "0.2.0",
+  "packages/create-soroban-resurrect": "0.2.0"
 }

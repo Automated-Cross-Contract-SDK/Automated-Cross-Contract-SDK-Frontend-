@@ -1,6 +1,6 @@
 {
   "name": "@soroban-resurrect/adapter-freighter",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "engines": {
     "node": ">=22.12"
   },
@@ -43,7 +43,7 @@
     "@soroban-resurrect/sdk": "0.1.0"
   },
   "devDependencies": {
-    "@soroban-resurrect/sdk": "0.1.0",
+    "@soroban-resurrect/sdk": "0.2.0",
     "@types/node": "^22.0.0",
     "@vitest/coverage-v8": "^5.0.5",
     "typescript": "~6.0.3",

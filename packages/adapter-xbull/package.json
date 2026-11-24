@@ -1,6 +1,6 @@
 {
   "name": "@soroban-resurrect/adapter-xbull",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "engines": {
     "node": ">=22.12"
   },
@@ -46,7 +46,7 @@
     "@vitest/coverage-v8": "^5.0.5",
     "typescript": "~6.0.3",
     "vitest": "^5.0.5",
-    "@soroban-resurrect/sdk": "0.1.0"
+    "@soroban-resurrect/sdk": "0.2.0"
   },
   "license": "MIT",
   "repository": {

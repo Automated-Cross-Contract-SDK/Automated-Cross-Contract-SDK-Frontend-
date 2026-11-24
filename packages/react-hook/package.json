@@ -1,6 +1,6 @@
 {
   "name": "@soroban-resurrect/react-hook",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "engines": {
     "node": ">=22.12"
   },
@@ -65,7 +65,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@soroban-resurrect/sdk": "0.1.0"
+    "@soroban-resurrect/sdk": "0.2.0"
   },
   "peerDependencies": {
     "@stellar/stellar-sdk": "^17.4.0",

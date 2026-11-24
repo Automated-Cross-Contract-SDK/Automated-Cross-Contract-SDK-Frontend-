@@ -1,6 +1,6 @@
 {
   "name": "@soroban-resurrect/adapter-rabet",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "engines": {
     "node": ">=22.12"
   },
@@ -38,7 +38,7 @@
   },
   "devDependencies": {
     "typescript": "~6.0.3",
-    "@soroban-resurrect/sdk": "0.1.0"
+    "@soroban-resurrect/sdk": "0.2.0"
   },
   "license": "MIT",
   "repository": {
