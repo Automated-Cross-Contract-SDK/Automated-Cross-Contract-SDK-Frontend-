@@ -31,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Address-based authorization follows SEP-43: wallets receive a `HashIdPreimage`
+  and return a signature (**breaking** for custom `signAuthEntry` wallets).
+  Entries now get an expiry, are verified, and are re-simulated.
+- `restoreKeys` and batch results keep their specific error codes.
+
 - `configOverrides`, `feeBumpConfig`, `rebuildTimeBounds` and
   `approveExpiredRebuild` were ignored by `submitWithRestore`.
 - Address-based authorization is signed after a separate restore.

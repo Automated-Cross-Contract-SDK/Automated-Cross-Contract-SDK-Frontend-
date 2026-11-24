@@ -6,6 +6,7 @@ import {
   Networks,
   Operation,
   StrKey,
+  hash,
   Transaction,
   TransactionBuilder,
   xdr,
@@ -116,8 +117,11 @@ describe('ensureAddressAuthorization (#244)', () => {
     const tx = makeInvokeTx(sourceKp.publicKey())
     const entry = makeAddressAuthEntry(signerKp.publicKey())
 
-    // Wallet "signs" by echoing the entry back (a valid SorobanAuthorizationEntry XDR).
-    const signAuthEntry = vi.fn(async (entryXdr: string) => entryXdr)
+    // SEP-43: the wallet gets a HashIdPreimage and returns a bare signature.
+    const signAuthEntry = vi.fn(async (preimageXdr: string) => {
+      const preimage = xdr.HashIdPreimage.fromXdr(preimageXdr, 'base64')
+      return Buffer.from(signerKp.sign(hash(preimage.toXdr()))).toString('base64')
+    })
     const wallet = { signAuthEntry } as unknown as AuthorizationWalletAdapter
     const controller = new AbortController()
 
@@ -143,6 +147,21 @@ describe('ensureAddressAuthorization (#244)', () => {
     // And it round-trips through XDR.
     const reparsed = TransactionBuilder.fromXDR(res.transaction.toXDR(), NP) as Transaction
     expect((reparsed.operations[0] as { auth?: unknown[] }).auth).toHaveLength(1)
+  })
+
+  it('rejects a signature made by the wrong key', async () => {
+    const wallet = {
+      signAuthEntry: async () =>
+        Buffer.from(Keypair.random().sign(Buffer.alloc(32))).toString('base64'),
+    } as unknown as AuthorizationWalletAdapter
+    await expect(
+      ensureAddressAuthorization({
+        transaction: makeInvokeTx(sourceKp.publicKey()),
+        simulation: { result: { auth: [makeAddressAuthEntry(signerKp.publicKey())] } },
+        wallet,
+        networkPassphrase: NP,
+      }),
+    ).rejects.toMatchObject({ code: 'SIGNING_FAILED' })
   })
 
   it('requiresAddressAuthorization agrees with the entry credential types', () => {

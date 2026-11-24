@@ -51,7 +51,7 @@ import {
   getExpiredTransactionInfo,
 } from './Restorer.js'
 import { SimulationCache } from './SimulationCache.js'
-import { ensureAddressAuthorization } from './Authorization.js'
+import { authorizeAndFinalize } from './Authorization.js'
 import {
   DEFAULT_NETWORK_PASSPHRASE,
   POLL_INTERVAL_MS,
@@ -473,18 +473,22 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
     }
 
     const assembled = assembleIfNeeded(originalTx, simulation)
-    const cap = config.maxRestoreFeeStroops
-    if (autoRestored.length > 0 && cap !== undefined && BigInt(assembled.fee) > BigInt(cap)) {
-      throw new RestoreFeeExceededError(Number(assembled.fee), Number(cap))
+    const enforceCap = (fee: string) => {
+      const cap = config.maxRestoreFeeStroops
+      if (autoRestored.length > 0 && cap !== undefined && BigInt(fee) > BigInt(cap)) {
+        throw new RestoreFeeExceededError(Number(fee), Number(cap))
+      }
     }
-
-    const { transaction } = await ensureAddressAuthorization({
+    enforceCap(assembled.fee)
+    const transaction = await authorizeAndFinalize({
+      server,
       transaction: assembled,
       simulation,
       wallet,
       networkPassphrase,
       signal,
     })
+    enforceCap(transaction.fee)
     params.onSigningOriginal?.()
     const signed = await sign(transaction)
     emit('original_submission_started')
@@ -745,7 +749,7 @@ export async function restoreKeys(params: RestoreKeysParams): Promise<ResurrectR
       success: false,
       archivedKeysDetected: keys.length,
       error: message,
-      errorCode: signal?.aborted ? 'ABORTED' : 'UNKNOWN_ERROR',
+      errorCode: signal?.aborted ? 'ABORTED' : getResurrectErrorCode(err),
     }
   }
 }

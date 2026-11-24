@@ -42,6 +42,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: npm test
 
+      - name: SDK coverage thresholds
+        if: ${{ !cancelled() }}
+        run: npm test -w packages/sdk -- --coverage
+
       - name: Build
         if: ${{ !cancelled() }}
         run: npm run build
