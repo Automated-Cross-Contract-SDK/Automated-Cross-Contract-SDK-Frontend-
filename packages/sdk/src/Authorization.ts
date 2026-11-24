@@ -15,8 +15,18 @@
  * - Provide an interface for wallets that support signing individual auth entries
  */
 
-import { xdr, Transaction, buildAuthorizationEntryPreimage, hash } from '@stellar/stellar-sdk'
-import { bytesToHex } from './bytes.js'
+import {
+  xdr,
+  Transaction,
+  Address,
+  authorizeEntry,
+  buildAuthorizationEntryPreimage,
+  hash,
+  rpc,
+} from '@stellar/stellar-sdk'
+import { base64ToBytes } from './bytes.js'
+import type { ISorobanRpcClient } from './RpcClient.js'
+import { SigningError, SimulationError, wrapSigningError } from './errors.js'
 import { asXdrBase64, type XdrBase64 } from './branded-types.js'
 import type { WalletCapabilities } from './types.js'
 import { assertWalletCapability } from './walletCapabilities.js'
@@ -61,18 +71,12 @@ export interface CategorizedAuthEntry {
  */
 export interface AuthorizationWalletAdapter {
   /**
-   * Signs a single Soroban authorization entry and returns the signed entry.
+   * Signs a Soroban authorization preimage, following SEP-43.
    *
-   * The wallet implementation should:
-   * 1. Decode the entry from XDR.
-   * 2. Hash the entry preimage using the network passphrase.
-   * 3. Sign the hash with the private key of the authorizing address.
-   * 4. Attach the signature to the entry's credentials.
-   * 5. Return the re-encoded XDR.
-   *
-   * @param authEntryXdr - Base64-encoded XDR of the `SorobanAuthorizationEntry`.
+   * @param authEntryXdr - Base64 XDR of the `HashIdPreimage` to sign. The wallet
+   *   signs the SHA-256 hash of these bytes.
    * @param opts - Additional context for signing.
-   * @returns Base64-encoded XDR of the signed `SorobanAuthorizationEntry`.
+   * @returns The base64-encoded 64-byte ed25519 signature.
    */
   signAuthEntry(
     authEntryXdr: XdrBase64,
@@ -84,7 +88,7 @@ export interface AuthorizationWalletAdapter {
       /** Cancels the wallet prompt when the adapter supports cancellation. */
       signal?: AbortSignal
     },
-  ): Promise<XdrBase64>
+  ): Promise<string>
   /**
    * Optional feature-detection flags (see {@link WalletCapabilities}). When the
    * wallet sets `capabilities.signAuthEntry === false`, {@link signAuthorizationEntries}
@@ -129,6 +133,8 @@ export interface SignAuthorizationEntriesOptions {
    * Network passphrase for computing authorization entry hashes.
    */
   networkPassphrase: string
+  /** Last ledger at which the signatures are valid. */
+  validUntilLedger: number
   /** Cancels subsequent wallet prompts and stops waiting for the current one. */
   signal?: AbortSignal
 }
@@ -171,12 +177,7 @@ export function categorizeAuthEntries(
     if (!isSourceAccount) {
       try {
         const address = getAddressCredentials(entry.credentials)?.address
-        if (address?.type === 'scAddressTypeAccount') {
-          // accountId is an xdr.PublicKey; encode as base64 for display
-          signerAddress = `account:${address.accountId.toXdr('base64')}`
-        } else if (address?.type === 'scAddressTypeContract') {
-          signerAddress = `contract:${bytesToHex(address.contractId.toBytes())}`
-        }
+        if (address) signerAddress = Address.fromScAddress(address).toString()
       } catch {
         // Could not extract signer address — leave undefined
       }
@@ -204,7 +205,7 @@ export function categorizeAuthEntries(
 export async function signAuthorizationEntries(
   options: SignAuthorizationEntriesOptions,
 ): Promise<xdr.SorobanAuthorizationEntry[]> {
-  const { entries, wallet, networkPassphrase, signal } = options
+  const { entries, wallet, networkPassphrase, validUntilLedger, signal } = options
 
   // If any entry actually needs the wallet's signature, make sure the wallet
   // hasn't opted out of CAP-0046 auth-entry signing before we start prompting.
@@ -224,18 +225,33 @@ export async function signAuthorizationEntries(
       continue
     }
 
-    // Address entries must be signed by the specified address
+    const { signerAddress } = categorized
+    if (!signerAddress) {
+      throw new SigningError('Authorization entry has no signer address')
+    }
+
+    // The signer address is the account the wallet must sign with.
     const walletOptions = {
       networkPassphrase,
-      address: categorized.signerAddress,
+      address: signerAddress,
       ...(signal ? { signal } : {}),
     }
-    const signedXdr = await runWithSignal(
-      () => wallet.signAuthEntry(categorized.entryBase64, walletOptions),
-      signal,
+    signed.push(
+      await wrapSigningError(() =>
+        authorizeEntry(
+          categorized.entry,
+          async (preimage) => {
+            const signature = await runWithSignal(
+              () => wallet.signAuthEntry(asXdrBase64(preimage.toXdr('base64')), walletOptions),
+              signal,
+            )
+            return { signature: base64ToBytes(signature), publicKey: signerAddress }
+          },
+          validUntilLedger,
+          networkPassphrase,
+        ),
+      ),
     )
-
-    signed.push(xdr.SorobanAuthorizationEntry.fromXDR(signedXdr, 'base64'))
   }
 
   return signed
@@ -335,8 +351,12 @@ export function supportsAuthEntrySigning(wallet: unknown): wallet is Authorizati
   )
 }
 
+/** Signatures stay valid for roughly eight minutes. */
+const AUTH_VALIDITY_LEDGERS = 100
+
 /** Minimal shape of the simulation response fields this helper reads. */
 interface SimulationWithAuth {
+  latestLedger?: number
   result?: { auth?: xdr.SorobanAuthorizationEntry[] } | null
 }
 
@@ -425,6 +445,7 @@ export async function ensureAddressAuthorization(
     entries: categorized,
     wallet,
     networkPassphrase,
+    validUntilLedger: (simulation?.latestLedger ?? 0) + AUTH_VALIDITY_LEDGERS,
     signal,
   })
 
@@ -492,4 +513,24 @@ function withAuthEntries(
     ),
     transaction.networkPassphrase,
   )
+}
+
+/**
+ * Signs address-based entries, then simulates again with the signatures
+ * attached: the first simulation cannot price verifying them.
+ */
+export async function authorizeAndFinalize(
+  options: EnsureAddressAuthorizationOptions & { server: ISorobanRpcClient },
+): Promise<Transaction> {
+  const { transaction, signed } = await ensureAddressAuthorization(options)
+  if (!signed) return transaction
+  const simulation = await runWithSignal(
+    () => options.server.simulateTransaction(transaction),
+    options.signal,
+  )
+  if (!rpc.Api.isSimulationSuccess(simulation)) {
+    const reason = rpc.Api.isSimulationError(simulation) ? simulation.error : 'unexpected response'
+    throw new SimulationError(`Simulation with signed authorization failed: ${reason}`)
+  }
+  return rpc.assembleTransaction(transaction, simulation).build()
 }

@@ -28,7 +28,7 @@ import {
 } from './constants.js'
 import { POLL_INTERVAL_MS } from './constants.js'
 import type { WalletAdapter } from './types.js'
-import { ensureAddressAuthorization } from './Authorization.js'
+import { authorizeAndFinalize } from './Authorization.js'
 import { declaredResourceFee } from './submission.js'
 import { toBuilderFee, calculateRestoreFee } from './feeCalculation.js'
 import {
@@ -921,14 +921,14 @@ export async function buildOriginalAfterRestore(
 
   const assembled = rpc.assembleTransaction(rawTx, sim).build()
   if (!wallet) return assembled
-  const { transaction } = await ensureAddressAuthorization({
+  return authorizeAndFinalize({
+    server,
     transaction: assembled,
     simulation: sim,
     wallet,
     networkPassphrase,
     signal,
   })
-  return transaction
 }
 
 /**

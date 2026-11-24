@@ -15,6 +15,7 @@ import {
   Keypair,
   Networks,
   TransactionBuilder,
+  hash,
   nativeToScVal,
   rpc,
   xdr,
@@ -24,7 +25,8 @@ import { SorobanResurrect } from '@soroban-resurrect/sdk'
 const rpcUrl = 'https://soroban-testnet.stellar.org'
 const networkPassphrase = Networks.TESTNET
 const server = new rpc.Server(rpcUrl)
-const sdk = new SorobanResurrect({ rpcUrl, networkPassphrase })
+// Restoring a large contract costs more than the default 1 XLM cap.
+const sdk = new SorobanResurrect({ rpcUrl, networkPassphrase, maxRestoreFeeStroops: 200_000_000 })
 
 async function fund() {
   const keypair = Keypair.random()
@@ -97,6 +99,24 @@ const sponsored = await sdk.submitWithRestore({
 })
 assert.ok(sponsored.success, sponsored.error)
 
+console.log('   a call needing another account (SEP-43 signAuthEntry) confirms')
+const owner = await fund()
+const authorized = await sdk.submitWithRestore({
+  transaction: await call(
+    xlm,
+    'transfer',
+    new Address(owner.publicKey()).toScVal(),
+    new Address(user.publicKey()).toScVal(),
+    nativeToScVal(10_000_000n, { type: 'i128' }),
+  ),
+  wallet: {
+    ...wallet,
+    signAuthEntry: async (preimage) =>
+      Buffer.from(owner.sign(hash(Buffer.from(preimage, 'base64')))).toString('base64'),
+  },
+})
+assert.ok(authorized.success, authorized.error)
+
 // Testnet entries live about 7 days, so contracts used at the start of the RPC
 // retention window are a steady supply of genuinely archived entries.
 console.log('3. looking for archived contracts')
@@ -118,7 +138,7 @@ async function findArchivedContracts() {
   const { oldestLedger } = await server.getHealth()
   const contracts = new Set()
   let cursor
-  for (let page = 0; page < 8; page++) {
+  for (let page = 0; page < 15; page++) {
     const result = await server.getTransactions(
       cursor
         ? { pagination: { cursor, limit: 200 } }

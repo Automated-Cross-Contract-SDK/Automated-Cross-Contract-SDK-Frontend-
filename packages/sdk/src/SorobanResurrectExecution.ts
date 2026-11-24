@@ -48,7 +48,7 @@ import {
   POLL_INTERVAL_MS,
   POLL_TIMEOUT_MS,
 } from './constants.js'
-import { ResurrectError, OriginalTransactionExpiredError } from './errors.js'
+import { ResurrectError, OriginalTransactionExpiredError, getResurrectErrorCode } from './errors.js'
 import { calculateRestoreFee } from './feeCalculation.js'
 import { signAndVerifyTransaction } from './signedTransaction.js'
 import { assertSubmitted } from './submission.js'
@@ -389,9 +389,8 @@ export class SorobanResurrectExecutor {
         archivedKeysDetected: keys.length,
         restoreTxHash: restoreHash,
         error: message,
-        ...(err instanceof ResurrectError ? { errorCode: err.code } : {}),
+        errorCode: signal?.aborted ? 'ABORTED' : getResurrectErrorCode(err),
         historyId,
-        errorCode: signal?.aborted ? 'ABORTED' : 'UNKNOWN_ERROR',
       }
       if (historyId) {
         this._history.update(historyId, result)
@@ -859,7 +858,7 @@ export class SorobanResurrectExecutor {
         restoreTxHash: restoreHash,
         archivedKeysDetected: archivedKeysByTx[i]?.length ?? 0,
         error: message,
-        errorCode: sharedSignal?.aborted ? 'ABORTED' : 'UNKNOWN_ERROR',
+        errorCode: sharedSignal?.aborted ? 'ABORTED' : getResurrectErrorCode(err),
       }))
     }
 
@@ -938,7 +937,7 @@ export class SorobanResurrectExecutor {
           restoreTxHash: restoreHash,
           archivedKeysDetected,
           error: message,
-          errorCode: signal?.aborted ? 'ABORTED' : 'UNKNOWN_ERROR',
+          errorCode: signal?.aborted ? 'ABORTED' : getResurrectErrorCode(err),
         })
       }
     }
