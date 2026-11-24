@@ -139,6 +139,5 @@ After EOL: no bug fixes, security patches, or support.
 
 ## Questions?
 
-- Check [SUPPORTING_POLICY.md](#) (this file)
-- Email: support@example.com
-- GitHub Discussions: github.com/Kingsman-99/Automated-Cross-Contract-SDK-Frontend-/discussions
+- Open an issue: https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/issues
+- Report vulnerabilities privately: see [SECURITY.md](./SECURITY.md)
