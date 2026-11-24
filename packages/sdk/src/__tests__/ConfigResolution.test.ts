@@ -6,8 +6,7 @@ import { resolveSubmitConfig } from '../RequestConfigOverrides.js'
 const rpcUrl = 'https://soroban-testnet.stellar.org'
 
 describe('configuration resolution', () => {
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('returns effective settings and defaults without runtime resources', () => {
+  it('returns effective settings and defaults without runtime resources', () => {
     const settings = getEffectiveConfig({ rpcUrl })
 
     expect(settings).toMatchObject({
@@ -16,7 +15,7 @@ describe('configuration resolution', () => {
       pollIntervalMs: 1000,
       pollTimeoutMs: 60_000,
       restoreFeeMultiplier: 3,
-      maxRestoreFeeStroops: 10_000_000,
+      maxRestoreFeeStroops: '10000000',
       maxSequenceRetries: 3,
       archiveDetectionChunkSize: 50,
       archiveDetectionConcurrency: 4,

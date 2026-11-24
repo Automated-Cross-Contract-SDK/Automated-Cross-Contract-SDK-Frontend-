@@ -1,0 +1,27 @@
+name: Testnet
+
+# Runs the built SDK against the real network. Not a PR gate: testnet
+# availability must not block merges.
+on:
+  schedule:
+    - cron: '30 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  testnet:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build:sdk
+      - run: npm run check:testnet

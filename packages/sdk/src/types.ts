@@ -343,8 +343,9 @@ export interface FeeBumpConfig {
   /** The fee-bump sponsor who will sign and pay the fees. */
   sponsor: FeeBumpSponsor
   /**
-   * Optional custom fee for the fee-bump wrapper (in stroops).
-   * If not provided, defaults to the inner transaction's fee.
+   * Optional per-operation inclusion fee for the wrapper (in stroops); the
+   * Soroban resource fee is added on top. Defaults to the inner transaction's
+   * own inclusion fee.
    */
   feeBumpFee?: FeeStroops | string
 }
@@ -429,6 +430,8 @@ export interface ResurrectResult {
   originalTxHash?: TxHash
   /** Hash of the submitted restore transaction (present if restore was needed). */
   restoreTxHash?: TxHash
+  /** How archived entries were restored. Present when any were detected. */
+  restoreMode?: RestoreMode
   /** Number of archived ledger entries that were detected and restored. */
   archivedKeysDetected: number
   /** Error message if the workflow failed. */
@@ -510,7 +513,15 @@ export interface RestoreKeysOptions {
  * proceed with the real submission — without having signed or submitted
  * anything to the network.
  */
+/**
+ * How archived entries are restored: `automatic` inside the contract call
+ * itself (protocol 23+, one signature) or by a `separate` restore transaction.
+ */
+export type RestoreMode = 'automatic' | 'separate'
+
 export interface DryRunResult {
+  /** How the entries would be restored. Present when a restore is needed. */
+  restoreMode?: RestoreMode
   /** Whether the transaction would require a restore before submission. */
   wouldNeedRestore: boolean
   /** Operation type names, in the order they appear in the original transaction. */

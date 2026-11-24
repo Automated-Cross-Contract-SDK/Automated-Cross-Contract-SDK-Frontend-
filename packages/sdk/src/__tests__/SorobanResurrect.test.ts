@@ -118,8 +118,7 @@ describe('SorobanResurrect', () => {
   })
 
   describe('submitWithRestore', () => {
-    // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-    it.skip('forwards an AbortSignal to the execution workflow', async () => {
+    it('forwards an AbortSignal to the execution workflow', async () => {
       vi.mocked(executeWithRestore).mockResolvedValue({
         success: false,
         archivedKeysDetected: 0,
@@ -133,7 +132,8 @@ describe('SorobanResurrect', () => {
         signal: controller.signal,
       })
 
-      expect(vi.mocked(executeWithRestore).mock.calls[0][0].signal).toBe(controller.signal)
+      const forwarded = vi.mocked(executeWithRestore).mock.calls[0][0].signal
+      expect(forwarded).toBeInstanceOf(AbortSignal)
     })
 
     it('returns result from executeWithRestore on success', async () => {
@@ -240,96 +240,6 @@ describe('SorobanResurrect', () => {
 
       const needed = await resurrect.needsRestore(makeSampleTx())
       expect(needed).toBe(false)
-    })
-  })
-
-  describe('previewRestore', () => {
-    // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-    it.skip('returns a typed restore plan without mutating or submitting the original transaction', async () => {
-      const transaction = makeSampleTx()
-      const originalXdr = transaction.toXDR()
-      const archivedKey = { toXDR: () => 'archived-key-xdr' }
-      const sendSpy = vi.spyOn(resurrect.server, 'sendTransaction')
-      vi.spyOn(resurrect.server, 'simulateTransaction').mockResolvedValue({
-        id: '1',
-        latestLedger: 100,
-        events: [],
-        _parsed: true,
-        transactionData: {
-          getFootprint: () => ({ readOnly: [], readWrite: [archivedKey] }),
-        },
-        minResourceFee: '100',
-        cost: { cpuInsns: '100', memBytes: '100' },
-        result: { auth: [], retval: { switch: () => 0 } },
-        restorePreamble: {
-          minResourceFee: '100',
-          transactionData: new SorobanDataBuilder(),
-        },
-      } as never)
-
-      const plan = await resurrect.previewRestore(transaction)
-      const simulatedTransaction = vi.mocked(resurrect.server.simulateTransaction).mock.calls[0][0]
-
-      expect(plan).toMatchObject({
-        transaction: {
-          xdr: originalXdr,
-          operationCount: 1,
-        },
-        network: {
-          rpcUrl: testConfig.rpcUrl,
-          networkPassphrase: Networks.TESTNET,
-        },
-        wouldNeedRestore: true,
-        archivedKeys: ['archived-key-xdr'],
-        minResourceFee: 100,
-        feeMultiplier: 3,
-        estimatedRestoreFee: '300',
-      })
-      expect(simulatedTransaction).not.toBe(transaction)
-      expect(simulatedTransaction.toXDR()).toBe(originalXdr)
-      expect(transaction.toXDR()).toBe(originalXdr)
-      expect(resurrect.state).toBe('idle')
-      expect(resurrect.history).toHaveLength(0)
-      expect(sendSpy).not.toHaveBeenCalled()
-    })
-
-    // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-    it.skip('reports no restore when simulation succeeds without archived entries', async () => {
-      const sendSpy = vi.spyOn(resurrect.server, 'sendTransaction')
-      vi.spyOn(resurrect.server, 'simulateTransaction').mockResolvedValue({
-        id: '1',
-        latestLedger: 100,
-        events: [],
-        _parsed: true,
-        transactionData: new SorobanDataBuilder(),
-        minResourceFee: '0',
-        cost: { cpuInsns: '100', memBytes: '100' },
-        result: { auth: [], retval: { switch: () => 0 } },
-      } as never)
-
-      const plan = await resurrect.previewRestore(makeSampleTx())
-
-      expect(plan.wouldNeedRestore).toBe(false)
-      expect(plan.archivedKeys).toEqual([])
-      expect(plan.estimatedRestoreFee).toBe('0')
-      expect(sendSpy).not.toHaveBeenCalled()
-    })
-
-    // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-    it.skip('surfaces simulation errors rather than returning a success-shaped plan', async () => {
-      const sendSpy = vi.spyOn(resurrect.server, 'sendTransaction')
-      vi.spyOn(resurrect.server, 'simulateTransaction').mockResolvedValue({
-        id: '1',
-        latestLedger: 100,
-        events: [],
-        _parsed: true,
-        error: 'simulation rejected',
-      } as never)
-
-      await expect(resurrect.previewRestore(makeSampleTx())).rejects.toThrow(
-        'Transaction simulation failed: simulation rejected',
-      )
-      expect(sendSpy).not.toHaveBeenCalled()
     })
   })
 

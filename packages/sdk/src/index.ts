@@ -61,7 +61,6 @@ export type {
   LedgerAdapterConfig,
   TrezorAdapterConfig,
   // Error types
-  ResurrectErrorCode,
   ResurrectSuccess,
   ResurrectFailedResult,
 } from './types.js'
@@ -303,3 +302,16 @@ export {
   LoggingFieldType,
 } from './LoggingRedaction.js'
 export type { LoggingFieldClassification } from './LoggingRedaction.js'
+
+export { extractAutoRestoredKeys } from './Archiver.js'
+export type { RestoreMode } from './types.js'
+export {
+  ResurrectErrorCode,
+  getResurrectErrorCode,
+  NetworkError,
+  SimulationError,
+  SigningError,
+  RestoreError,
+  ResurrectTimeoutError,
+  InvalidInputError,
+} from './errors.js'

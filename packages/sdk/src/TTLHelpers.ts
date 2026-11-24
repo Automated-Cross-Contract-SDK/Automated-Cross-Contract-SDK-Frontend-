@@ -1,4 +1,4 @@
-import { rpc, xdr } from '@stellar/stellar-sdk'
+import { xdr } from '@stellar/stellar-sdk'
 import type { ArchivedLedgerEntry } from './types.js'
 import type { ISorobanRpcClient } from './RpcClient.js'
 import { asXdrBase64, type XdrBase64 } from './branded-types.js'
@@ -185,7 +185,6 @@ function makeLiveInfo(
   liveUntilLedger: number,
   currentLedger: number,
   entryType: LedgerKeyEntryType,
-  warningWindowLedgers: number,
 ): LedgerEntryTTLInfo {
   const ttlLedgers = Math.max(0, liveUntilLedger - currentLedger)
   const isArchived = ttlLedgers === 0
@@ -294,7 +293,6 @@ export async function queryLedgerTTL(
         entry.liveUntilLedgerSeq,
         currentLedger,
         getLedgerKeyEntryType(entry.key),
-        warningWindowLedgers,
       ),
     )
   }
@@ -342,7 +340,7 @@ export async function getExpiringSoonEntries(
   ledgersThreshold: number,
   opts: QueryLedgerTTLOptions = {},
 ): Promise<LedgerEntryTTLInfo[]> {
-  const result = await queryLedgerTTL(server, keys)
+  const result = await queryLedgerTTL(server, keys, opts)
   return result.entries.filter(
     (entry) =>
       entry.unavailableReason === 'missing' ||

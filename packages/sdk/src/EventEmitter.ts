@@ -1,4 +1,4 @@
-import { NOOP_LOGGER, resolveLogger } from './Logger.js'
+import { resolveLogger } from './Logger.js'
 import type { Logger } from './types.js'
 
 /** Allows event maps to satisfy index-signature constrained emitter APIs. */

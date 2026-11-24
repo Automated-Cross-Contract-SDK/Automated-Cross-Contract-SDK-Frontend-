@@ -25,6 +25,7 @@ import {
 } from './constants.js'
 import { SimulationCache } from './SimulationCache.js'
 import { SYSTEM_RUNTIME } from './runtime.js'
+import { InvalidInputError } from './errors.js'
 import { validateRestoreMemoConfig } from './memoValidation.js'
 
 /**
@@ -65,7 +66,7 @@ function validateNumber(field: string, value: unknown, minimum: number, exclusiv
     (exclusive ? value > minimum : value >= minimum)
   if (!valid) {
     const comparison = exclusive ? 'greater than 0' : 'greater than or equal to 1'
-    throw new Error(`Invalid config.${field}: must be a finite number ${comparison}`)
+    throw new InvalidInputError(`Invalid config.${field}: must be a finite number ${comparison}`)
   }
 }
 
@@ -73,7 +74,7 @@ function validateFeeCap(value: unknown): void {
   const validNumber = typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
   const validString = typeof value === 'string' && /^\d+$/.test(value)
   if (!validNumber && !validString) {
-    throw new Error(
+    throw new InvalidInputError(
       `Invalid config.maxRestoreFeeStroops: expected a non-negative safe integer or decimal integer string; ` +
         `received ${JSON.stringify(value)}.`,
     )
@@ -82,7 +83,7 @@ function validateFeeCap(value: unknown): void {
 
 function validateInteger(field: string, value: unknown, minimum: number): void {
   if (typeof value !== 'number' || !Number.isInteger(value) || value < minimum) {
-    throw new Error(
+    throw new InvalidInputError(
       `Invalid config.${field}: must be an integer greater than or equal to ${minimum}`,
     )
   }
@@ -93,7 +94,7 @@ function validateInteger(field: string, value: unknown, minimum: number): void {
  */
 function validateBoolean(field: string, value: unknown): void {
   if (typeof value !== 'boolean') {
-    throw new Error(
+    throw new InvalidInputError(
       `Invalid config.${field}: expected a boolean; received ${JSON.stringify(value)}.`,
     )
   }
@@ -117,18 +118,20 @@ export const SIMULATION_CACHE_MAX_SIZE = 50
  */
 export function validateConfigShape(config: SorobanResurrectConfig): void {
   if (typeof config.rpcUrl !== 'string' || config.rpcUrl.length === 0) {
-    throw new Error('Invalid config.rpcUrl: config.rpcUrl must be a non-empty string')
+    throw new InvalidInputError('Invalid config.rpcUrl: config.rpcUrl must be a non-empty string')
   }
   let rpcUrl: URL
   try {
     rpcUrl = new URL(config.rpcUrl)
   } catch {
-    throw new Error(
+    throw new InvalidInputError(
       `Invalid config.rpcUrl: config.rpcUrl must be a valid URL (received "${config.rpcUrl}")`,
     )
   }
   if (rpcUrl.protocol !== 'http:' && rpcUrl.protocol !== 'https:') {
-    throw new Error(`Invalid config.rpcUrl: expected an http(s) URL, received "${rpcUrl.protocol}"`)
+    throw new InvalidInputError(
+      `Invalid config.rpcUrl: expected an http(s) URL, received "${rpcUrl.protocol}"`,
+    )
   }
 
   if (config.pollIntervalMs !== undefined) {
@@ -206,7 +209,7 @@ export function validateConfigShape(config: SorobanResurrectConfig): void {
     config.archiveDetectionMethod !== undefined &&
     !ARCHIVE_DETECTION_METHODS.includes(config.archiveDetectionMethod)
   ) {
-    throw new Error(
+    throw new InvalidInputError(
       `Invalid config.archiveDetectionMethod: ${JSON.stringify(config.archiveDetectionMethod)}. ` +
         `Must be one of: ${ARCHIVE_DETECTION_METHODS.map((m) => `"${m}"`).join(', ')}.`,
     )
@@ -217,7 +220,7 @@ export function validateConfigShape(config: SorobanResurrectConfig): void {
   }
 
   if (config.archiveDetectionMethod === 'direct' && config.archiveDetectionFallback === true) {
-    throw new Error(
+    throw new InvalidInputError(
       'Invalid config.archiveDetectionFallback: true is incompatible with ' +
         'archiveDetectionMethod "direct".',
     )
@@ -237,7 +240,7 @@ export function validateConfigShape(config: SorobanResurrectConfig): void {
 
   if (config.simulationCacheMaxSize !== undefined) {
     if (!Number.isSafeInteger(config.simulationCacheMaxSize) || config.simulationCacheMaxSize < 1) {
-      throw new Error(
+      throw new InvalidInputError(
         `Invalid config.simulationCacheMaxSize: expected a positive safe integer; ` +
           `received ${JSON.stringify(config.simulationCacheMaxSize)}.`,
       )
@@ -250,7 +253,7 @@ export function validateConfigShape(config: SorobanResurrectConfig): void {
     config.maxBatchSize !== undefined &&
     (!Number.isInteger(config.maxBatchSize) || config.maxBatchSize < 1)
   ) {
-    throw new Error(
+    throw new InvalidInputError(
       `Invalid maxBatchSize: ${JSON.stringify(config.maxBatchSize)}. Must be a positive integer.`,
     )
   }
@@ -258,7 +261,9 @@ export function validateConfigShape(config: SorobanResurrectConfig): void {
   for (const field of ['archiveDetectionChunkSize', 'archiveDetectionConcurrency'] as const) {
     const value = config[field]
     if (value !== undefined && (!Number.isInteger(value) || value < 1)) {
-      throw new Error(`Invalid ${field}: ${JSON.stringify(value)}. Must be a positive integer.`)
+      throw new InvalidInputError(
+        `Invalid ${field}: ${JSON.stringify(value)}. Must be a positive integer.`,
+      )
     }
   }
 
@@ -285,7 +290,7 @@ export function validateConfigShape(config: SorobanResurrectConfig): void {
   if (config.restoreSizeWarnRatio !== undefined) {
     const ratio = config.restoreSizeWarnRatio
     if (typeof ratio !== 'number' || !Number.isFinite(ratio) || ratio <= 0 || ratio > 1) {
-      throw new Error(
+      throw new InvalidInputError(
         'Invalid config.restoreSizeWarnRatio: must be a number greater than 0 and at most 1',
       )
     }
@@ -302,7 +307,7 @@ export function validateConfigShape(config: SorobanResurrectConfig): void {
     ] as const
     for (const method of methods) {
       if (typeof config.runtime?.[method] !== 'function') {
-        throw new Error(`config.runtime.${method} must be a function`)
+        throw new InvalidInputError(`config.runtime.${method} must be a function`)
       }
     }
   }
@@ -390,14 +395,15 @@ function resolveEffectiveSettings(config: SorobanResurrectConfig): EffectiveSoro
 
   if (!KNOWN_NETWORK_PASSPHRASES.includes(networkPassphrase)) {
     const knownNetworks = KNOWN_NETWORK_PASSPHRASES.map((p) => `"${p}"`).join(', ')
-    throw new Error(
+    throw new InvalidInputError(
       `Invalid config.networkPassphrase: "${networkPassphrase}". ` +
         `Invalid network passphrase — must be one of: ${knownNetworks}. ` +
         `A typo in the passphrase will cause cryptic transaction failures.`,
     )
   }
 
-  const { rpcClient: _rpcClient, ...rest } = config
+  const rest: SorobanResurrectConfig = { ...config }
+  delete rest.rpcClient
   return {
     ...rest,
     rpcUrl: config.rpcUrl,

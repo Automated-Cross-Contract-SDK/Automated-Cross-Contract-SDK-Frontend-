@@ -12,7 +12,6 @@ import type {
   ResolvedSorobanResurrectConfig,
   WalletAdapter,
   SorobanResurrectEvents,
-  SorobanResurrectConfig,
 } from './types.js'
 import type { SdkRuntime } from './types.js'
 import { SYSTEM_RUNTIME } from './runtime.js'
@@ -21,7 +20,7 @@ import { getExpiringSoonEntries, type LedgerEntryTTLInfo } from './TTLHelpers.js
 import { toBuilderFee, calculateRestoreFee } from './feeCalculation.js'
 import { isErrorResponse } from './Archiver.js'
 import { DEFAULT_NETWORK_PASSPHRASE } from './constants.js'
-import { asTxHash, asXdrBase64 } from './branded-types.js'
+import { asTxHash } from './branded-types.js'
 import { signAndVerifyTransaction } from './signedTransaction.js'
 import { assertSubmitted } from './submission.js'
 import { assertRestoreTransactionFresh, resolveRestoreMemo } from './Restorer.js'
@@ -200,15 +199,11 @@ export async function extendLedgerTTL(
     networkPassphrase,
     config,
   )
-  const signedXdr = await withPhaseTimeout(
-    options.wallet.signTransaction(asXdrBase64(transaction.toXDR()), { networkPassphrase }),
+  const signedTransaction = await withPhaseTimeout(
+    signAndVerifyTransaction(transaction, options.wallet, networkPassphrase, config),
     config.walletSigningTimeoutMs,
     'Wallet signing',
   )
-  const signedTransaction = TransactionBuilder.fromXDR(signedXdr, networkPassphrase)
-  if (!(signedTransaction instanceof Transaction)) {
-    throw new Error('extendLedgerTTL: wallet returned an invalid signed transaction')
-  }
 
   const sent = await withPhaseTimeout(
     server.sendTransaction(signedTransaction),
@@ -246,7 +241,7 @@ async function waitForTerminalStatus(
   hash: string,
   pollIntervalMs: number,
   pollTimeoutMs: number,
-  runtime: SdkRuntime,
+  runtime: SdkRuntime = SYSTEM_RUNTIME,
 ): Promise<rpc.Api.GetTransactionResponse> {
   const startTime = runtime.now()
   let attempt = 0

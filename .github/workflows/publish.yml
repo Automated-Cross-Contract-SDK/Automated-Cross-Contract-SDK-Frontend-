@@ -2,9 +2,7 @@
 name: Publish
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_call:
   workflow_dispatch:
     inputs:
       channel:
@@ -34,6 +32,8 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # Add required reviewers to this environment to gate every npm release.
+    environment: npm
     steps:
       - uses: actions/checkout@v4
 
@@ -126,7 +126,7 @@ jobs:
           INPUT_BASE: ${{ inputs.base }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ -n "$INPUT_CHANNEL" ]; then
             channel="$INPUT_CHANNEL"
             base="$INPUT_BASE"
           else

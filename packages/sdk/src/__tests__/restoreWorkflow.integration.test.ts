@@ -193,6 +193,7 @@ describe('full restore workflow integration', () => {
       restoreTxHash: 'restore-tx-hash',
       archivedKeysDetected: 1,
       sequenceRetries: 0,
+      restoreMode: 'separate',
     })
 
     // RPC calls happen in the expected end-to-end order: simulate -> account

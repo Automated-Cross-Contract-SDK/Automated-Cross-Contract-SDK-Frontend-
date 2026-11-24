@@ -59,7 +59,7 @@ function makeMockRpcClient(): ISorobanRpcClient {
     getTransaction: vi.fn(),
     getAccount: vi.fn(),
     getLedgerEntries: vi.fn(),
-    getLatestLedger: vi.fn(),
+    getLatestLedger: vi.fn().mockResolvedValue({ sequence: 100 }),
   }
 }
 
@@ -163,8 +163,7 @@ describe('SorobanRpcClient', () => {
     expect(client.serverURL).toBe('https://soroban-testnet.stellar.org')
   })
 
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('wraps transport failures in a typed NETWORK_ERROR without hiding the cause', async () => {
+  it('wraps transport failures in a typed NETWORK_ERROR without hiding the cause', async () => {
     const client = new SorobanRpcClient('https://soroban-testnet.stellar.org')
     const cause = new Error('connection refused')
     const spy = vi.spyOn(rpc.Server.prototype, 'getLatestLedger').mockRejectedValue(cause)
@@ -338,8 +337,7 @@ describe('SorobanResurrect — rpcClient injection', () => {
     expect(sdk.config.rpcClient).toBe(mockClient)
   })
 
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('allows a test double to drive the full submitWithRestore path', async () => {
+  it('allows a test double to drive the full submitWithRestore path', async () => {
     const mockClient = makeMockRpcClient()
 
     const mockSorobanData = new SorobanDataBuilder().build()
@@ -415,8 +413,7 @@ describe('SorobanResurrect — rpcClient injection', () => {
 
 describe('free functions accept ISorobanRpcClient', () => {
   describe('executeWithRestore', () => {
-    // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-    it.skip('accepts an ISorobanRpcClient as server', async () => {
+    it('accepts an ISorobanRpcClient as server', async () => {
       const mockClient = makeMockRpcClient()
       const mockSorobanData = new SorobanDataBuilder().build()
 
@@ -514,13 +511,13 @@ describe('free functions accept ISorobanRpcClient', () => {
 // ---------------------------------------------------------------------------
 
 describe('backward compatibility', () => {
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('a partial mock cast as rpc.Server still works with executeWithRestore (existing pattern)', async () => {
+  it('a partial mock cast as rpc.Server still works with executeWithRestore (existing pattern)', async () => {
     // This is the original test pattern used across the codebase.
     // It must continue to work — ISorobanRpcClient is backward compatible.
     const legacyMock = {
       simulateTransaction: vi.fn(),
       sendTransaction: vi.fn(),
+      getLatestLedger: vi.fn().mockResolvedValue({ sequence: 100 }),
       getTransaction: vi.fn(),
       getAccount: vi.fn(),
       getLedgerEntries: vi.fn(),

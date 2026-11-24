@@ -117,14 +117,14 @@ describe('SorobanResurrect.submitWithRestore — callback invocation ordering', 
 
   beforeEach(() => {
     resurrect = new SorobanResurrect(testConfig)
+    vi.spyOn(resurrect.server, 'getLatestLedger').mockResolvedValue({ sequence: 100 } as never)
   })
 
   afterEach(() => {
     vi.useRealTimers()
   })
 
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('invokes callbacks in the documented order for the full restore-then-submit flow', async () => {
+  it('invokes callbacks in the documented order for the full restore-then-submit flow', async () => {
     vi.spyOn(resurrect.server, 'simulateTransaction')
       .mockResolvedValueOnce(makeRestoreResponse() as never)
       .mockResolvedValueOnce(makeSuccessResponse() as never)
@@ -159,8 +159,7 @@ describe('SorobanResurrect.submitWithRestore — callback invocation ordering', 
     expect(callbacks.onRestoreFailed).not.toHaveBeenCalled()
   })
 
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('publishes typed lifecycle phases and a terminal completion event', async () => {
+  it('publishes typed lifecycle phases and a terminal completion event', async () => {
     vi.spyOn(resurrect.server, 'simulateTransaction')
       .mockResolvedValueOnce(makeRestoreResponse() as never)
       .mockResolvedValueOnce(makeSuccessResponse() as never)
@@ -207,8 +206,7 @@ describe('SorobanResurrect.submitWithRestore — callback invocation ordering', 
     expect(callback).toHaveBeenCalledTimes(11)
   })
 
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('shares only concurrent requests with the same logical requestId', async () => {
+  it('shares only concurrent requests with the same logical requestId', async () => {
     vi.spyOn(resurrect.server, 'simulateTransaction').mockResolvedValue(
       makeSuccessResponse() as never,
     )
@@ -269,8 +267,8 @@ describe('SorobanResurrect.submitWithRestore — callback invocation ordering', 
     expect(resurrect.history).toHaveLength(4)
   })
 
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('rejects an empty requestId without starting a workflow', async () => {
+  it('rejects an empty requestId without starting a workflow', async () => {
+    const simulate = vi.spyOn(resurrect.server, 'simulateTransaction')
     const result = await resurrect.submitWithRestore({
       transaction: makeSampleTx(),
       wallet: makeWallet(),
@@ -281,12 +279,11 @@ describe('SorobanResurrect.submitWithRestore — callback invocation ordering', 
       success: false,
       error: 'requestId must be a non-empty string',
     })
-    expect(resurrect.server.simulateTransaction).not.toHaveBeenCalled()
+    expect(simulate).not.toHaveBeenCalled()
     expect(resurrect.history).toHaveLength(0)
   })
 
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('can return after original submission while still confirming a required restore', async () => {
+  it('can return after original submission while still confirming a required restore', async () => {
     vi.spyOn(resurrect.server, 'simulateTransaction')
       .mockResolvedValueOnce(makeRestoreResponse() as never)
       .mockResolvedValueOnce(makeSuccessResponse() as never)
@@ -314,8 +311,7 @@ describe('SorobanResurrect.submitWithRestore — callback invocation ordering', 
     expect(resurrect.server.getTransaction).toHaveBeenCalledTimes(1)
   })
 
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('does not submit the original transaction when restore confirmation remains pending', async () => {
+  it('does not submit the original transaction when restore confirmation remains pending', async () => {
     vi.useFakeTimers()
     vi.spyOn(resurrect.server, 'simulateTransaction')
       .mockResolvedValueOnce(makeRestoreResponse() as never)
@@ -348,8 +344,7 @@ describe('SorobanResurrect.submitWithRestore — callback invocation ordering', 
     expect(resurrect.server.sendTransaction).toHaveBeenCalledTimes(1)
   })
 
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('returns an explicit pending result or timeout error with the submitted hash', async () => {
+  it('returns an explicit pending result or timeout error with the submitted hash', async () => {
     vi.useFakeTimers()
     vi.spyOn(resurrect.server, 'simulateTransaction').mockResolvedValue(
       makeSuccessResponse() as never,
@@ -497,8 +492,7 @@ describe('SorobanResurrect.submitWithRestore — callback invocation ordering', 
     }
   })
 
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('stops after onRestoreFailed and never reaches later callbacks when the restore transaction fails on-chain', async () => {
+  it('stops after onRestoreFailed and never reaches later callbacks when the restore transaction fails on-chain', async () => {
     vi.spyOn(resurrect.server, 'simulateTransaction').mockResolvedValue(
       makeRestoreResponse() as never,
     )
@@ -576,8 +570,7 @@ describe('SorobanResurrect.submitWithRestore — callback invocation ordering', 
     expect(order).toEqual(['onRestoreFailed'])
   })
 
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('calls onRestoreFailed and stops if the signed original transaction cannot be parsed after a successful restore', async () => {
+  it('calls onRestoreFailed and stops if the signed original transaction cannot be parsed after a successful restore', async () => {
     vi.spyOn(resurrect.server, 'simulateTransaction')
       .mockResolvedValueOnce(makeRestoreResponse() as never)
       .mockResolvedValueOnce(makeSuccessResponse() as never)
@@ -631,8 +624,7 @@ describe('SorobanResurrect.submitWithRestore — callback invocation ordering', 
     expect(callbacks.onOriginalSubmitted).not.toHaveBeenCalled()
   })
 
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('drives instance state transitions in step with the callback order', async () => {
+  it('drives instance state transitions in step with the callback order', async () => {
     vi.spyOn(resurrect.server, 'simulateTransaction')
       .mockResolvedValueOnce(makeRestoreResponse() as never)
       .mockResolvedValueOnce(makeSuccessResponse() as never)

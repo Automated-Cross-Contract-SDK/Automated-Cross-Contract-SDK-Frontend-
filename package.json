@@ -55,7 +55,8 @@
     "prepare": "husky",
     "verify:packaging": "node scripts/verify-packaging.mjs",
     "check:bundle": "node scripts/check-bundle-budgets.mjs",
-    "check:malware": "bash scripts/check-malware-markers.sh"
+    "check:malware": "bash scripts/check-malware-markers.sh",
+    "check:testnet": "node scripts/testnet-check.mjs"
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",

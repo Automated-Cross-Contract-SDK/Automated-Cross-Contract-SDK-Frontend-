@@ -28,8 +28,7 @@ function makeSampleTx(): Transaction {
 
 describe('SorobanResurrect — config change reactivity', () => {
   describe('getEffectiveConfig', () => {
-    // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-    it.skip('returns a validated snapshot with defaults and no runtime clients', () => {
+    it('returns a validated snapshot with defaults and no runtime clients', () => {
       const settings = getEffectiveConfig({
         rpcUrl: 'https://soroban-testnet.stellar.org',
       })
@@ -40,7 +39,7 @@ describe('SorobanResurrect — config change reactivity', () => {
         pollIntervalMs: 1000,
         pollTimeoutMs: 60_000,
         restoreFeeMultiplier: RESTORE_FEE_MULTIPLIER,
-        maxRestoreFeeStroops: 10_000_000,
+        maxRestoreFeeStroops: '10000000',
         maxSequenceRetries: 3,
         archiveDetectionChunkSize: 50,
         archiveDetectionConcurrency: 4,

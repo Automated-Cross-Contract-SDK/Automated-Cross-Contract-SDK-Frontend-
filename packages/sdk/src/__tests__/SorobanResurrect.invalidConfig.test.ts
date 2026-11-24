@@ -138,8 +138,7 @@ describe('SorobanResurrect — invalid config handling', () => {
     ).toThrow('config.archiveDetectionFallback')
   })
 
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('throws a typed INVALID_INPUT error for invalid configuration', () => {
+  it('throws a typed INVALID_INPUT error for invalid configuration', () => {
     try {
       new SorobanResurrect({ rpcUrl: '' } as SorobanResurrectConfig)
       throw new Error('expected constructor to reject the invalid URL')

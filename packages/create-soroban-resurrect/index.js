@@ -8,7 +8,7 @@ import { createInterface } from 'node:readline/promises'
 
 const NETWORKS = ['testnet', 'futurenet', 'mainnet']
 const WALLETS = ['freighter', 'albedo', 'xbull', 'lobstr', 'rabet']
-const SDK_VERSION = '^0.1.0'
+const SDK_VERSION = '^0.1.0' // x-release-please-version
 
 const argv = process.argv.slice(2)
 const flag = (name) => {

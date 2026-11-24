@@ -13,6 +13,7 @@ import {
 import {
   extractXdrOperations,
   waitForTransaction,
+  assertRestoreTransactionFresh,
   buildRestoreTransaction,
   buildOriginalAfterRestore,
   getExpiredTransactionInfo,
@@ -184,26 +185,26 @@ describe('Restorer', () => {
       )
     })
 
-    // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-    it.skip('stops polling promptly when its abort signal is triggered', async () => {
+    it('stops polling promptly when its abort signal is triggered', async () => {
       const server = makeMockServer()
       vi.mocked(server.getTransaction).mockResolvedValue({
         status: rpc.Api.GetTransactionStatus.NOT_FOUND,
       } as never)
       const controller = new AbortController()
-      const waiting = waitForTransaction(server, 'hash', 60_000, 60_000, controller.signal)
+      const waiting = waitForTransaction(server, 'hash', 60_000, 60_000, {
+        signal: controller.signal,
+      })
 
       await Promise.resolve()
       controller.abort()
 
-      await expect(waiting).rejects.toThrow('Operation cancelled')
+      await expect(waiting).rejects.toMatchObject({ name: 'AbortError' })
       expect(server.getTransaction).toHaveBeenCalledTimes(1)
     })
   })
 
   describe('buildRestoreTransaction', () => {
-    // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-    it.skip('builds a transaction with restore footprint operation', async () => {
+    it('builds a transaction with restore footprint operation', async () => {
       const server = makeMockServer()
       const kp = Keypair.random()
       const realAccount = new Account(kp.publicKey(), '1')
@@ -224,14 +225,13 @@ describe('Restorer', () => {
       expect(tx.operations.length).toBeGreaterThanOrEqual(1)
       expect(tx.ledgerBounds).toEqual({
         minLedger: 100,
-        maxLedger: 100 + RESTORE_TX_LEDGER_BOUNDS_WINDOW,
+        maxLedger: 130,
       })
     })
   })
 
   describe('assertRestoreTransactionFresh', () => {
-    // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-    it.skip('allows a signed restore while the latest ledger is inside the bounds', async () => {
+    it('allows a signed restore while the latest ledger is inside the bounds', async () => {
       const server = makeMockServer()
       const kp = Keypair.random()
       const tx = await buildRestoreTransaction({
@@ -248,8 +248,7 @@ describe('Restorer', () => {
       await expect(assertRestoreTransactionFresh(server, tx, tx)).resolves.toBeUndefined()
     })
 
-    // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-    it.skip('rejects a preamble once the current ledger reaches its exclusive max bound', async () => {
+    it('rejects a preamble once the current ledger reaches its exclusive max bound', async () => {
       const server = makeMockServer()
       const kp = Keypair.random()
       const tx = await buildRestoreTransaction({
@@ -365,25 +364,31 @@ describe('Restorer', () => {
       })
     })
 
-    // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-    it.skip('accepts valid caller-supplied future bounds and rejects an expired override', async () => {
+    it('accepts valid caller-supplied future bounds and rejects an expired override', async () => {
       const server = makeMockServer()
       const now = Math.floor(Date.now() / 1000)
       const originalTx = makeTimeBoundTx(0, now + 30)
       vi.mocked(server.getAccount).mockResolvedValue(new Account(originalTx.source, '3') as never)
       mockSuccessfulSimulation(server)
 
-      const rebuilt = await buildOriginalAfterRestore(server, originalTx, Networks.TESTNET, '100', {
-        minTime: now,
-        maxTime: now + 180,
-      })
+      const rebuilt = await buildOriginalAfterRestore(
+        server,
+        originalTx,
+        Networks.TESTNET,
+        '100',
+        undefined,
+        {
+          minTime: now,
+          maxTime: now + 180,
+        },
+      )
       expect(rebuilt.timeBounds).toEqual({
         minTime: String(now),
         maxTime: String(now + 180),
       })
 
       await expect(
-        buildOriginalAfterRestore(server, originalTx, Networks.TESTNET, '100', {
+        buildOriginalAfterRestore(server, originalTx, Networks.TESTNET, '100', undefined, {
           minTime: now,
           maxTime: now,
         }),

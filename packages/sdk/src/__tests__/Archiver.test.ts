@@ -207,45 +207,34 @@ describe('Archiver', () => {
       expect(result).toEqual([])
     })
 
-    it('detects archived entries when ledger entries are missing', async () => {
+    it('detects entries whose TTL has expired and ignores ones that do not exist', async () => {
       const existingKey = {
         toXDR: () => 'base64-1',
         type: 'contractData',
       } as unknown as xdr.LedgerKey
-      const missingKey = {
+      const archivedKey = {
         toXDR: () => 'base64-2',
+        type: 'contractCode',
+      } as unknown as xdr.LedgerKey
+      const absentKey = {
+        toXDR: () => 'base64-3',
         type: 'contractCode',
       } as unknown as xdr.LedgerKey
       const server = {
         getLedgerEntries: vi.fn().mockResolvedValue({
-          entries: [{ key: existingKey }],
+          latestLedger: 100,
+          entries: [
+            { key: existingKey, liveUntilLedgerSeq: 100 },
+            { key: archivedKey, liveUntilLedgerSeq: 0 },
+          ],
         }),
       } as unknown as rpc.Server
 
-      const keys = [existingKey, missingKey]
-
-      const result = await detectArchivedEntries(server, keys)
-      expect(result.length).toBe(1)
-      expect(result[0].keyBase64).toBe('base64-2')
+      const result = await detectArchivedEntries(server, [existingKey, archivedKey, absentKey])
+      expect(result.map((entry) => entry.keyBase64)).toEqual(['base64-2'])
     })
 
-    // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-    it.skip('returns missing entries in canonical key order, independent of input order', async () => {
-      const liveKey = { toXDR: () => 'live' } as unknown as xdr.LedgerKey
-      const laterKey = { toXDR: () => 'z-key' } as unknown as xdr.LedgerKey
-      const earlierKey = { toXDR: () => 'a-key' } as unknown as xdr.LedgerKey
-      const server = {
-        getLedgerEntries: vi.fn().mockResolvedValue({
-          entries: [{ key: liveKey }],
-        }),
-      } as unknown as rpc.Server
-
-      const result = await detectArchivedEntries(server, [laterKey, liveKey, earlierKey])
-
-      expect(result.map((entry) => entry.keyBase64)).toEqual(['a-key', 'z-key'])
-    })
-
-    it('treats all keys in a chunk as archived when the request fails', async () => {
+    it('fails rather than guessing when the request fails', async () => {
       const server = {
         getLedgerEntries: vi.fn().mockRejectedValue(new Error('network error')),
       } as unknown as rpc.Server
@@ -256,8 +245,9 @@ describe('Archiver', () => {
       } as unknown as xdr.LedgerKey
       const keys = [mockKey]
 
-      const result = await detectArchivedEntries(server, keys)
-      expect(result.length).toBe(1)
+      await expect(detectArchivedEntries(server, keys)).rejects.toMatchObject({
+        code: 'ARCHIVE_DETECTION_BATCH_FAILED',
+      })
     })
   })
 
@@ -379,7 +369,11 @@ describe('Archiver', () => {
           },
         }),
         getLedgerEntries: vi.fn().mockResolvedValue({
-          entries: [{ key: liveKey }],
+          latestLedger: 100,
+          entries: [
+            { key: liveKey, liveUntilLedgerSeq: 200 },
+            { key: archivedKey, liveUntilLedgerSeq: 0 },
+          ],
         }),
       } as unknown as rpc.Server
 

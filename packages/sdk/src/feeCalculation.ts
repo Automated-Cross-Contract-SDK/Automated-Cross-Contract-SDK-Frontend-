@@ -1,4 +1,4 @@
-import type { SorobanResurrectConfig } from './types.js'
+import type { RestoreMode, SorobanResurrectConfig } from './types.js'
 import { BASE_FEE, type xdr } from '@stellar/stellar-sdk'
 import { RestoreFeeExceededError } from './errors.js'
 import { RESTORE_FEE_MULTIPLIER } from './constants.js'
@@ -78,8 +78,10 @@ export interface RestoreCostEstimate {
   estimatedFee: string
   /** Number of archived ledger entries detected. */
   archivedKeysDetected: number
-  /** Whether the transaction requires a restore before it can be submitted. */
+  /** Whether the transaction touches archived entries that must be restored. */
   wouldNeedRestore: boolean
+  /** `automatic` when the call restores its entries itself; see {@link RestoreMode}. */
+  restoreMode?: RestoreMode
 }
 
 /**

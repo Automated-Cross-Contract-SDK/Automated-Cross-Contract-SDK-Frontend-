@@ -1,8 +1,7 @@
-import { rpc, Transaction, TransactionBuilder, xdr } from '@stellar/stellar-sdk'
+import { rpc, Transaction, xdr } from '@stellar/stellar-sdk'
 import type {
   ArchivedLedgerEntry,
   DryRunResult,
-  ExpiredTransactionInfo,
   ResurrectResult,
   ResolvedSorobanResurrectConfig,
   RestoreKeysOptions,
@@ -22,10 +21,8 @@ import {
   buildBatchRestoreTransaction,
   buildRestoreTransactionFromKeys,
   buildOriginalAfterRestore,
-  resolveRestoreMemo,
   waitForTransaction,
   extractXdrOperations,
-  getExpiredTransactionInfo,
   waitForTransactionSSE,
   assertRestoreTransactionFresh,
 } from './Restorer.js'
@@ -34,12 +31,13 @@ import {
   isErrorResponse,
   isSuccessResponse,
   extractArchivedKeys,
+  extractAutoRestoredKeys,
 } from './Archiver.js'
 import { TransactionHistory, TransactionHistoryEntry } from './TransactionHistory.js'
 import { attachHistoryPersistence, type HistoryPersistenceHandle } from './HistoryPersistence.js'
 import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
 import { SorobanResurrectSimulator } from './SorobanResurrectSimulation.js'
-import { asTxHash, asHistoryEntryId, asXdrBase64, asFeeStroops } from './branded-types.js'
+import { asTxHash, asHistoryEntryId, asFeeStroops } from './branded-types.js'
 import type { AbortSignalOptions } from './AbortUtils.js'
 import { runWithSignal, throwIfAborted } from './AbortUtils.js'
 import { createFailureGuidance } from './FailureGuidance.js'
@@ -52,8 +50,8 @@ import {
 } from './constants.js'
 import { ResurrectError, OriginalTransactionExpiredError } from './errors.js'
 import { calculateRestoreFee } from './feeCalculation.js'
+import { signAndVerifyTransaction } from './signedTransaction.js'
 import { assertSubmitted } from './submission.js'
-import { validateRestoreMemoConfig } from './memoValidation.js'
 
 /**
  * Handles all transaction execution concerns for a `SorobanResurrect` instance:
@@ -167,6 +165,7 @@ export class SorobanResurrectExecutor {
       }
       return {
         wouldNeedRestore: true,
+        restoreMode: 'separate',
         intendedOperations,
         archivedKeysDetected: archivedKeys.length,
         archivedKeys,
@@ -175,11 +174,18 @@ export class SorobanResurrectExecutor {
     }
 
     if (isSuccessResponse(response)) {
+      const archivedKeys = extractAutoRestoredKeys(response)
       return {
-        wouldNeedRestore: false,
+        wouldNeedRestore: archivedKeys.length > 0,
         intendedOperations,
-        archivedKeysDetected: 0,
-        archivedKeys: [],
+        archivedKeysDetected: archivedKeys.length,
+        archivedKeys,
+        ...(archivedKeys.length > 0
+          ? {
+              restoreMode: 'automatic' as const,
+              estimatedRestoreFee: asFeeStroops(response.minResourceFee),
+            }
+          : {}),
       }
     }
 
@@ -322,16 +328,13 @@ export class SorobanResurrectExecutor {
 
       stateMgr.setState('signing_restore', 'Awaiting wallet signature for restore transaction...')
       opts?.onSigningRestore?.()
-      const walletOptions = signal ? { networkPassphrase, signal } : { networkPassphrase }
-      const signedXdr = await runWithSignal(
-        () => wallet.signTransaction(asXdrBase64(restoreTx.toXDR()), walletOptions),
+      const signedTx = await signAndVerifyTransaction(
+        restoreTx,
+        wallet,
+        networkPassphrase,
+        this._config,
         signal,
       )
-
-      const signedTx = TransactionBuilder.fromXDR(signedXdr, networkPassphrase)
-      if (!(signedTx instanceof Transaction)) {
-        throw new Error('Failed to parse signed restore transaction')
-      }
 
       await assertRestoreTransactionFresh(this._server, signedTx, restoreTx)
 
@@ -438,7 +441,33 @@ export class SorobanResurrectExecutor {
    * @returns {@link ResurrectResult} with outcome, hashes, and `historyId`.
    */
   async submitWithRestore(
-    options: SubmitWithRestoreOptions & AbortSignalOptions,
+    options: SubmitWithRestoreRequestOptions & AbortSignalOptions,
+  ): Promise<ResurrectResult> {
+    const { requestId } = options
+    if (requestId === undefined) return this._submitWithRestore(options)
+    if (requestId.trim() === '') {
+      return {
+        success: false,
+        archivedKeysDetected: 0,
+        error: 'requestId must be a non-empty string',
+        errorCode: 'INVALID_INPUT',
+        failure: createFailureGuidance('INVALID_INPUT'),
+      }
+    }
+
+    // Concurrent calls with the same id share one workflow (a double click
+    // must not sign twice); the id can be reused once it settles.
+    const inFlight = this._inFlightRequests.get(requestId)
+    if (inFlight) return inFlight
+    const workflow = this._submitWithRestore(options).finally(() =>
+      this._inFlightRequests.delete(requestId),
+    )
+    this._inFlightRequests.set(requestId, workflow)
+    return workflow
+  }
+
+  private async _submitWithRestore(
+    options: SubmitWithRestoreRequestOptions & AbortSignalOptions,
   ): Promise<ResurrectResult> {
     const {
       transaction,
@@ -478,6 +507,9 @@ export class SorobanResurrectExecutor {
       }
     }
 
+    // Validated before anything is recorded or signed.
+    const effectiveConfig = resolveSubmitConfig(this._config, options)
+
     const historyId = this._history.add(transaction)
     const stateMgr = this._stateMgr
     const emitter = stateMgr.emitter
@@ -487,26 +519,20 @@ export class SorobanResurrectExecutor {
       options.onLifecycleEvent?.(payload)
     }
 
-    // Per-call restore-tx memo override (falls back to instance config).
-    const effectiveConfig = {
-      ...this._config,
-      ...(options.restoreTxMemo !== undefined || options.restoreTxMemoText !== undefined
-        ? {
-            restoreTxMemo: options.restoreTxMemo,
-            restoreTxMemoText: options.restoreTxMemoText,
-          }
-        : {}),
-    }
-
-    const restoreConfig = effectiveConfig
-    validateRestoreMemoConfig(restoreConfig)
-
     const result = await executeWithRestore({
       server: options.retry ? new RetryingRpcClient(this._server, options.retry) : this._server,
       transaction,
       wallet,
       config: effectiveConfig,
       signal: options.signal,
+      requestId: options.requestId,
+      feeBumpConfig: options.feeBumpConfig,
+      rebuildTimeBounds: options.rebuildTimeBounds,
+      approveExpiredRebuild: options.approveExpiredRebuild,
+      onLifecycleEvent: emitLifecycle,
+      confirmationPolicy: options.confirmationPolicy,
+      confirmationTimeoutMs: options.confirmationTimeoutMs,
+      confirmationTimeoutBehavior: options.confirmationTimeoutBehavior,
 
       onSigningRestore: () => {
         stateMgr.setState('signing_restore', 'Awaiting wallet signature for restore transaction...')
@@ -721,29 +747,7 @@ export class SorobanResurrectExecutor {
       return [await this.submitWithRestore({ ...items[0], signal: options.signal })]
     }
 
-    const restoreConfigs = items.map((item) => {
-      const hasMemoOverride =
-        item.restoreTxMemo !== undefined || item.restoreTxMemoText !== undefined
-      const config = hasMemoOverride
-        ? {
-            ...this._config,
-            restoreTxMemo: item.restoreTxMemo,
-            restoreTxMemoText: item.restoreTxMemoText,
-          }
-        : this._config
-      validateRestoreMemoConfig(config)
-      return config
-    })
-
-    if (
-      items.some((item) => item.restoreTxMemo !== undefined || item.restoreTxMemoText !== undefined)
-    ) {
-      const results: ResurrectResult[] = []
-      for (const item of items) {
-        results.push(await this.submitWithRestore(item))
-      }
-      return results
-    }
+    for (const item of items) resolveSubmitConfig(this._config, item)
 
     const wallet = items[0].wallet
     const { signal: sharedSignal } = options
@@ -794,18 +798,6 @@ export class SorobanResurrectExecutor {
       }
       return results
     }
-    const memoSignature = (config: (typeof restoreConfigs)[number]): string => {
-      const memo = resolveRestoreMemo(undefined, config)
-      return JSON.stringify(memo ? [memo.type, memo.value] : ['none'])
-    }
-    if (
-      restoreConfigs.some((config) => memoSignature(config) !== memoSignature(restoreConfigs[0]))
-    ) {
-      throw new ResurrectError(
-        'INVALID_RESTORE_MEMO',
-        'submitBatchWithRestore builds one shared restore transaction; all items must use the same restore memo configuration.',
-      )
-    }
 
     const networkPassphrase = this._config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
     const pollInterval = this._config.pollIntervalMs ?? POLL_INTERVAL_MS
@@ -826,17 +818,13 @@ export class SorobanResurrectExecutor {
         'signing_restore',
         'Awaiting wallet signature for batch restore transaction...',
       )
-      const walletOptions = sharedSignal
-        ? { networkPassphrase, signal: sharedSignal }
-        : { networkPassphrase }
-      const signedXdr = await runWithSignal(
-        () => wallet.signTransaction(asXdrBase64(restoreTx.toXDR()), walletOptions),
+      const signedTx = await signAndVerifyTransaction(
+        restoreTx,
+        wallet,
+        networkPassphrase,
+        this._config,
         sharedSignal,
       )
-      const signedTx = TransactionBuilder.fromXDR(signedXdr, networkPassphrase)
-      if (!(signedTx instanceof Transaction)) {
-        throw new Error('Failed to parse signed batch restore transaction')
-      }
 
       await assertRestoreTransactionFresh(this._server, signedTx, restoreTx)
 
@@ -889,19 +877,20 @@ export class SorobanResurrectExecutor {
               networkPassphrase,
               item.transaction.fee,
               signal,
+              undefined,
+              item.wallet,
+              pollInterval,
             ),
           signal,
         )
         item.onSigningOriginal?.()
-        const walletOptions = signal ? { networkPassphrase, signal } : { networkPassphrase }
-        const signedXdr = await runWithSignal(
-          () => item.wallet.signTransaction(asXdrBase64(preparedTx.toXDR()), walletOptions),
+        const signedTx = await signAndVerifyTransaction(
+          preparedTx,
+          item.wallet,
+          networkPassphrase,
+          this._config,
           signal,
         )
-        const signedTx = TransactionBuilder.fromXDR(signedXdr, networkPassphrase)
-        if (!(signedTx instanceof Transaction)) {
-          throw new Error('Failed to parse signed transaction')
-        }
 
         const sent = await runWithSignal(() => this._server.sendTransaction(signedTx), signal)
         assertSubmitted(sent, 'ORIGINAL_TX_FAILED', 'Transaction')
@@ -911,6 +900,7 @@ export class SorobanResurrectExecutor {
 
         results.push({
           success: true,
+          confirmationStatus: 'submitted',
           originalTxHash: hash,
           restoreTxHash: restoreHash,
           archivedKeysDetected,

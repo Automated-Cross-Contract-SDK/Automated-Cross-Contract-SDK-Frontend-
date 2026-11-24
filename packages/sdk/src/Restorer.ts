@@ -19,13 +19,16 @@ import type {
 } from './types.js'
 import type { ISorobanRpcClient } from './RpcClient.js'
 import type { SequenceNumber, StellarPublicKey, TxHash, XdrBase64 } from './branded-types.js'
-import { asTxHash, asXdrBase64 } from './branded-types.js'
+import { asXdrBase64 } from './branded-types.js'
 import {
   BASE_FEE,
   DEFAULT_NETWORK_PASSPHRASE,
   SOROBAN_MAX_TX_XDR_BYTES,
   RESTORE_TX_SIZE_WARN_RATIO,
 } from './constants.js'
+import { POLL_INTERVAL_MS } from './constants.js'
+import type { WalletAdapter } from './types.js'
+import { ensureAddressAuthorization } from './Authorization.js'
 import { declaredResourceFee } from './submission.js'
 import { toBuilderFee, calculateRestoreFee } from './feeCalculation.js'
 import {
@@ -38,6 +41,7 @@ import { isRestoreResponse, extractArchivedKeys } from './Archiver.js'
 import {
   RestoreFeeExceededError,
   ResurrectError,
+  ResurrectTimeoutError,
   OriginalTransactionExpiredError,
 } from './errors.js'
 import { evaluateRestoreFootprint, restoreSizeGuidance } from './footprintGuard.js'
@@ -451,58 +455,7 @@ export async function waitForTransaction(
     await delayWithSignal(jitter, signal)
   }
 
-  throw new ResurrectError(
-    'CONFIRMATION_TIMEOUT',
-    `Transaction ${hash} did not complete within ${pollTimeoutMs}ms`,
-  )
-}
-
-function createAbortError(): Error {
-  const error = new Error('Operation cancelled')
-  error.name = 'AbortError'
-  return error
-}
-
-function awaitWithAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
-  if (!signal) return promise
-  if (signal.aborted) return Promise.reject(createAbortError())
-
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = () => {
-      signal.removeEventListener('abort', onAbort)
-      reject(createAbortError())
-    }
-    signal.addEventListener('abort', onAbort, { once: true })
-    promise.then(
-      (value) => {
-        signal.removeEventListener('abort', onAbort)
-        if (signal.aborted) reject(createAbortError())
-        else resolve(value)
-      },
-      (error: unknown) => {
-        signal.removeEventListener('abort', onAbort)
-        reject(error)
-      },
-    )
-  })
-}
-
-function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
-  if (!signal) return new Promise((resolve) => setTimeout(resolve, ms))
-  if (signal.aborted) return Promise.reject(createAbortError())
-
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      signal.removeEventListener('abort', onAbort)
-      resolve()
-    }, ms)
-    const onAbort = () => {
-      clearTimeout(timer)
-      signal.removeEventListener('abort', onAbort)
-      reject(createAbortError())
-    }
-    signal.addEventListener('abort', onAbort, { once: true })
-  })
+  throw new ResurrectTimeoutError(`Transaction ${hash} did not complete within ${pollTimeoutMs}ms`)
 }
 
 /**
@@ -716,10 +669,7 @@ async function pollTransactionAdaptive(
     await delayWithSignal(delay, signal)
   }
 
-  throw new ResurrectError(
-    'CONFIRMATION_TIMEOUT',
-    `Transaction ${hash} did not complete within ${timeoutMs}ms`,
-  )
+  throw new ResurrectTimeoutError(`Transaction ${hash} did not complete within ${timeoutMs}ms`)
 }
 
 /**
@@ -796,6 +746,9 @@ export async function waitForTransactionSSE(
  * @see {@link buildOriginalAfterRestore}, which uses this to copy
  *   operations onto a freshly-built transaction.
  */
+/** Extra simulations allowed after a restore before giving up. */
+const RESIMULATION_ATTEMPTS = 3
+
 const parsedXdrOperationsCache = new WeakMap<Transaction, xdr.Operation[]>()
 
 export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
@@ -899,6 +852,8 @@ export async function buildOriginalAfterRestore(
   fee: string,
   signal?: AbortSignal,
   rebuildTimeBounds?: RebuildTimeBounds,
+  wallet?: WalletAdapter,
+  resimulationDelayMs: number = POLL_INTERVAL_MS,
 ): Promise<Transaction> {
   const now = Math.floor(Date.now() / 1000)
   const bounds = rebuildTimeBounds ?? originalTx.timeBounds
@@ -944,23 +899,36 @@ export async function buildOriginalAfterRestore(
   }
   const rawTx = builder.build()
 
-  const sim = await runWithSignal(() => server.simulateTransaction(rawTx), signal)
+  // The RPC node may lag a ledger behind the confirmed restore, so allow a few
+  // attempts. Never fall back to the raw transaction: without a footprint the
+  // network always rejects it.
+  let sim = await runWithSignal(() => server.simulateTransaction(rawTx), signal)
+  for (let i = 0; i < RESIMULATION_ATTEMPTS && rpc.Api.isSimulationRestore(sim); i++) {
+    await delayWithSignal(resimulationDelayMs, signal)
+    sim = await runWithSignal(() => server.simulateTransaction(rawTx), signal)
+  }
 
   if (rpc.Api.isSimulationRestore(sim)) {
-    // A restore may have succeeded in the ledger but some RPC/test doubles keep
-    // reporting the same archived footprint for the immediate re-simulation.
-    // In that case, continue with the rebuilt original transaction rather than
-    // failing early and blocking the successful resubmission path.
-    return rawTx
+    throw new ResurrectError(
+      'RESTORE_TX_FAILED',
+      'Entries are still archived after the restore transaction confirmed',
+    )
   }
 
   if (rpc.Api.isSimulationError(sim)) {
     throw new Error(`Re-simulation failed after restore: ${sim.error}`)
   }
 
-  const assembled = rpc.assembleTransaction(rawTx, sim)
-
-  return assembled.build()
+  const assembled = rpc.assembleTransaction(rawTx, sim).build()
+  if (!wallet) return assembled
+  const { transaction } = await ensureAddressAuthorization({
+    transaction: assembled,
+    simulation: sim,
+    wallet,
+    networkPassphrase,
+    signal,
+  })
+  return transaction
 }
 
 /**
@@ -1016,7 +984,9 @@ export async function buildFeeBumpTransaction(
     throw new Error('Failed to parse inner transaction XDR')
   }
 
-  const fee = feeBumpFee ?? innerTx.fee
+  // The builder takes a per-operation fee and adds the resource fee itself.
+  const inclusionFee = Number(BigInt(innerTx.fee) - declaredResourceFee(innerTx))
+  const fee = feeBumpFee ?? Math.ceil(inclusionFee / innerTx.operations.length).toString()
 
   const feeBumpTx = TransactionBuilder.buildFeeBumpTransaction(
     Keypair.fromPublicKey(sponsorPublicKey),

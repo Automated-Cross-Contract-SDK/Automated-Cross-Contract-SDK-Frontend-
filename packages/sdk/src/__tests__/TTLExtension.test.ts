@@ -77,8 +77,7 @@ function makeServer(publicKey: string) {
 }
 
 describe('extendLedgerTTL', () => {
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('estimates the fee and submits an extend-footprint-TTL transaction after confirmation', async () => {
+  it('estimates the fee and submits an extend-footprint-TTL transaction after confirmation', async () => {
     const publicKey = Keypair.random().publicKey()
     const { server, sendTransaction } = makeServer(publicKey)
     const wallet = makeWallet(publicKey)
@@ -206,8 +205,7 @@ describe('extendLedgerTTL', () => {
     ).rejects.toThrow('TTL extension submission timed out after 5ms')
   })
 
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('bounds transaction confirmation independently', async () => {
+  it('bounds transaction confirmation independently', async () => {
     const publicKey = Keypair.random().publicKey()
     const { server } = makeServer(publicKey)
     vi.mocked(server.getTransaction).mockImplementation(() => new Promise(() => {}))

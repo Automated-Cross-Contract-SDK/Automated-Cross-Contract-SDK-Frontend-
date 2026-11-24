@@ -1,4 +1,5 @@
 import { rpc, type Transaction } from '@stellar/stellar-sdk'
+import { archivedKeysInResources, extractAutoRestoredKeys } from './Archiver.js'
 import { ResurrectError, type ResurrectErrorCode } from './errors.js'
 
 /**
@@ -29,7 +30,7 @@ const SOROBAN_OPERATIONS = ['invokeHostFunction', 'extendFootprintTtl', 'restore
 /**
  * Applies the simulated footprint, resource fee and authorization to a
  * transaction that has not been assembled yet. Transactions the caller already
- * assembled are returned untouched.
+ * assembled are returned untouched unless they miss a newly archived entry.
  */
 export function assembleIfNeeded(
   transaction: Transaction,
@@ -39,10 +40,16 @@ export function assembleIfNeeded(
   if (
     transaction.operations.length !== 1 ||
     !SOROBAN_OPERATIONS.includes(transaction.operations[0].type) ||
-    envelope.type !== 'envelopeTypeTx' ||
-    'sorobanData' in envelope.v1.tx.ext
+    envelope.type !== 'envelopeTypeTx'
   ) {
     return transaction
+  }
+  const { ext } = envelope.v1.tx
+  if ('sorobanData' in ext) {
+    // Entries may have been archived since the caller assembled it.
+    const declared = new Set(archivedKeysInResources(ext.sorobanData).map((e) => e.keyBase64))
+    const upToDate = extractAutoRestoredKeys(simulation).every((e) => declared.has(e.keyBase64))
+    if (upToDate) return transaction
   }
   return rpc.assembleTransaction(transaction, simulation).build()
 }

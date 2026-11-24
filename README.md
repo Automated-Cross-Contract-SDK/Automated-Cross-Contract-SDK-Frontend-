@@ -19,20 +19,18 @@ Soroban-Resurrect solves the "archived ledger entry" problem for Soroban dApps. 
         ▼
 [dApp Frontend] ──► Soroban-Resurrect
                           │
-                    ┌─────┴──────┐
-                    ▼            ▼
-              Simulate      Detect
-              Transaction   Archived
-              (RPC)         Keys
-                    │            │
-                    └──────┬─────┘
-                           ▼
-                    RestoreFootprintOp
-                           │
-                    ┌──────┴──────┐
-                    ▼             ▼
-              Restore Tx     Original Tx
-              (sign+send)   (sign+send)
+                  Simulate transaction
+                          │
+                Archived entries found?
+                  ┌───────┴────────┐
+                 no               yes
+                  │                │
+                  │     Check fee cap, notify dApp
+                  │                │
+                  └───────┬────────┘
+                          ▼
+          Sign once, submit, confirm
+     (the call restores its own entries)
 ```
 
 ---
@@ -250,14 +248,16 @@ const { isProcessing, isIdle, isSuccess, isError } = useSorobanResurrect(config)
 
 The SDK implements the complete [CAP-0066](https://github.com/stellar/stellar-protocol/blob/master/core/cap-0066.md) restoration flow:
 
+Since protocol 23 the network restores archived entries **inside the contract call itself**, so the usual flow needs one signature:
+
 1. **Simulate** — Calls `simulateTransaction` on the Soroban RPC endpoint
-2. **Detect** — Checks if the response is a `SimulateTransactionRestoreResponse` (via `Api.isSimulationRestore()`); extracts the archived ledger keys from the `SorobanDataBuilder` footprint
-3. **Build Restore Tx** — Constructs a transaction with `Operation.restoreFootprint({})` using the restore preamble data (footprint + resource fee from simulation)
-4. **Wallet Sign #1** — Prompts the user's wallet to sign the restore transaction
-5. **Submit Restore** — Sends the restore transaction and polls `getTransaction` until confirmed
-6. **Rebuild Original** — After restore confirms, re-simulates the original transaction, rebuilds it with a fresh account sequence number and the new simulation data via `assembleTransaction`
-7. **Wallet Sign #2** — Prompts the wallet to sign the prepared original transaction
-8. **Submit Original** — Sends the user's intended transaction
+2. **Detect** — Reads the archived entries the simulation marked for restoration (`archivedSorobanEntries`) and reports them through `onRestoreNeeded`
+3. **Check** — Applies `maxRestoreFeeStroops` before the wallet is prompted
+4. **Sign and submit** — Assembles the call with its restore footprint; one wallet prompt restores the entries and runs the call (`result.restoreMode === 'automatic'`)
+
+When an RPC returns a restore preamble instead (older protocols), the SDK signs and confirms a separate `RestoreFootprint` transaction, then rebuilds, re-simulates and signs the original (`restoreMode === 'separate'`). `restoreKeys()` always restores explicitly, without a call.
+
+Every transaction a wallet returns is verified against the one it was asked to sign.
 
 ### Failure Handling
 
@@ -500,10 +500,5 @@ MIT
 
 ## Handsoff notes
 
-<!-- handsoff-issue-366 -->
-
 - #366: SDK: futurenet presets resolve to a passphrase the config validator rejects
-
-<!-- handsoff-issue-560 -->
-
 - #560: Add backpressure for concurrent restore workflows

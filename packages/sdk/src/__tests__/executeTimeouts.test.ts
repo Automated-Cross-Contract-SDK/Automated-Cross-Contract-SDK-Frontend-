@@ -24,14 +24,17 @@ const mocks = vi.hoisted(() => ({
   isTxBadSeqError: vi.fn(),
 }))
 
-vi.mock('../Archiver.js', () => ({
+vi.mock('../Archiver.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../Archiver.js')>()),
   isErrorResponse: mocks.isErrorResponse,
   isRestoreResponse: mocks.isRestoreResponse,
   isSuccessResponse: mocks.isSuccessResponse,
   extractArchivedKeys: mocks.extractArchivedKeys,
 }))
 
-vi.mock('../Restorer.js', () => ({
+vi.mock('../Restorer.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../Restorer.js')>()),
+  assertRestoreTransactionFresh: vi.fn(),
   buildRestoreTransaction: mocks.buildRestoreTransaction,
   waitForTransaction: mocks.waitForTransaction,
   waitForTransactionSSE: mocks.waitForTransaction,
@@ -105,8 +108,7 @@ describe('executeWithRestore phase timeouts', () => {
     mocks.isTxBadSeqError.mockReturnValue(false)
   })
 
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('times out simulation without using the confirmation timeout', async () => {
+  it('times out simulation without using the confirmation timeout', async () => {
     const { server, wallet, config } = makeSetup()
     vi.mocked(server.simulateTransaction).mockImplementation(() => new Promise(() => {}))
 
@@ -120,8 +122,7 @@ describe('executeWithRestore phase timeouts', () => {
     expect(result.error).toBe('Transaction simulation timed out after 5ms')
   })
 
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('times out wallet signing independently', async () => {
+  it('times out wallet signing independently', async () => {
     const { server, wallet, config } = makeSetup()
     useRestoreSimulation(server)
     wallet.signTransaction = vi.fn(() => new Promise(() => {}))
@@ -136,8 +137,7 @@ describe('executeWithRestore phase timeouts', () => {
     expect(result.error).toBe('Wallet signing timed out after 5ms')
   })
 
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('times out restore confirmation independently', async () => {
+  it('times out restore confirmation independently', async () => {
     const { server, wallet, config } = makeSetup()
     useRestoreSimulation(server)
     vi.mocked(server.sendTransaction).mockResolvedValue({ hash: 'restore-hash' } as never)
@@ -153,8 +153,7 @@ describe('executeWithRestore phase timeouts', () => {
     expect(result.error).toBe('Restore confirmation timed out after 5ms')
   })
 
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('times out original submission independently', async () => {
+  it('times out original submission independently', async () => {
     const { server, wallet, config } = makeSetup()
     useRestoreSimulation(server)
     vi.mocked(server.sendTransaction)

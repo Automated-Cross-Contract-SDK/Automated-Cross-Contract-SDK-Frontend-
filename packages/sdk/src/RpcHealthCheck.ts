@@ -99,18 +99,7 @@ export async function checkRpcEndpointReachability(
     const response = await fetch(endpoint, {
       method: 'HEAD',
       signal: controller.signal,
-    }).catch(() => undefined)
-
-    clearTimeout(timeoutId)
-
-    if (!response) {
-      return {
-        endpoint,
-        reachable: false,
-        error: 'No response (connection timeout or refused)',
-        responseTimeMs: Date.now() - startTime,
-      }
-    }
+    }).finally(() => clearTimeout(timeoutId))
 
     return {
       endpoint,
@@ -207,7 +196,7 @@ export async function checkRpcMethod(
         available: true,
         responseTimeMs: Date.now() - startTime,
       }
-    } catch (parseErr) {
+    } catch {
       return {
         method,
         available: false,
