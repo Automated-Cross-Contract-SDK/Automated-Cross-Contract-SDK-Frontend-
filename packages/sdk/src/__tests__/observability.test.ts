@@ -77,8 +77,7 @@ describe('RpcHealthCheck', () => {
       expect(result.responseTimeMs).toBeGreaterThanOrEqual(0)
     })
 
-    // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-    it.skip('returns reachable=false for network errors', async () => {
+    it('returns reachable=false for network errors', async () => {
       fetchSpy.mockRejectedValueOnce(new Error('Network timeout'))
 
       const result = await checkRpcEndpointReachability('https://bad-endpoint.invalid', 5000)
@@ -378,11 +377,10 @@ describe('RpcHealthCheck', () => {
 
 describe('LoggingRedaction', () => {
   describe('RedactionUtils.hashAddress', () => {
-    // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-    it.skip('redacts address to first 2 and last 4 characters', () => {
+    it('redacts address to first 2 and last 4 characters', () => {
       const address = 'GABC1234567890ABCDEF1234567890Z'
       const redacted = RedactionUtils.hashAddress(address)
-      expect(redacted).toBe('GA...90Z')
+      expect(redacted).toBe('GA...890Z')
     })
 
     it('returns *** for short addresses', () => {
@@ -397,18 +395,16 @@ describe('LoggingRedaction', () => {
   })
 
   describe('RedactionUtils.hashSuffix', () => {
-    // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-    it.skip('redacts hash to last 4 characters by default', () => {
+    it('redacts hash to last 4 characters by default', () => {
       const hash = 'abc123def456xyz789'
       const redacted = RedactionUtils.hashSuffix(hash)
-      expect(redacted).toBe('...xyz789')
+      expect(redacted).toBe('...z789')
     })
 
-    // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-    it.skip('respects custom character count', () => {
+    it('respects custom character count', () => {
       const hash = 'abc123def456xyz789'
       const redacted = RedactionUtils.hashSuffix(hash, 8)
-      expect(redacted).toBe('...ef456xyz789')
+      expect(redacted).toBe('...56xyz789')
     })
 
     it('returns *** for short hashes', () => {
@@ -521,8 +517,7 @@ describe('LoggingRedaction', () => {
       expect(logged).not.toContain('privateKey')
     })
 
-    // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-    it.skip('includes redacted sensitive fields when allowSensitive=true', () => {
+    it('includes redacted sensitive fields when allowSensitive=true', () => {
       const logger = new SafeLogger(true)
       const obj = {
         workflowId: 'wf_123',
@@ -534,7 +529,7 @@ describe('LoggingRedaction', () => {
       expect(logSpy).toHaveBeenCalled()
       const logged = logSpy.mock.calls[0][0]
       expect(logged).toContain('wf_123')
-      expect(logged).toContain('GA...XYZ')
+      expect(logged).toContain('GA...0XYZ')
     })
 
     it('logs errors with context', () => {

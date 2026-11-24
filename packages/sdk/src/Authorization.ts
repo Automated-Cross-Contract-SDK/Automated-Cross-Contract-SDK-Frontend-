@@ -15,7 +15,8 @@
  * - Provide an interface for wallets that support signing individual auth entries
  */
 
-import { xdr, Transaction, TransactionBuilder, hash } from '@stellar/stellar-sdk'
+import { xdr, Transaction, buildAuthorizationEntryPreimage, hash } from '@stellar/stellar-sdk'
+import { bytesToHex } from './bytes.js'
 import { asXdrBase64, type XdrBase64 } from './branded-types.js'
 import type { WalletCapabilities } from './types.js'
 import { assertWalletCapability } from './walletCapabilities.js'
@@ -136,6 +137,22 @@ export interface SignAuthorizationEntriesOptions {
 // Core helpers
 // ---------------------------------------------------------------------------
 
+/** Address credentials of any credential arm, or `null` for source-account entries. */
+function getAddressCredentials(
+  credentials: xdr.SorobanCredentials,
+): xdr.SorobanAddressCredentials | null {
+  switch (credentials.type) {
+    case 'sorobanCredentialsAddress':
+      return credentials.address
+    case 'sorobanCredentialsAddressV2':
+      return credentials.addressV2
+    case 'sorobanCredentialsAddressWithDelegates':
+      return credentials.addressWithDelegates.addressCredentials
+    default:
+      return null
+  }
+}
+
 /**
  * Categorizes a list of `SorobanAuthorizationEntry` items from a simulation
  * response into source-account entries (no extra signing needed) and address
@@ -147,25 +164,18 @@ export function categorizeAuthEntries(
   authEntries: xdr.SorobanAuthorizationEntry[],
 ): CategorizedAuthEntry[] {
   return authEntries.map((entry) => {
-    const credentials = entry.credentials()
-    const credentialTypeName = credentials.switch().name
-
-    const isSourceAccount = credentialTypeName === 'sorobanCredentialsSourceAccount'
+    const isSourceAccount = entry.credentials.type === 'sorobanCredentialsSourceAccount'
 
     let signerAddress: string | undefined
 
     if (!isSourceAccount) {
       try {
-        const addressCredentials = credentials.address()
-        if (addressCredentials) {
-          const address = addressCredentials.address()
-          const addrType = address.switch().name
-          if (addrType === 'scAddressTypeAccount') {
-            // accountId is an xdr.PublicKey; encode as base64 for display
-            signerAddress = `account:${address.accountId().toXDR('base64')}`
-          } else {
-            signerAddress = `contract:${address.contractId().toString('hex')}`
-          }
+        const address = getAddressCredentials(entry.credentials)?.address
+        if (address?.type === 'scAddressTypeAccount') {
+          // accountId is an xdr.PublicKey; encode as base64 for display
+          signerAddress = `account:${address.accountId.toXdr('base64')}`
+        } else if (address?.type === 'scAddressTypeContract') {
+          signerAddress = `contract:${bytesToHex(address.contractId.toBytes())}`
         }
       } catch {
         // Could not extract signer address — leave undefined
@@ -250,28 +260,7 @@ export function attachAuthorizationEntries(options: AttachAuthorizationOptions):
     throw new Error('attachAuthorizationEntries: transaction has no InvokeHostFunction operation')
   }
 
-  // Access the underlying XDR envelope to mutate the auth list
-  const envelope = transaction.toEnvelope()
-  const envelopeType = envelope.switch()
-
-  let rawOps: xdr.Operation[]
-
-  if (envelopeType.name === 'envelopeTypeTxV0') {
-    rawOps = envelope.v0().tx().operations()
-  } else {
-    // Covers envelopeTypeTx (V1) and fee-bump inner (which wraps V1)
-    rawOps = envelope.v1().tx().operations()
-  }
-
-  const rawOp = rawOps[invokeIdx]
-  const body = rawOp.body()
-
-  // body.value() returns the underlying InvokeHostFunctionOp when the
-  // discriminant is invokeHostFunction — cast via unknown to satisfy TypeScript
-  const invokeBody = body.value() as unknown as xdr.InvokeHostFunctionOp
-  invokeBody.auth(authEntries)
-
-  return transaction
+  return withAuthEntries(transaction, invokeIdx, authEntries)
 }
 
 /**
@@ -291,22 +280,17 @@ export function hashAuthorizationEntry(
   entry: xdr.SorobanAuthorizationEntry,
   networkPassphrase: string,
 ): Uint8Array {
-  // Encode the passphrase to bytes without relying on Node.js Buffer
-  const passphraseBytes = new TextEncoder().encode(networkPassphrase)
-  // hash() from stellar-base/stellar-sdk accepts Buffer-like Uint8Array
-  const networkIdHash = hash(passphraseBytes as unknown as Parameters<typeof hash>[0])
-  const addressCreds = entry.credentials().address()
-
-  const preimage = xdr.HashIdPreimage.envelopeTypeSorobanAuthorization(
-    new xdr.HashIdPreimageSorobanAuthorization({
-      networkId: networkIdHash,
-      nonce: addressCreds.nonce(),
-      signatureExpirationLedger: addressCreds.signatureExpirationLedger(),
-      invocation: entry.rootInvocation(),
-    }),
+  const credentials = getAddressCredentials(entry.credentials)
+  if (!credentials) {
+    throw new Error('hashAuthorizationEntry: entry has no address credentials to sign')
+  }
+  const preimage = buildAuthorizationEntryPreimage(
+    entry,
+    credentials.signatureExpirationLedger,
+    networkPassphrase,
   )
 
-  return hash(preimage.toXDR())
+  return hash(preimage.toXdr())
 }
 
 /**
@@ -322,9 +306,7 @@ export function hashAuthorizationEntry(
 export function requiresAddressAuthorization(
   authEntries: xdr.SorobanAuthorizationEntry[],
 ): boolean {
-  return authEntries.some(
-    (entry) => entry.credentials().switch().name !== 'sorobanCredentialsSourceAccount',
-  )
+  return authEntries.some((entry) => entry.credentials.type !== 'sorobanCredentialsSourceAccount')
 }
 
 /**
@@ -336,9 +318,7 @@ export function requiresAddressAuthorization(
 export function getAddressAuthEntries(
   authEntries: xdr.SorobanAuthorizationEntry[],
 ): xdr.SorobanAuthorizationEntry[] {
-  return authEntries.filter(
-    (entry) => entry.credentials().switch().name !== 'sorobanCredentialsSourceAccount',
-  )
+  return authEntries.filter((entry) => entry.credentials.type !== 'sorobanCredentialsSourceAccount')
 }
 
 // ---------------------------------------------------------------------------
@@ -448,45 +428,68 @@ export async function ensureAddressAuthorization(
     signal,
   })
 
-  const rebuilt = attachSignedAuthEntries(transaction, signedEntries, networkPassphrase)
+  const rebuilt = attachSignedAuthEntries(transaction, signedEntries)
   const signedEntryCount = categorized.filter((c) => c.credentialType === 'address').length
 
   return { transaction: rebuilt, signed: true, signedEntryCount }
 }
 
-/**
- * Attaches signed auth entries to the first `InvokeHostFunction` op and
- * returns a rebuilt `Transaction` (so the change survives re-serialisation,
- * regardless of whether `Transaction.toEnvelope()` returns a live reference).
- */
+/** Attaches signed auth entries to the first `InvokeHostFunction` operation. */
 function attachSignedAuthEntries(
   transaction: Transaction,
   authEntries: xdr.SorobanAuthorizationEntry[],
-  networkPassphrase: string,
 ): Transaction {
-  const envelope = transaction.toEnvelope()
-  const envelopeType = envelope.switch()
-
-  const rawOps: xdr.Operation[] =
-    envelopeType.name === 'envelopeTypeTxV0'
-      ? envelope.v0().tx().operations()
-      : envelope.v1().tx().operations()
-
-  const invokeIdx = rawOps.findIndex((op) => op.body().switch().name === 'invokeHostFunction')
+  const invokeIdx = transaction.operations.findIndex((op) => op.type === 'invokeHostFunction')
   if (invokeIdx === -1) {
     throw new Error(
       'ensureAddressAuthorization: transaction has no InvokeHostFunction operation to attach auth entries to',
     )
   }
+  return withAuthEntries(transaction, invokeIdx, authEntries)
+}
 
-  const invokeBody = rawOps[invokeIdx].body().value() as unknown as xdr.InvokeHostFunctionOp
-  invokeBody.auth(authEntries)
-
-  const rebuilt = TransactionBuilder.fromXDR(envelope.toXDR('base64'), networkPassphrase)
-  if (!(rebuilt instanceof Transaction)) {
-    throw new Error(
-      'ensureAddressAuthorization: failed to rebuild transaction after attaching auth entries',
-    )
+/**
+ * Returns an unsigned copy of `transaction` whose operation at `invokeIdx`
+ * carries `authEntries`. XDR values are immutable, so the envelope is rebuilt;
+ * every other field (fee, sequence, preconditions, Soroban data) is kept.
+ */
+function withAuthEntries(
+  transaction: Transaction,
+  invokeIdx: number,
+  authEntries: xdr.SorobanAuthorizationEntry[],
+): Transaction {
+  const envelope = transaction.toEnvelope()
+  if (envelope.type !== 'envelopeTypeTx') {
+    throw new Error(`Unsupported transaction envelope type: ${envelope.type}`)
   }
-  return rebuilt
+  const { tx } = envelope.v1
+  const operations = tx.operations.map((operation, index) => {
+    if (index !== invokeIdx || operation.body.type !== 'invokeHostFunction') return operation
+    const { hostFunction } = operation.body.invokeHostFunctionOp
+    return new xdr.Operation({
+      sourceAccount: operation.sourceAccount,
+      body: xdr.OperationBody.invokeHostFunction(
+        new xdr.InvokeHostFunctionOp({ hostFunction, auth: authEntries }),
+      ),
+    })
+  })
+
+  return new Transaction(
+    xdr.TransactionEnvelope.envelopeTypeTx(
+      new xdr.TransactionV1Envelope({
+        tx: new xdr.Transaction({
+          sourceAccount: tx.sourceAccount,
+          fee: tx.fee,
+          seqNum: tx.seqNum,
+          cond: tx.cond,
+          memo: tx.memo,
+          operations,
+          ext: tx.ext,
+        }),
+        // Changing the operations invalidates any existing signature.
+        signatures: [],
+      }),
+    ),
+    transaction.networkPassphrase,
+  )
 }

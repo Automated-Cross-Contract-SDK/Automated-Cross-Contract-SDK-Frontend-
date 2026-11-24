@@ -86,8 +86,8 @@ export interface ContractScanResult {
 
 function durabilityOf(kind: 'persistent' | 'temporary'): xdr.ContractDataDurability {
   return kind === 'temporary'
-    ? xdr.ContractDataDurability.temporary()
-    : xdr.ContractDataDurability.persistent()
+    ? xdr.ContractDataDurability.temporary
+    : xdr.ContractDataDurability.persistent
 }
 
 function contractDataKey(
@@ -121,11 +121,12 @@ async function tryContractCodeKey(
   try {
     const res = await server.getLedgerEntries(contractInstanceKey(contractId))
     const entry = res.entries?.[0]
-    if (!entry) return undefined
-    const instance = entry.val.contractData().val().instance()
-    const exec = instance.executable()
-    if (exec.switch().name !== 'contractExecutableWasm') return undefined
-    return xdr.LedgerKey.contractCode(new xdr.LedgerKeyContractCode({ hash: exec.wasmHash() }))
+    if (entry?.val.type !== 'contractData') return undefined
+    const { val } = entry.val.contractData
+    if (val.type !== 'scvContractInstance') return undefined
+    const { executable } = val.instance
+    if (executable.type !== 'contractExecutableWasm') return undefined
+    return xdr.LedgerKey.contractCode(new xdr.LedgerKeyContractCode({ hash: executable.wasmHash }))
   } catch {
     return undefined
   }

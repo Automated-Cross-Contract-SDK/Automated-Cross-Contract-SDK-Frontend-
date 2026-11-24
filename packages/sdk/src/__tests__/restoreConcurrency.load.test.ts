@@ -14,8 +14,12 @@ import type { WalletAdapter, SorobanResurrectConfig } from '../types.js'
 
 function makeMockServer(): rpc.Server {
   let sendCount = 0
+  const originals = new Set<string>()
   return {
-    simulateTransaction: vi.fn().mockImplementation(async () => {
+    simulateTransaction: vi.fn().mockImplementation(async (tx: Transaction) => {
+      // Each workflow simulates its original first, then the rebuilt copy.
+      const restored = originals.has(tx.source)
+      originals.add(tx.source)
       const mockSorobanData = new SorobanDataBuilder().build()
       const mockLedgerKey = { toXDR: () => 'base64-key' }
       return {
@@ -25,21 +29,26 @@ function makeMockServer(): rpc.Server {
         _parsed: true,
         transactionData: {
           build: () => mockSorobanData,
-          getFootprint: () => ({ readOnly: () => [], readWrite: () => [mockLedgerKey] }),
+          getFootprint: () => ({ readOnly: [], readWrite: [mockLedgerKey] }),
         },
         minResourceFee: '100',
         cost: { cpuInsns: '100', memBytes: '100' },
         result: { auth: [], retval: { switch: () => 0 } },
-        restorePreamble: {
-          minResourceFee: '100',
-          transactionData: { build: () => mockSorobanData },
-        },
+        ...(restored
+          ? {}
+          : {
+              restorePreamble: {
+                minResourceFee: '100',
+                transactionData: { build: () => mockSorobanData },
+              },
+            }),
       }
     }),
     getAccount: vi.fn().mockImplementation(async (pubKey: string) => new Account(pubKey, '1')),
     sendTransaction: vi.fn().mockImplementation(async () => ({ hash: `tx-hash-${++sendCount}` })),
     getTransaction: vi.fn().mockResolvedValue({ status: rpc.Api.GetTransactionStatus.SUCCESS }),
     getLedgerEntries: vi.fn(),
+    getLatestLedger: vi.fn().mockResolvedValue({ sequence: 100 }),
   } as unknown as rpc.Server
 }
 
@@ -77,8 +86,7 @@ describe('concurrent restore requests — load test', () => {
     server = makeMockServer()
   })
 
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('handles many concurrent executeWithRestore calls without cross-request state corruption', async () => {
+  it('handles many concurrent executeWithRestore calls without cross-request state corruption', async () => {
     const CONCURRENCY = 25
 
     const calls = Array.from({ length: CONCURRENCY }, () =>

@@ -1,44 +1,35 @@
 import { describe, it, expect } from 'vitest'
-import { rpc } from '@stellar/stellar-sdk'
+import { rpc, xdr } from '@stellar/stellar-sdk'
 import { parseTransactionDiagnostics } from '../Diagnostics.js'
 
-/**
- * Duck-typed stand-ins for the XDR object graph the parser walks. The real
- * `xdr.DiagnosticEvent` / `xdr.TransactionResult` decoders are exercised
- * transitively; here we pin the parsing / extraction logic against fixtures.
- */
-function fakeDiagEvent(topicName: string, dataName: string) {
-  return {
-    toXDR: () => `xdr(${topicName}/${dataName})`,
-    inSuccessfulContractCall: () => false,
-    event: () => ({
-      body: () => ({
-        v0: () => ({
-          topics: () => [{ switch: () => ({ name: topicName }) }],
-          data: () => ({ switch: () => ({ name: dataName }) }),
-        }),
-      }),
+function diagEvent(topic: string, data: xdr.ScVal): xdr.DiagnosticEvent {
+  return new xdr.DiagnosticEvent({
+    inSuccessfulContractCall: false,
+    event: new xdr.ContractEvent({
+      ext: xdr.ExtensionPoint.v0(),
+      contractId: null,
+      type: xdr.ContractEventType.diagnostic,
+      body: xdr.ContractEventBody.v0(
+        new xdr.ContractEventV0({ topics: [xdr.ScVal.scvSymbol(topic)], data }),
+      ),
     }),
-  }
+  })
 }
 
-function fakeResult(txCode: string, opResults: unknown[]) {
-  return {
-    result: () => ({
-      switch: () => ({ name: txCode }),
-      results: () => opResults,
-    }),
-  }
+function txFailed(results: xdr.OperationResult[]): xdr.TransactionResult {
+  return new xdr.TransactionResult({
+    feeCharged: 100n,
+    result: xdr.TransactionResultResult.txFailed(results),
+    ext: xdr.TransactionResultExt.v0(),
+  })
 }
 
-const okInnerOp = {
-  switch: () => ({ name: 'opInner' }),
-  tr: () => ({
-    switch: () => ({ name: 'invokeHostFunction' }),
-    invokeHostFunctionResult: () => ({ switch: () => ({ name: 'invokeHostFunctionSuccess' }) }),
-  }),
-}
-const badAuthOp = { switch: () => ({ name: 'opBadAuth' }) }
+const okInnerOp = xdr.OperationResult.opInner(
+  xdr.OperationResultTr.invokeHostFunction(
+    xdr.InvokeHostFunctionResult.invokeHostFunctionSuccess(new xdr.Hash(new Uint8Array(32))),
+  ),
+)
+const badAuthOp = xdr.OperationResult.opBadAuth()
 
 const FAILED = rpc.Api.GetTransactionStatus.FAILED
 const SUCCESS = rpc.Api.GetTransactionStatus.SUCCESS
@@ -57,15 +48,15 @@ describe('parseTransactionDiagnostics (#242)', () => {
     const diag = parseTransactionDiagnostics({
       status: FAILED,
       diagnosticEventsXdr: [
-        fakeDiagEvent('scvSymbol', 'scvString'),
-        fakeDiagEvent('scvSymbol', 'scvError'),
+        diagEvent('fn_call', xdr.ScVal.scvString('hello')),
+        diagEvent('error', xdr.ScVal.scvString('trapped')),
       ],
     } as never)
 
     expect(diag).toBeDefined()
     expect(diag!.events).toHaveLength(2)
-    expect(diag!.events[0]).toContain('topics=[scvSymbol]')
-    expect(diag!.revertReason).toContain('scvError')
+    expect(diag!.events[0]).toContain('topics=[fn_call]')
+    expect(diag!.revertReason).toContain('topics=[error]')
     expect(diag!.rawEventsXdr).toHaveLength(2)
   })
 
@@ -81,7 +72,7 @@ describe('parseTransactionDiagnostics (#242)', () => {
   it('extracts result codes and the failed op index from the result XDR', () => {
     const diag = parseTransactionDiagnostics({
       status: FAILED,
-      resultXdr: fakeResult('txFailed', [okInnerOp, badAuthOp]),
+      resultXdr: txFailed([okInnerOp, badAuthOp]),
     } as never)
 
     expect(diag).toBeDefined()
@@ -94,8 +85,8 @@ describe('parseTransactionDiagnostics (#242)', () => {
   it('combines event and result-xdr diagnostics', () => {
     const diag = parseTransactionDiagnostics({
       status: FAILED,
-      diagnosticEventsXdr: [fakeDiagEvent('scvSymbol', 'scvString')],
-      resultXdr: fakeResult('txFailed', [badAuthOp]),
+      diagnosticEventsXdr: [diagEvent('fn_call', xdr.ScVal.scvString('hello'))],
+      resultXdr: txFailed([badAuthOp]),
     } as never)
 
     expect(diag!.events).toHaveLength(1)

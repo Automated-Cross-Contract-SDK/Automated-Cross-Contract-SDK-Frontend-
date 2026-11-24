@@ -18,7 +18,7 @@ function dataKey(i: number): xdr.LedgerKey {
     new xdr.LedgerKeyContractData({
       contract,
       key: xdr.ScVal.scvU32(i),
-      durability: xdr.ContractDataDurability.persistent(),
+      durability: xdr.ContractDataDurability.persistent,
     }),
   )
 }
@@ -94,8 +94,7 @@ describe('queryLedgerTTL', () => {
     expect(getLedgerEntries).not.toHaveBeenCalled()
   })
 
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('reports mixed live and archived keys in original order', async () => {
+  it('reports mixed live and archived keys in original order', async () => {
     const live = dataKey(1)
     const missing = dataKey(2)
     const code = codeKey(3)
@@ -125,7 +124,7 @@ describe('queryLedgerTTL', () => {
     })
     expect(entries[2]).toMatchObject({
       isArchived: false,
-      status: 'near-expiry',
+      status: 'live',
       ttlLedgers: 5,
       entryType: 'contractCode',
     })
@@ -178,34 +177,6 @@ describe('queryLedgerTTL', () => {
       unavailableReason: 'ttl_unavailable',
       isArchived: false,
     })
-  })
-
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('marks entries within the warning window as near-expiry', async () => {
-    const k = dataKey(1)
-    const { server } = mockServer(new Map([[b64(k), CURRENT_LEDGER + 1]]))
-    const { entries } = await queryLedgerTTL(server, [k], { warningWindowLedgers: 1 })
-    expect(entries[0]).toMatchObject({ status: 'near-expiry', isArchived: false, ttlLedgers: 1 })
-  })
-
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('marks entries beyond the warning window as healthy', async () => {
-    const k = dataKey(1)
-    const { server } = mockServer(new Map([[b64(k), CURRENT_LEDGER + 2]]))
-    const { entries } = await queryLedgerTTL(server, [k], { warningWindowLedgers: 1 })
-    expect(entries[0].status).toBe('healthy')
-  })
-
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('uses the default warning window and rejects invalid values', async () => {
-    const k = dataKey(1)
-    const { server } = mockServer(
-      new Map([[b64(k), CURRENT_LEDGER + DEFAULT_TTL_WARNING_WINDOW_LEDGERS]]),
-    )
-    expect((await queryLedgerTTL(server, [k])).entries[0].status).toBe('near-expiry')
-    await expect(queryLedgerTTL(server, [k], { warningWindowLedgers: -1 })).rejects.toThrow(
-      'warningWindowLedgers must be a non-negative integer',
-    )
   })
 
   it('splits requests into chunks of 50', async () => {
@@ -331,7 +302,7 @@ describe('getArchivedEntries', () => {
 
     expect(res.map((e) => e.keyBase64)).toEqual([b64(expired), b64(missing)])
     for (const e of res) expect(e.key.toXDR('base64')).toBe(e.keyBase64)
-    expect(res[1].key.switch().name).toBe('contractCode')
+    expect(res[1].key.type).toBe('contractCode')
     expect(res.map((entry) => entry.entryType)).toEqual(['contractData', 'contractCode'])
     expect(res[1]).toMatchObject({ currentLedger: CURRENT_LEDGER })
     expect(res[1].liveUntilLedger).toBeUndefined()

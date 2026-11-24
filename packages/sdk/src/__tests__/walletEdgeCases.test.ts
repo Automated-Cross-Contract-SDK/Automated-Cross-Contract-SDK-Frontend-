@@ -23,7 +23,7 @@ function makeMockServer(): rpc.Server {
       _parsed: true,
       transactionData: {
         build: () => mockSorobanData,
-        getFootprint: () => ({ readOnly: () => [], readWrite: () => [mockLedgerKey] }),
+        getFootprint: () => ({ readOnly: [], readWrite: [mockLedgerKey] }),
       },
       minResourceFee: '100',
       cost: { cpuInsns: '100', memBytes: '100' },
@@ -37,6 +37,7 @@ function makeMockServer(): rpc.Server {
     sendTransaction: vi.fn().mockResolvedValue({ hash: 'tx-hash-1' }),
     getTransaction: vi.fn().mockResolvedValue({ status: rpc.Api.GetTransactionStatus.SUCCESS }),
     getLedgerEntries: vi.fn(),
+    getLatestLedger: vi.fn().mockResolvedValue({ sequence: 100 }),
   } as unknown as rpc.Server
 }
 
@@ -66,8 +67,7 @@ describe('wallet edge cases', () => {
     server = makeMockServer()
   })
 
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('handles the wallet rejecting the signing request', async () => {
+  it('handles the wallet rejecting the signing request', async () => {
     const wallet: WalletAdapter = {
       isConnected: vi.fn().mockResolvedValue(true),
       getPublicKey: vi.fn().mockResolvedValue(Keypair.random().publicKey()),
@@ -106,8 +106,14 @@ describe('wallet edge cases', () => {
     expect(result.error).toBeDefined()
   })
 
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('handles the wallet connection dropping mid-workflow (after the restore step, before signing the original tx)', async () => {
+  it('handles the wallet connection dropping mid-workflow (after the restore step, before signing the original tx)', async () => {
+    // The restore worked, so the rebuilt original simulates cleanly.
+    const restoreNeeded = await server.simulateTransaction(makeSampleTx())
+    const clean: Record<string, unknown> = { ...restoreNeeded }
+    delete clean.restorePreamble
+    vi.mocked(server.simulateTransaction)
+      .mockResolvedValueOnce(restoreNeeded)
+      .mockResolvedValue(clean as never)
     let signCallCount = 0
     const wallet: WalletAdapter = {
       isConnected: vi.fn().mockResolvedValue(true),

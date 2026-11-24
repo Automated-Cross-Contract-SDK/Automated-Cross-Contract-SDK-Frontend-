@@ -4,7 +4,7 @@ import {
   RestoreStateInfo,
   SorobanResurrectEvents,
 } from './types.js'
-import { TypedEventEmitter, type WithIndexSignature } from './EventEmitter.js'
+import { TypedEventEmitter } from './EventEmitter.js'
 
 /**
  * Manages the observable workflow state for a `SorobanResurrect` instance.

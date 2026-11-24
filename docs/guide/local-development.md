@@ -11,7 +11,7 @@ exactly what you need when testing restoration flows.
 The repo ships a `.devcontainer/devcontainer.json`, so a fresh Codespace or VS Code
 dev container starts ready to build:
 
-- Node 20 (satisfies `engines.node >= 18`) and npm `10.9.8` (the `packageManager` pin).
+- Node 22 (satisfies `engines.node >= 22.12`) and npm `10.9.8` (the `packageManager` pin).
 - `npm ci` runs on post-create, so `npm run verify` works straight away.
 - Port `5173` (docs site, `npm run docs:dev`) and `8000` (local Soroban RPC) are forwarded.
 - Docker-in-Docker is enabled, so `docker compose up -d` below works inside the

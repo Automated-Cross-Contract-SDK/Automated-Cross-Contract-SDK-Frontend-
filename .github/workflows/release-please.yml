@@ -20,8 +20,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: release-please
@@ -30,8 +29,25 @@ concurrency:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      released: ${{ steps.release.outputs.releases_created }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      - id: release
+        uses: googleapis/release-please-action@v4
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  # Tags created with GITHUB_TOKEN do not trigger other workflows, so publish
+  # is called directly once the release PR has been merged.
+  publish:
+    needs: release-please
+    if: needs.release-please.outputs.released == 'true'
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/publish.yml
+    secrets: inherit

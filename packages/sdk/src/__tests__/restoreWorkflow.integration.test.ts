@@ -81,7 +81,7 @@ function makeRestoreSimResponse() {
     _parsed: true,
     transactionData: {
       build: () => mockSorobanData,
-      getFootprint: () => ({ readOnly: () => [], readWrite: () => [archivedLedgerKey] }),
+      getFootprint: () => ({ readOnly: [], readWrite: [archivedLedgerKey] }),
     },
     minResourceFee: '100',
     cost: { cpuInsns: '100', memBytes: '100' },
@@ -193,6 +193,7 @@ describe('full restore workflow integration', () => {
       restoreTxHash: 'restore-tx-hash',
       archivedKeysDetected: 1,
       sequenceRetries: 0,
+      restoreMode: 'separate',
     })
 
     // RPC calls happen in the expected end-to-end order: simulate -> account

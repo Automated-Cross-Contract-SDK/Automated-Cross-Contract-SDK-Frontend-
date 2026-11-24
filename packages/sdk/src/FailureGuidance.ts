@@ -54,6 +54,21 @@ const guidance: Record<ResurrectErrorCode, Guidance> = {
     retryable: false,
     nextStep: 'Use a wallet that supports the required transaction operation.',
   },
+  SIGNING_FAILED: {
+    stage: 'signing',
+    retryable: true,
+    nextStep: 'Ask the user to review and approve the wallet request again.',
+  },
+  TIMEOUT: {
+    stage: 'unknown',
+    retryable: true,
+    nextStep: 'Check whether the transaction was submitted before retrying.',
+  },
+  INVALID_INPUT: {
+    stage: 'unknown',
+    retryable: false,
+    nextStep: 'Correct the configuration or input.',
+  },
   UNKNOWN_ERROR: {
     stage: 'unknown',
     retryable: false,

@@ -77,9 +77,8 @@ function parseFilter(spec: string | undefined): DebugFilter {
  * the browser's `localStorage.debug` when both somehow exist.
  */
 function readFilterSpec(): string | undefined {
-  if (typeof process !== 'undefined' && process.env?.DEBUG) {
-    return process.env.DEBUG
-  }
+  const { process } = globalThis as { process?: { env?: Record<string, string | undefined> } }
+  if (process?.env?.DEBUG) return process.env.DEBUG
 
   try {
     if (typeof localStorage !== 'undefined') {

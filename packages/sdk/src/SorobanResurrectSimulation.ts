@@ -1,12 +1,13 @@
 import { Transaction, rpc } from '@stellar/stellar-sdk'
 import { ArchivedLedgerEntry } from './types.js'
-import type { ResolvedSorobanResurrectConfig, SorobanResurrectConfig } from './types.js'
+import type { ResolvedSorobanResurrectConfig } from './types.js'
 import { SimulationCache } from './SimulationCache.js'
 import {
   isRestoreResponse,
   isSuccessResponse,
   isErrorResponse,
   extractArchivedKeys,
+  extractAutoRestoredKeys,
 } from './Archiver.js'
 import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
 import type { ISorobanRpcClient } from './RpcClient.js'
@@ -195,7 +196,7 @@ export class SorobanResurrectSimulator {
 
     if (isSuccessResponse(response)) {
       readSimulationFootprint(response)
-      return []
+      return extractAutoRestoredKeys(response)
     }
 
     if (isErrorResponse(response)) {
@@ -224,7 +225,6 @@ export class SorobanResurrectSimulator {
    * is not used.
    */
   private async _detectViaDirect(transaction: Transaction): Promise<ArchivedLedgerEntry[]> {
-    const server = this._server
     const { detectArchivedKeysViaDirect } = await import('./Archiver.js')
     return detectArchivedKeysViaDirect(this._server, transaction, {
       chunkSize: this._config.archiveDetectionChunkSize,

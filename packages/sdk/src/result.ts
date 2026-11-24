@@ -1,13 +1,12 @@
 import { rpc, xdr } from '@stellar/stellar-sdk'
 
-import { asXdrBase64 } from './branded-types.js'
 import type {
   ArchivedLedgerEntry,
   ResurrectResult,
   ResurrectSuccess,
   ResurrectFailedResult,
 } from './types.js'
-import { getLedgerKeyEntryType } from './TTLHelpers.js'
+import { extractArchivedKeys } from './Archiver.js'
 import { readSimulationFootprint } from './SimulationFootprint.js'
 
 export type Result<T, E = Error> = Ok<T, E> | Err<T, E>
@@ -246,34 +245,7 @@ export function fromNullable<T>(value: T | null | undefined): Option<T> {
 export function extractArchivedKeysSafe(
   response: rpc.Api.SimulateTransactionRestoreResponse,
 ): Result<ArchivedLedgerEntry[], Error> {
-  return toResult(() => {
-    const keys: ArchivedLedgerEntry[] = []
-
-    if (!response._parsed) {
-      console.warn(
-        'SorobanResurrect: restore simulation response has _parsed=false, cannot extract archived keys',
-      )
-      return keys
-    }
-
-    try {
-      const footprint = response.transactionData.getFootprint()
-      const readWrite = footprint.readWrite()
-
-      for (const ledgerKey of readWrite) {
-        const keyBase64 = asXdrBase64(ledgerKey.toXDR('base64'))
-        keys.push({
-          key: ledgerKey,
-          keyBase64,
-          entryType: getLedgerKeyEntryType(ledgerKey),
-        })
-      }
-    } catch {
-      return keys
-    }
-
-    return keys
-  })
+  return toResult(() => extractArchivedKeys(response))
 }
 
 export function extractFootprintFromSuccessSafe(

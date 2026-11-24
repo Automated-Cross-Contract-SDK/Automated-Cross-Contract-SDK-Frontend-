@@ -10,9 +10,8 @@ describe('versioned Soroban RPC response fixtures', () => {
     expect(rpc.Api.isSimulationRestore(response)).toBe(false)
     expect(rpc.Api.isSimulationError(response)).toBe(false)
     expect(
-      (response as rpc.Api.SimulateTransactionSuccessResponse).transactionData
-        .getFootprint()
-        .readWrite(),
+      (response as rpc.Api.SimulateTransactionSuccessResponse).transactionData.getFootprint()
+        .readWrite,
     ).toEqual([])
   })
 
@@ -21,9 +20,8 @@ describe('versioned Soroban RPC response fixtures', () => {
 
     expect(rpc.Api.isSimulationRestore(response)).toBe(true)
     expect(
-      (response as rpc.Api.SimulateTransactionRestoreResponse).transactionData
-        .getFootprint()
-        .readWrite(),
+      (response as rpc.Api.SimulateTransactionRestoreResponse).transactionData.getFootprint()
+        .readWrite,
     ).toEqual([expect.objectContaining({ toXDR: expect.any(Function) })])
   })
 
@@ -50,9 +48,8 @@ describe('versioned Soroban RPC response fixtures', () => {
     expect(rpc.Api.isSimulationRestore(response)).toBe(false)
     expect(rpc.Api.isSimulationError(response)).toBe(false)
     expect(
-      (response as rpc.Api.SimulateTransactionSuccessResponse).transactionData
-        .getFootprint()
-        .readWrite(),
+      (response as rpc.Api.SimulateTransactionSuccessResponse).transactionData.getFootprint()
+        .readWrite,
     ).toEqual([])
   })
 })

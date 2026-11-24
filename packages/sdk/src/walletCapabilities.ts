@@ -1,5 +1,4 @@
 import { ResurrectError } from './errors.js'
-import type { ResurrectErrorCode } from './errors.js'
 import type { WalletAdapter, WalletCapabilities } from './types.js'
 
 /**

@@ -1,4 +1,4 @@
-import { rpc, Transaction, TransactionBuilder, xdr } from '@stellar/stellar-sdk'
+import { rpc, Transaction, xdr } from '@stellar/stellar-sdk'
 import type { ISorobanRpcClient } from './RpcClient.js'
 import type { StellarPublicKey } from './branded-types.js'
 import type {
@@ -17,16 +17,16 @@ import type {
 } from './types.js'
 import { resolveConfig } from './SorobanResurrectConfig.js'
 import { SorobanResurrectStateManager } from './SorobanResurrectState.js'
+import type { SubmitWithRestoreRequestOptions } from './RequestConfigOverrides.js'
 import { SorobanResurrectSimulator } from './SorobanResurrectSimulation.js'
 import { SorobanResurrectExecutor } from './SorobanResurrectExecution.js'
 import {
-  isErrorResponse,
   isRestoreResponse,
   isSuccessResponse,
   extractArchivedKeys,
+  extractAutoRestoredKeys,
 } from './Archiver.js'
 import { buildRestoreCostEstimate, type RestoreCostEstimate } from './feeCalculation.js'
-import type { RestorePlan } from './RestorePlan.js'
 import type { TransactionHistoryEntry } from './TransactionHistory.js'
 import {
   queryLedgerTTL,
@@ -118,6 +118,9 @@ export class SorobanResurrect {
     this.logger = resolveLogger(config.logger)
 
     this._stateMgr = new SorobanResurrectStateManager()
+    this._stateMgr.onStateChange((info) =>
+      this.logger.debug(`state → ${info.state}`, { message: info.message }),
+    )
     this._simulator = new SorobanResurrectSimulator(
       this._server,
       this._config,
@@ -491,6 +494,20 @@ export class SorobanResurrect {
       return buildRestoreCostEstimate(minResourceFee, archivedKeys.length, this._config)
     }
 
+    // Automatic restoration is paid inside the call's own resource fee, so
+    // there is no separate restore transaction and no multiplier.
+    const automatic = extractAutoRestoredKeys(response)
+    if (automatic.length > 0 && isSuccessResponse(response)) {
+      return {
+        minResourceFee: parseInt(response.minResourceFee, 10),
+        multiplier: 1,
+        estimatedFee: response.minResourceFee,
+        archivedKeysDetected: automatic.length,
+        wouldNeedRestore: true,
+        restoreMode: 'automatic',
+      }
+    }
+
     return buildRestoreCostEstimate(0, 0, this._config)
   }
 
@@ -606,7 +623,7 @@ export class SorobanResurrect {
    * ```
    */
   async submitWithRestore(
-    options: SubmitWithRestoreOptions & AbortSignalOptions,
+    options: SubmitWithRestoreRequestOptions & AbortSignalOptions,
   ): Promise<ResurrectResult> {
     const controller = new AbortController()
     const externalSignal = options.signal
@@ -800,7 +817,9 @@ export class SorobanResurrect {
     ledgersThreshold = 100_000,
     opts: QueryLedgerTTLOptions = {},
   ): Promise<LedgerEntryTTLInfo[]> {
-    return this._trackOperation(() => getExpiringSoonEntries(this._server, keys, ledgersThreshold))
+    return this._trackOperation(() =>
+      getExpiringSoonEntries(this._server, keys, ledgersThreshold, opts),
+    )
   }
 
   /**

@@ -70,7 +70,7 @@ import {
   RPC_CIRCUIT_BREAKER_COOLDOWN_MS,
 } from './constants.js'
 import type { SubmitRetryOptions } from './types.js'
-import { ResurrectError, type ResurrectErrorCode } from './errors.js'
+import { NetworkError, ResurrectError, type ResurrectErrorCode } from './errors.js'
 
 // ---------------------------------------------------------------------------
 // Interface
@@ -149,6 +149,21 @@ export interface ISorobanRpcClient {
 // Concrete implementation
 // ---------------------------------------------------------------------------
 
+const TRANSPORT_FAILURE =
+  /fetch failed|failed to fetch|network|connection (?:refused|reset)|socket|ECONN|ENOTFOUND|EAI_AGAIN/i
+
+/** Surfaces transport failures as {@link NetworkError}; RPC errors pass through. */
+async function typedTransport<T>(call: () => Promise<T>): Promise<T> {
+  try {
+    return await call()
+  } catch (error) {
+    if (error instanceof Error && TRANSPORT_FAILURE.test(error.message)) {
+      throw new NetworkError(error.message, error)
+    }
+    throw error
+  }
+}
+
 /**
  * Production implementation of {@link ISorobanRpcClient} that delegates
  * every call to an underlying `rpc.Server` instance from
@@ -209,37 +224,37 @@ export class SorobanRpcClient implements ISorobanRpcClient {
   }
 
   simulateTransaction(transaction: Transaction): Promise<rpc.Api.SimulateTransactionResponse> {
-    return this.ensureServer().simulateTransaction(transaction)
+    return typedTransport(() => this.ensureServer().simulateTransaction(transaction))
   }
 
   sendTransaction(
     transaction: Transaction | import('@stellar/stellar-sdk').FeeBumpTransaction,
   ): Promise<rpc.Api.SendTransactionResponse> {
-    return this.ensureServer().sendTransaction(transaction)
+    return typedTransport(() => this.ensureServer().sendTransaction(transaction))
   }
 
   getTransaction(hash: string): Promise<rpc.Api.GetTransactionResponse> {
-    return this.ensureServer().getTransaction(hash)
+    return typedTransport(() => this.ensureServer().getTransaction(hash))
   }
 
   getAccount(publicKey: string): Promise<Account> {
-    return this.ensureServer().getAccount(publicKey)
+    return typedTransport(() => this.ensureServer().getAccount(publicKey))
   }
 
   getLedgerEntries(...keys: xdr.LedgerKey[]): Promise<rpc.Api.GetLedgerEntriesResponse> {
-    return this.ensureServer().getLedgerEntries(...keys)
+    return typedTransport(() => this.ensureServer().getLedgerEntries(...keys))
   }
 
   getLatestLedger(): Promise<rpc.Api.GetLatestLedgerResponse> {
-    return this.ensureServer().getLatestLedger()
+    return typedTransport(() => this.ensureServer().getLatestLedger())
   }
 
   getNetwork(): Promise<unknown> {
-    return this.ensureServer().getNetwork()
+    return typedTransport(() => this.ensureServer().getNetwork())
   }
 
   getVersionInfo(): Promise<unknown> {
-    return this.ensureServer().getVersionInfo()
+    return typedTransport(() => this.ensureServer().getVersionInfo())
   }
 }
 
@@ -483,6 +498,7 @@ function property(value: unknown, key: string): unknown {
  * describe simulation/transaction failures are deliberately not retried.
  */
 export function isRetryableRpcError(error: unknown): boolean {
+  if (error instanceof NetworkError) return true
   const message = error instanceof Error ? error.message : String(error)
   if (DETERMINISTIC_ERROR.test(message)) return false
 

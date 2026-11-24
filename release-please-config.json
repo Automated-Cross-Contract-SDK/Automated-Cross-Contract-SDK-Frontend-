@@ -13,6 +13,60 @@
     },
     "packages/svelte-hook": {
       "component": "svelte-hook"
+    },
+    "packages/adapter-albedo": {
+      "component": "adapter-albedo"
+    },
+    "packages/adapter-freighter": {
+      "component": "adapter-freighter"
+    },
+    "packages/adapter-lobstr": {
+      "component": "adapter-lobstr"
+    },
+    "packages/adapter-rabet": {
+      "component": "adapter-rabet"
+    },
+    "packages/adapter-walletconnect": {
+      "component": "adapter-walletconnect"
+    },
+    "packages/adapter-walletkit": {
+      "component": "adapter-walletkit"
+    },
+    "packages/adapter-xbull": {
+      "component": "adapter-xbull"
+    },
+    "packages/create-soroban-resurrect": {
+      "component": "create-soroban-resurrect",
+      "extra-files": [
+        "index.js",
+        {
+          "type": "json",
+          "path": "template/package.json",
+          "jsonpath": "$.dependencies['@soroban-resurrect/sdk']"
+        }
+      ]
     }
-  }
+  },
+  "bump-minor-pre-major": true,
+  "plugins": [
+    "node-workspace",
+    {
+      "type": "linked-versions",
+      "groupName": "soroban-resurrect",
+      "components": [
+        "sdk",
+        "react-hook",
+        "vue-hook",
+        "svelte-hook",
+        "adapter-albedo",
+        "adapter-freighter",
+        "adapter-lobstr",
+        "adapter-rabet",
+        "adapter-walletconnect",
+        "adapter-walletkit",
+        "adapter-xbull",
+        "create-soroban-resurrect"
+      ]
+    }
+  ]
 }

@@ -144,39 +144,23 @@ function parseOperationResults(result: xdr.TransactionResult): {
   failedOperationIndex?: number
   operationResultCode?: string
 } {
-  let opResults: xdr.OperationResult[] | undefined
-  try {
-    opResults = result.result().results()
-  } catch {
-    // Result arm carries no per-operation results (e.g. txInsufficientFee).
-    return {}
-  }
-  // Some arms (txInsufficientFee, txBadSeq, …) return `undefined` rather than
-  // throwing when asked for `results()`.
-  if (!Array.isArray(opResults)) return {}
+  // Arms such as txInsufficientFee carry no per-operation results.
+  if (!('results' in result.result)) return {}
+  const opResults = result.result.results
 
   for (let index = 0; index < opResults.length; index++) {
     const opResult = opResults[index]
-    const outerCode = opResult.switch().name
 
-    if (outerCode !== 'opInner') {
-      if (!SUCCESS_CODE.test(outerCode)) {
-        return { failedOperationIndex: index, operationResultCode: outerCode }
+    if (opResult.type !== 'opInner') {
+      if (!SUCCESS_CODE.test(opResult.type)) {
+        return { failedOperationIndex: index, operationResultCode: opResult.type }
       }
       continue
     }
 
-    try {
-      const inner = opResult.tr().value() as { switch(): { name: string } }
-      const innerCode = inner.switch().name
-      if (!SUCCESS_CODE.test(innerCode)) {
-        return { failedOperationIndex: index, operationResultCode: innerCode }
-      }
-    } catch {
-      return {
-        failedOperationIndex: index,
-        operationResultCode: opResult.tr().switch().name,
-      }
+    const innerCode = (opResult.tr.value as { type?: string } | null)?.type ?? opResult.tr.type
+    if (!SUCCESS_CODE.test(innerCode)) {
+      return { failedOperationIndex: index, operationResultCode: innerCode }
     }
   }
 
@@ -195,13 +179,13 @@ function parseDiagnostics(events: xdr.DiagnosticEvent[]): {
   for (const event of events) {
     let v0: xdr.ContractEventV0
     try {
-      v0 = event.event().body().v0()
+      v0 = event.event.body.v0
     } catch {
       continue
     }
 
-    const topics = v0.topics().map(safeNative)
-    const data = safeNative(v0.data())
+    const topics = v0.topics.map(safeNative)
+    const data = safeNative(v0.data)
 
     const head = topics.map(stringifyNative).filter(Boolean).join(', ')
     const body = stringifyNative(data)
@@ -277,7 +261,7 @@ export function parseTransactionFailure(
   let opInfo: { failedOperationIndex?: number; operationResultCode?: string } = {}
   if (result) {
     try {
-      txResultCode = result.result().switch().name
+      txResultCode = result.result.type
     } catch {
       // keep 'unknown'
     }

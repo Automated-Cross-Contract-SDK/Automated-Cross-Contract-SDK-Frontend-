@@ -62,8 +62,7 @@ describe('result helpers', () => {
     expect(outcome._unsafeUnwrapErr().message).toBe('async boom')
   })
 
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('returns extraction failures as Err instead of treating them as an empty restore', () => {
+  it('returns extraction failures as Err instead of treating them as an empty restore', () => {
     const response = {
       _parsed: false,
     } as any

@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Automatic restoration (CAP-0066): archived entries are detected in protocol
+  23+ simulations and restored by the call itself with one signature. See
+  `restoreMode` and `extractAutoRestoredKeys`.
+- Typed errors, `getResurrectErrorCode`, per-phase timeouts, `requestId`
+  de-duplication, confirmation policies and all workflow lifecycle events.
+- Every wallet-signed transaction is verified before submission.
+
+### Changed
+
+- **Breaking:** `detectArchivedEntries` treats an expired TTL as archived and an
+  absent key as non-existent, and throws `ARCHIVE_DETECTION_BATCH_FAILED` when
+  the RPC fails instead of guessing.
+- **Breaking:** confirmation polling throws `ResurrectTimeoutError` (`TIMEOUT`);
+  wallet failures use `SIGNING_FAILED`.
+- **Breaking:** requires `@stellar/stellar-sdk` 17.4+ and Node.js 22.12+.
+- **Breaking:** non-empty `restoreTxMemo` / `restoreTxMemoText` throw
+  `INVALID_RESTORE_MEMO`; the network rejects Soroban transactions with a memo.
+- Restore and TTL-extension fees never drop below the 100-stroop base fee, and
+  fractional fees are truncated to whole stroops.
+
+### Fixed
+
+- `configOverrides`, `feeBumpConfig`, `rebuildTimeBounds` and
+  `approveExpiredRebuild` were ignored by `submitWithRestore`.
+- Address-based authorization is signed after a separate restore.
+
+- Hardware-wallet restores no longer get an automatic memo, which made the
+  network reject them.
+- `attachAuthorizationEntries` returns a transaction that carries the entries.
+- `buildContractDataKey` returns real XDR instead of a look-alike object.
+- `submitWithRestore` assembles un-assembled transactions when no restore is
+  needed; previously the network rejected them.
+- Rejected submissions fail immediately instead of polling until timeout, and
+  the `tx_bad_seq` retry recognises real RPC rejections.
+- `submitWithRestore` rejects a missing transaction or wallet up front.
+
+### Added
+
 - `CODE_OF_CONDUCT.md`, `CHANGELOG.md`, `ARCHITECTURE.md`, and expanded JSDoc /
   API reference documentation.
 - Changelog validation for every publishable package. Releases now require
@@ -65,6 +103,10 @@ CAP-0066 archived ledger entries.
   quick-start guide, and API reference.
 
 ### Fixed
+
+- `configOverrides`, `feeBumpConfig`, `rebuildTimeBounds` and
+  `approveExpiredRebuild` were ignored by `submitWithRestore`.
+- Address-based authorization is signed after a separate restore.
 
 - Corrected the archive detection method selection so the configured
   `archiveDetectionMethod` (`simulation` vs `direct`) is respected

@@ -52,8 +52,7 @@ describe('waitForTransaction — timeout and retry behavior', () => {
       expect(calls).toBe(8)
     })
 
-    // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-    it.skip('throws a descriptive timeout error when the status stays NOT_FOUND for the entire poll window', async () => {
+    it('throws a descriptive timeout error when the status stays NOT_FOUND for the entire poll window', async () => {
       const server = makeMockServer()
       vi.mocked(server.getTransaction).mockResolvedValue({
         status: rpc.Api.GetTransactionStatus.NOT_FOUND,
@@ -73,32 +72,34 @@ describe('waitForTransaction — timeout and retry behavior', () => {
   })
 
   describe('RPC unavailable during polling', () => {
-    // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-    it.skip('cancels an in-flight status request when its signal aborts', async () => {
+    it('cancels an in-flight status request when its signal aborts', async () => {
       const server = makeMockServer()
       vi.mocked(server.getTransaction).mockReturnValue(new Promise(() => {}) as never)
       const controller = new AbortController()
 
-      const promise = waitForTransaction(server, 'hash', 100, 5000, controller.signal)
+      const promise = waitForTransaction(server, 'hash', 100, 5000, {
+        signal: controller.signal,
+      })
       controller.abort()
 
-      await expect(promise).rejects.toThrow('Operation cancelled')
+      await expect(promise).rejects.toMatchObject({ name: 'AbortError' })
     })
 
-    // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-    it.skip('clears the retry timer when polling is cancelled', async () => {
+    it('clears the retry timer when polling is cancelled', async () => {
       const server = makeMockServer()
       vi.mocked(server.getTransaction).mockResolvedValue({
         status: rpc.Api.GetTransactionStatus.NOT_FOUND,
       } as never)
       const controller = new AbortController()
-      const promise = waitForTransaction(server, 'hash', 1000, 5000, controller.signal)
+      const promise = waitForTransaction(server, 'hash', 1000, 5000, {
+        signal: controller.signal,
+      })
 
       await vi.advanceTimersByTimeAsync(0)
       expect(vi.getTimerCount()).toBe(1)
       controller.abort()
 
-      await expect(promise).rejects.toThrow('Operation cancelled')
+      await expect(promise).rejects.toMatchObject({ name: 'AbortError' })
       expect(vi.getTimerCount()).toBe(0)
     })
 

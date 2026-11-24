@@ -11,6 +11,7 @@ import {
   xdr,
 } from '@stellar/stellar-sdk'
 import {
+  attachAuthorizationEntries,
   ensureAddressAuthorization,
   supportsAuthEntrySigning,
   requiresAddressAuthorization,
@@ -147,5 +148,19 @@ describe('ensureAddressAuthorization (#244)', () => {
   it('requiresAddressAuthorization agrees with the entry credential types', () => {
     expect(requiresAddressAuthorization([makeSourceAccountAuthEntry()])).toBe(false)
     expect(requiresAddressAuthorization([makeAddressAuthEntry(signerKp.publicKey())])).toBe(true)
+  })
+})
+
+describe('attachAuthorizationEntries', () => {
+  it('returns a transaction that really carries the entries and preserves other fields', () => {
+    const tx = makeInvokeTx(Keypair.random().publicKey())
+    const attached = attachAuthorizationEntries({
+      transaction: tx,
+      authEntries: [makeAddressAuthEntry(Keypair.random().publicKey())],
+    })
+    const reparsed = TransactionBuilder.fromXDR(attached.toXDR(), NP) as Transaction
+    expect((reparsed.operations[0] as { auth?: unknown[] }).auth).toHaveLength(1)
+    expect(reparsed).toMatchObject({ fee: tx.fee, sequence: tx.sequence, source: tx.source })
+    expect(reparsed.timeBounds).toEqual(tx.timeBounds)
   })
 })

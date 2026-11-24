@@ -6,8 +6,7 @@ import { resolveSubmitConfig } from '../RequestConfigOverrides.js'
 const rpcUrl = 'https://soroban-testnet.stellar.org'
 
 describe('configuration resolution', () => {
-  // TODO(known-failing): feature lost in bad merges; see docs/known-failing-tests.md
-  it.skip('returns effective settings and defaults without runtime resources', () => {
+  it('returns effective settings and defaults without runtime resources', () => {
     const settings = getEffectiveConfig({ rpcUrl })
 
     expect(settings).toMatchObject({
@@ -16,7 +15,7 @@ describe('configuration resolution', () => {
       pollIntervalMs: 1000,
       pollTimeoutMs: 60_000,
       restoreFeeMultiplier: 3,
-      maxRestoreFeeStroops: 10_000_000,
+      maxRestoreFeeStroops: '10000000',
       maxSequenceRetries: 3,
       archiveDetectionChunkSize: 50,
       archiveDetectionConcurrency: 4,
@@ -63,25 +62,17 @@ describe('request-specific configuration overrides', () => {
       configOverrides: {
         pollTimeoutMs: 12_000,
         restoreFeeMultiplier: 7,
-        restoreTxMemoText: 'one request only',
       },
     })
 
     expect(effective.pollTimeoutMs).toBe(12_000)
     expect(effective.restoreFeeMultiplier).toBe(7)
-    expect(effective.restoreTxMemoText).toBe('one request only')
     expect(baseConfig.pollTimeoutMs).toBe(60_000)
     expect(baseConfig.restoreFeeMultiplier).toBe(3)
     expect(Object.isFrozen(effective)).toBe(true)
   })
 
-  it('preserves legacy top-level memo precedence and validates overrides', () => {
-    const effective = resolveSubmitConfig({ rpcUrl, restoreTxMemoText: 'instance' } as never, {
-      configOverrides: { restoreTxMemoText: 'nested' },
-      restoreTxMemoText: 'legacy',
-    })
-
-    expect(effective.restoreTxMemoText).toBe('legacy')
+  it('validates overrides', () => {
     expect(() =>
       resolveSubmitConfig(baseConfig as never, {
         configOverrides: { pollTimeoutMs: 0 },

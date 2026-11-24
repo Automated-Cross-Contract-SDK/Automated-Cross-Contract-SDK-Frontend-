@@ -126,23 +126,11 @@ export interface SorobanResurrectConfig {
    */
   ttlWatchAutoExtend?: boolean
   /**
-   * Optional memo attached to restore transactions built by the SDK.
-   *
-   * Restore transactions are otherwise built with no memo, so wallets and
-   * explorers show a bare `restoreFootprint` operation with no indication of
-   * why the signature is being requested. Setting a memo here makes the
-   * prompt self-explanatory (e.g. `Memo.text('Soroban archive restore')`).
-   *
-   * Default: `undefined` (no memo — unchanged behaviour for existing users).
-   *
-   * @see {@link restoreTxMemoText} for a plain-string convenience form.
+   * @deprecated The network rejects Soroban transactions that carry a memo, so
+   * anything but a `none` memo throws `INVALID_RESTORE_MEMO`.
    */
   restoreTxMemo?: Memo
-  /**
-   * Convenience string form of {@link restoreTxMemo}. When set (and
-   * `restoreTxMemo` is not), a `Memo.text(restoreTxMemoText)` is attached to
-   * restore transactions. Ignored when {@link restoreTxMemo} is provided.
-   */
+  /** @deprecated See {@link restoreTxMemo}; any non-empty value throws. */
   restoreTxMemoText?: string
   /**
    * Optional pre-built RPC client to use instead of creating one from `rpcUrl`.
@@ -355,8 +343,9 @@ export interface FeeBumpConfig {
   /** The fee-bump sponsor who will sign and pay the fees. */
   sponsor: FeeBumpSponsor
   /**
-   * Optional custom fee for the fee-bump wrapper (in stroops).
-   * If not provided, defaults to the inner transaction's fee.
+   * Optional per-operation inclusion fee for the wrapper (in stroops); the
+   * Soroban resource fee is added on top. Defaults to the inner transaction's
+   * own inclusion fee.
    */
   feeBumpFee?: FeeStroops | string
 }
@@ -441,6 +430,8 @@ export interface ResurrectResult {
   originalTxHash?: TxHash
   /** Hash of the submitted restore transaction (present if restore was needed). */
   restoreTxHash?: TxHash
+  /** How archived entries were restored. Present when any were detected. */
+  restoreMode?: RestoreMode
   /** Number of archived ledger entries that were detected and restored. */
   archivedKeysDetected: number
   /** Error message if the workflow failed. */
@@ -522,7 +513,15 @@ export interface RestoreKeysOptions {
  * proceed with the real submission — without having signed or submitted
  * anything to the network.
  */
+/**
+ * How archived entries are restored: `automatic` inside the contract call
+ * itself (protocol 23+, one signature) or by a `separate` restore transaction.
+ */
+export type RestoreMode = 'automatic' | 'separate'
+
 export interface DryRunResult {
+  /** How the entries would be restored. Present when a restore is needed. */
+  restoreMode?: RestoreMode
   /** Whether the transaction would require a restore before submission. */
   wouldNeedRestore: boolean
   /** Operation type names, in the order they appear in the original transaction. */

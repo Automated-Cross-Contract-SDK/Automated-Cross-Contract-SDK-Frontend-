@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Address, Keypair, xdr } from '@stellar/stellar-sdk'
+import { buildContractDataKey } from '../Archiver.js'
 import { serializeLedgerKey } from '../LedgerKey.js'
 
 function contractDataKey(): xdr.LedgerKey {
@@ -7,7 +8,7 @@ function contractDataKey(): xdr.LedgerKey {
     new xdr.LedgerKeyContractData({
       contract: Address.contract(Buffer.alloc(32, 1)).toScAddress(),
       key: xdr.ScVal.scvSymbol('balance'),
-      durability: xdr.ContractDataDurability.persistent(),
+      durability: xdr.ContractDataDurability.persistent,
     }),
   )
 }
@@ -35,5 +36,14 @@ describe('serializeLedgerKey', () => {
 
     expect(serializeLedgerKey(decoded)).toBe(serialized)
     expect(serializeLedgerKey(contractDataKey())).not.toBe(serialized)
+  })
+})
+
+describe('buildContractDataKey', () => {
+  it('builds real XDR that survives a round trip', () => {
+    const key = buildContractDataKey('01'.repeat(32), xdr.ScVal.scvSymbol('balance'))
+    expect(serializeLedgerKey(xdr.LedgerKey.fromXDR(serializeLedgerKey(key), 'base64'))).toBe(
+      serializeLedgerKey(contractDataKey()),
+    )
   })
 })

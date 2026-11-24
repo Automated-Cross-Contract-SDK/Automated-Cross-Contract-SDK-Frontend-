@@ -1,4 +1,5 @@
 import { Transaction } from '@stellar/stellar-sdk'
+import { bytesToHex } from './bytes.js'
 import type { ResurrectResult } from './types.js'
 import { asHistoryEntryId, type HistoryEntryId } from './branded-types.js'
 
@@ -250,7 +251,7 @@ export class TransactionHistory {
       status: entry.status,
       attemptCount: entry.attemptCount,
       lastAttemptAt: entry.lastAttemptAt,
-      transactionHash: entry.transaction.hash().toString('hex'),
+      transactionHash: bytesToHex(entry.transaction.hash()),
     }))
     return JSON.stringify(serialized)
   }

@@ -31,7 +31,7 @@ function scValToString(value: xdr.ScVal): string {
     /* fall through to discriminant name */
   }
   try {
-    return value.switch().name
+    return value.type
   } catch {
     return '<scval>'
   }
@@ -42,13 +42,10 @@ function scValToString(value: xdr.ScVal): string {
  */
 function stringifyDiagnosticEvent(ev: xdr.DiagnosticEvent): string {
   try {
-    const inSuccess = ev.inSuccessfulContractCall()
-    const body = ev.event().body().v0()
-    const topics = body
-      .topics()
-      .map((t) => scValToString(t))
-      .join(', ')
-    const data = scValToString(body.data())
+    const inSuccess = ev.inSuccessfulContractCall
+    const body = ev.event.body.v0
+    const topics = body.topics.map((t) => scValToString(t)).join(', ')
+    const data = scValToString(body.data)
     return `[${inSuccess ? 'ok' : 'fail'}] topics=[${topics}] data=${data}`
   } catch {
     try {
@@ -85,7 +82,7 @@ function toTransactionResult(raw: unknown): xdr.TransactionResult | undefined {
       return undefined
     }
   }
-  if (typeof (raw as xdr.TransactionResult).result === 'function') {
+  if (raw instanceof xdr.TransactionResult) {
     return raw as xdr.TransactionResult
   }
   return undefined
@@ -98,21 +95,19 @@ function toTransactionResult(raw: unknown): xdr.TransactionResult | undefined {
 function collectOpResultCodes(opResult: xdr.OperationResult): string[] {
   const codes: string[] = []
   try {
-    const outer = opResult.switch().name
-    codes.push(outer)
-    if (outer === 'opInner') {
-      const inner = opResult.tr()
+    codes.push(opResult.type)
+    if (opResult.type === 'opInner') {
+      const inner = opResult.tr
       // `tr()` discriminant names the op *type*; the meaningful result code is
       // one level deeper for Soroban ops.
-      const trName = inner.switch().name
-      if (trName === 'invokeHostFunction') {
-        codes.push(inner.invokeHostFunctionResult().switch().name)
-      } else if (trName === 'restoreFootprint') {
-        codes.push(inner.restoreFootprintResult().switch().name)
-      } else if (trName === 'extendFootprintTtl') {
-        codes.push(inner.extendFootprintTtlResult().switch().name)
+      if (inner.type === 'invokeHostFunction') {
+        codes.push(inner.invokeHostFunctionResult.type)
+      } else if (inner.type === 'restoreFootprint') {
+        codes.push(inner.restoreFootprintResult.type)
+      } else if (inner.type === 'extendFootprintTtl') {
+        codes.push(inner.extendFootprintTtlResult.type)
       } else {
-        codes.push(trName)
+        codes.push(inner.type)
       }
     }
   } catch {
@@ -173,16 +168,10 @@ export function parseTransactionDiagnostics(
   const txResult = toTransactionResult(anyResp.resultXdr ?? anyResp.returnValue)
   if (txResult) {
     try {
-      const r = txResult.result()
-      resultCodes.push(r.switch().name)
-      let opResults: xdr.OperationResult[] | undefined
-      try {
-        opResults = r.results() as xdr.OperationResult[]
-      } catch {
-        opResults = undefined
-      }
-      if (Array.isArray(opResults)) {
-        opResults.forEach((op, idx) => {
+      const r = txResult.result
+      resultCodes.push(r.type)
+      if ('results' in r) {
+        r.results.forEach((op, idx) => {
           const codes = collectOpResultCodes(op)
           resultCodes.push(...codes)
           const failed = codes.some((c) => c !== 'opInner' && !/Success$/i.test(c))

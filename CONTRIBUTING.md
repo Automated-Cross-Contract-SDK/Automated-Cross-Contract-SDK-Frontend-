@@ -75,7 +75,7 @@ by commenting with a brief status update.
 
 | Tool    | Minimum version    |
 | ------- | ------------------ |
-| Node.js | 20.x               |
+| Node.js | 22.12+             |
 | npm     | 10.x               |
 | Git     | any recent version |
 

@@ -1,15 +1,10 @@
-import { rpc, Transaction } from '@stellar/stellar-sdk'
+import { Address, rpc, Transaction } from '@stellar/stellar-sdk'
 import { xdr } from '@stellar/stellar-sdk'
 import { ArchivedLedgerEntry, SimulateResponse } from './types.js'
 import { getLedgerKeyEntryType } from './TTLHelpers.js'
-import {
-  asContractIdHex,
-  asXdrBase64,
-  type ContractIdHex,
-  type HexString,
-} from './branded-types.js'
-import { extractArchivedKeysSafe, extractFootprintFromSuccessSafe } from './result.js'
+import { asXdrBase64, type ContractIdHex, type HexString } from './branded-types.js'
 import type { ISorobanRpcClient } from './RpcClient.js'
+import { ResurrectError } from './errors.js'
 import { serializeLedgerKey } from './LedgerKey.js'
 import { createDebugger } from './Debug.js'
 import { LEDGER_ENTRY_CHUNK_SIZE, LEDGER_ENTRY_CONCURRENCY } from './constants.js'
@@ -74,6 +69,37 @@ export function isErrorResponse(
   response: SimulateResponse,
 ): response is rpc.Api.SimulateTransactionErrorResponse {
   return rpc.Api.isSimulationError(response)
+}
+
+/**
+ * Archived entries that a simulated call restores by itself.
+ *
+ * Since protocol 23 (CAP-0066) RPC no longer returns a restore preamble for
+ * contract calls. It returns a normal success whose resources list, by index
+ * into the read-write footprint, the archived entries that are restored in
+ * place when the transaction executes.
+ */
+export function extractAutoRestoredKeys(response: SimulateResponse): ArchivedLedgerEntry[] {
+  if (!isSuccessResponse(response) || isRestoreResponse(response)) return []
+  const data: xdr.SorobanTransactionData | undefined = response.transactionData?.build?.()
+  return archivedKeysInResources(data)
+}
+
+/** Entries a transaction's own resources mark for automatic restoration. */
+export function archivedKeysInResources(
+  data: xdr.SorobanTransactionData | undefined,
+): ArchivedLedgerEntry[] {
+  if (data?.ext?.type !== 'resourceExt') return []
+  const { readWrite } = data.resources.footprint
+  return data.ext.resourceExt.archivedSorobanEntries
+    .map((index) => readWrite[index])
+    .filter((key) => key !== undefined)
+    .map((key) => ({
+      key,
+      keyBase64: serializeLedgerKey(key),
+      entryType: getLedgerKeyEntryType(key),
+    }))
+    .sort(compareArchivedEntries)
 }
 
 /**
@@ -188,37 +214,41 @@ async function detectArchivedChunk(
   chunk: xdr.LedgerKey[],
   chunkIndex: number,
 ): Promise<ArchivedLedgerEntry[]> {
+  let result: rpc.Api.GetLedgerEntriesResponse
   try {
-    const result = await server.getLedgerEntries(...chunk)
-    // Build a set of returned entry keys to identify archived ones
-    const knownKeys = new Set<string>()
-    if (result.entries) {
-      for (const entry of result.entries) {
-        knownKeys.add(entry.key.toXDR('base64'))
-      }
-    }
-    // Check each key in the chunk; if not in returned entries, it's archived
-    const archived: ArchivedLedgerEntry[] = []
-    for (const key of chunk) {
-      const keyXdr = asXdrBase64(key.toXDR('base64'))
-      if (!knownKeys.has(keyXdr)) {
-        archived.push({
-          key,
-          keyBase64: keyXdr,
-          entryType: getLedgerKeyEntryType(key),
-        })
-      }
-    }
-    return archived
+    result = await server.getLedgerEntries(...chunk)
   } catch (err) {
-    debug('detectArchivedEntries: chunk %d failed, assuming archived', chunkIndex, err)
-    // On network error, conservatively treat all keys in chunk as archived
-    return chunk.map((key) => ({
+    debug('detectArchivedEntries: chunk %d failed', chunkIndex, err)
+    throw new ResurrectError(
+      'ARCHIVE_DETECTION_BATCH_FAILED',
+      `Could not determine archive status: ${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
+
+  // RPC returns archived entries with an expired TTL (0 once evicted). A key
+  // that is absent does not exist, so there is nothing to restore.
+  const archivedKeys = new Set<string>()
+  for (const entry of result.entries ?? []) {
+    const { liveUntilLedgerSeq } = entry
+    if (liveUntilLedgerSeq !== undefined && liveUntilLedgerSeq < result.latestLedger) {
+      archivedKeys.add(entry.key.toXDR('base64'))
+    }
+  }
+  return chunk
+    .map((key) => ({
       key,
       keyBase64: asXdrBase64(key.toXDR('base64')),
       entryType: getLedgerKeyEntryType(key),
     }))
-  }
+    .filter(({ key, keyBase64 }) => archivedKeys.has(keyBase64) && isRestorable(key))
+}
+
+/** Only contract code and persistent contract data can be archived and restored. */
+function isRestorable(key: xdr.LedgerKey): boolean {
+  return (
+    key.type === 'contractCode' ||
+    (key.type === 'contractData' && key.contractData.durability.name === 'persistent')
+  )
 }
 
 /**
@@ -308,9 +338,8 @@ export async function detectArchivedKeysViaSimulation(
     return extractArchivedKeys(response)
   }
 
-  if (isSuccessResponse(response) || isErrorResponse(response)) {
-    return []
-  }
+  if (isSuccessResponse(response)) return extractAutoRestoredKeys(response)
+  if (isErrorResponse(response)) return []
   throw new IncompleteFootprintError(
     'unrecognized-response',
     'the RPC response is not a recognized success, error, or restore response.',
@@ -360,13 +389,8 @@ export async function detectArchivedKeysViaDirect(
     )
   }
 
-  const { readWrite } = extractFootprintFromSuccess(response)
-
-  if (readWrite.length === 0) {
-    return []
-  }
-
-  return detectArchivedEntries(server, readWrite, options)
+  const { readOnly, readWrite } = extractFootprintFromSuccess(response)
+  return detectArchivedEntries(server, [...readOnly, ...readWrite], options)
 }
 
 /**
@@ -389,24 +413,16 @@ export function buildContractDataKey(
     (contractId.match(/.{1,2}/g) ?? []).map((b) => parseInt(b, 16)),
   )
 
-  const contractAddress = {
-    switch: () => xdr.ScAddressType.scAddressTypeContract(),
-    contractId: contractBytes,
-  } as unknown as xdr.ScAddress
-
-  const contractData = {
-    contract: contractAddress,
-    key,
-    durability:
-      keyType === 'temporary'
-        ? xdr.ContractDataDurability.temporary()
-        : xdr.ContractDataDurability.persistent(),
-  } as unknown as xdr.LedgerKeyContractData
-
-  return {
-    type: xdr.LedgerEntryType.contractData(),
-    contractData,
-  } as unknown as xdr.LedgerKey
+  return xdr.LedgerKey.contractData(
+    new xdr.LedgerKeyContractData({
+      contract: Address.contract(contractBytes).toScAddress(),
+      key,
+      durability:
+        keyType === 'temporary'
+          ? xdr.ContractDataDurability.temporary
+          : xdr.ContractDataDurability.persistent,
+    }),
+  )
 }
 
 /**
@@ -479,10 +495,12 @@ export async function getContractDataEntry(
 
   try {
     const result = await server.getLedgerEntries(ledgerKey)
-    if (result.entries && result.entries.length > 0) {
-      return result.entries[0]
-    }
-    return null
+    const entry = result.entries?.[0]
+    if (!entry) return null
+    // RPC still returns archived entries, with an expired TTL.
+    const { liveUntilLedgerSeq } = entry
+    const archived = liveUntilLedgerSeq !== undefined && liveUntilLedgerSeq < result.latestLedger
+    return archived ? null : entry
   } catch {
     return null
   }
@@ -495,7 +513,7 @@ export async function getContractDataEntry(
  *
  * @param wasmHash - The wasm hash as a 64-char hex string (as returned by
  *   `Operation.uploadContractWasm`/`installContractWasm` responses), or a
- *   raw `Buffer`/`Uint8Array`.
+ *   raw `Uint8Array`.
  * @returns An xdr.LedgerKey for the ContractCode entry.
  *
  * @example
@@ -504,13 +522,11 @@ export async function getContractDataEntry(
  * const archived = await checkArchivedContractCode(server, wasmHashHex)
  * ```
  */
-export function buildContractCodeKey(
-  wasmHash: HexString | string | Buffer | Uint8Array,
-): xdr.LedgerKey {
+export function buildContractCodeKey(wasmHash: HexString | string | Uint8Array): xdr.LedgerKey {
   const hash =
     typeof wasmHash === 'string'
-      ? Buffer.from((wasmHash.match(/.{1,2}/g) ?? []).map((b) => parseInt(b, 16)))
-      : Buffer.from(wasmHash)
+      ? new Uint8Array((wasmHash.match(/.{1,2}/g) ?? []).map((b) => parseInt(b, 16)))
+      : wasmHash
 
   const contractCode = new xdr.LedgerKeyContractCode({ hash })
 
@@ -528,7 +544,7 @@ export function buildContractCodeKey(
  */
 export async function checkArchivedContractCode(
   server: ISorobanRpcClient,
-  wasmHash: HexString | string | Buffer | Uint8Array,
+  wasmHash: HexString | string | Uint8Array,
 ): Promise<boolean> {
   const ledgerKey = buildContractCodeKey(wasmHash)
   const archived = await detectArchivedEntries(server, [ledgerKey])
@@ -545,16 +561,18 @@ export async function checkArchivedContractCode(
  */
 export async function getContractCodeEntry(
   server: ISorobanRpcClient,
-  wasmHash: HexString | string | Buffer | Uint8Array,
+  wasmHash: HexString | string | Uint8Array,
 ): Promise<rpc.Api.LedgerEntryResult | null> {
   const ledgerKey = buildContractCodeKey(wasmHash)
 
   try {
     const result = await server.getLedgerEntries(ledgerKey)
-    if (result.entries && result.entries.length > 0) {
-      return result.entries[0]
-    }
-    return null
+    const entry = result.entries?.[0]
+    if (!entry) return null
+    // RPC still returns archived entries, with an expired TTL.
+    const { liveUntilLedgerSeq } = entry
+    const archived = liveUntilLedgerSeq !== undefined && liveUntilLedgerSeq < result.latestLedger
+    return archived ? null : entry
   } catch {
     return null
   }

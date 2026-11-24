@@ -14,13 +14,13 @@
   "description": "Automated Cross-Contract State Restoration SDK & Wallet Middleware for Soroban",
   "license": "MIT",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12"
   },
   "supportedVersions": {
-    "node": ">=20",
+    "node": ">=22.12",
     "npm": ">=10",
     "peerDependencies": {
-      "@stellar/stellar-sdk": ">=12 <14"
+      "@stellar/stellar-sdk": "^17.4.0"
     }
   },
   "packageManager": "npm@10.9.8",
@@ -55,7 +55,8 @@
     "prepare": "husky",
     "verify:packaging": "node scripts/verify-packaging.mjs",
     "check:bundle": "node scripts/check-bundle-budgets.mjs",
-    "check:malware": "bash scripts/check-malware-markers.sh"
+    "check:malware": "bash scripts/check-malware-markers.sh",
+    "check:testnet": "node scripts/testnet-check.mjs"
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",

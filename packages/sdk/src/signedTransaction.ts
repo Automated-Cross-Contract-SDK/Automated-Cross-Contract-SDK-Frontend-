@@ -1,7 +1,9 @@
 import { FeeBumpTransaction, Transaction, TransactionBuilder } from '@stellar/stellar-sdk'
 import type { WalletAdapter } from './types.js'
 import type { SorobanResurrectConfig } from './types.js'
-import { ResurrectError } from './errors.js'
+import { ResurrectError, wrapSigningError } from './errors.js'
+import { extractXdrOperations } from './Restorer.js'
+import { runWithSignal } from './AbortUtils.js'
 import { asXdrBase64 } from './branded-types.js'
 
 function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
@@ -9,8 +11,8 @@ function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
 }
 
 function sameOperations(expected: Transaction, actual: Transaction): boolean {
-  const expectedOperations = expected.toEnvelope().v1().tx().operations()
-  const actualOperations = actual.toEnvelope().v1().tx().operations()
+  const expectedOperations = extractXdrOperations(expected)
+  const actualOperations = extractXdrOperations(actual)
   return (
     expectedOperations.length === actualOperations.length &&
     expectedOperations.every(
@@ -66,12 +68,16 @@ export function verifySignedTransaction(
   return signedTx
 }
 
-/** Warns and signs only transactions whose returned envelope verifies. */
+/**
+ * The single signing path: prompts the wallet (honouring `signal`) and only
+ * returns a transaction that verifies against the one it was asked to sign.
+ */
 export async function signAndVerifyTransaction(
   transaction: Transaction,
   wallet: WalletAdapter,
   networkPassphrase: string,
   config: Pick<SorobanResurrectConfig, 'logger'>,
+  signal?: AbortSignal,
 ): Promise<Transaction> {
   if (wallet.capabilities?.hardware) {
     config.logger?.warn(
@@ -80,8 +86,15 @@ export async function signAndVerifyTransaction(
     )
   }
 
-  const signedXdr = await wallet.signTransaction(asXdrBase64(transaction.toXDR()), {
-    networkPassphrase,
-  })
+  const signedXdr = await wrapSigningError(() =>
+    runWithSignal(
+      () =>
+        wallet.signTransaction(asXdrBase64(transaction.toXDR()), {
+          networkPassphrase,
+          ...(signal ? { signal } : {}),
+        }),
+      signal,
+    ),
+  )
   return verifySignedTransaction(transaction, signedXdr, networkPassphrase)
 }

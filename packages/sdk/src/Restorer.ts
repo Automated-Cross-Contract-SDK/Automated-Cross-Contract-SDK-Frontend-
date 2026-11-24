@@ -19,14 +19,18 @@ import type {
 } from './types.js'
 import type { ISorobanRpcClient } from './RpcClient.js'
 import type { SequenceNumber, StellarPublicKey, TxHash, XdrBase64 } from './branded-types.js'
-import { asTxHash, asXdrBase64 } from './branded-types.js'
+import { asXdrBase64 } from './branded-types.js'
 import {
   BASE_FEE,
   DEFAULT_NETWORK_PASSPHRASE,
   SOROBAN_MAX_TX_XDR_BYTES,
   RESTORE_TX_SIZE_WARN_RATIO,
 } from './constants.js'
-import { calculateRestoreFee } from './feeCalculation.js'
+import { POLL_INTERVAL_MS } from './constants.js'
+import type { WalletAdapter } from './types.js'
+import { ensureAddressAuthorization } from './Authorization.js'
+import { declaredResourceFee } from './submission.js'
+import { toBuilderFee, calculateRestoreFee } from './feeCalculation.js'
 import {
   delayWithSignal,
   runWithSignal,
@@ -37,6 +41,7 @@ import { isRestoreResponse, extractArchivedKeys } from './Archiver.js'
 import {
   RestoreFeeExceededError,
   ResurrectError,
+  ResurrectTimeoutError,
   OriginalTransactionExpiredError,
 } from './errors.js'
 import { evaluateRestoreFootprint, restoreSizeGuidance } from './footprintGuard.js'
@@ -87,13 +92,8 @@ export function resolveRestoreMemo(
   explicit: Memo | undefined,
   config: Pick<SorobanResurrectConfig, 'restoreTxMemo' | 'restoreTxMemoText'>,
 ): Memo | undefined {
-  validateRestoreMemoConfig(config)
-  if (explicit) return explicit
-  if (config.restoreTxMemo) return config.restoreTxMemo
-  if (config.restoreTxMemoText !== undefined && config.restoreTxMemoText !== '') {
-    return Memo.text(config.restoreTxMemoText)
-  }
-  return undefined
+  validateRestoreMemoConfig({ ...config, restoreTxMemo: explicit ?? config.restoreTxMemo })
+  return explicit ?? config.restoreTxMemo
 }
 
 /**
@@ -140,6 +140,9 @@ export function resolveRestoreMemo(
  */
 export function isTxBadSeqError(response: unknown): boolean {
   if (!response || typeof response !== 'object') return false
+  // Real RPC rejections carry the code in decoded XDR, not as text.
+  const { errorResult } = response as Partial<rpc.Api.SendTransactionResponse>
+  if (errorResult?.result?.type === 'txBadSeq') return true
 
   const candidates: string[] = []
   const record = (value: unknown) => {
@@ -202,7 +205,7 @@ export async function buildRestoreTransaction(params: BuildRestoreTxParams): Pro
   }
 
   const builder = new TransactionBuilder(account, {
-    fee: restoreFee,
+    fee: toBuilderFee(restoreFee, transactionData, config),
     networkPassphrase,
   })
     .addOperation(Operation.restoreFootprint({}))
@@ -452,58 +455,7 @@ export async function waitForTransaction(
     await delayWithSignal(jitter, signal)
   }
 
-  throw new ResurrectError(
-    'CONFIRMATION_TIMEOUT',
-    `Transaction ${hash} did not complete within ${pollTimeoutMs}ms`,
-  )
-}
-
-function createAbortError(): Error {
-  const error = new Error('Operation cancelled')
-  error.name = 'AbortError'
-  return error
-}
-
-function awaitWithAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
-  if (!signal) return promise
-  if (signal.aborted) return Promise.reject(createAbortError())
-
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = () => {
-      signal.removeEventListener('abort', onAbort)
-      reject(createAbortError())
-    }
-    signal.addEventListener('abort', onAbort, { once: true })
-    promise.then(
-      (value) => {
-        signal.removeEventListener('abort', onAbort)
-        if (signal.aborted) reject(createAbortError())
-        else resolve(value)
-      },
-      (error: unknown) => {
-        signal.removeEventListener('abort', onAbort)
-        reject(error)
-      },
-    )
-  })
-}
-
-function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
-  if (!signal) return new Promise((resolve) => setTimeout(resolve, ms))
-  if (signal.aborted) return Promise.reject(createAbortError())
-
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      signal.removeEventListener('abort', onAbort)
-      resolve()
-    }, ms)
-    const onAbort = () => {
-      clearTimeout(timer)
-      signal.removeEventListener('abort', onAbort)
-      reject(createAbortError())
-    }
-    signal.addEventListener('abort', onAbort, { once: true })
-  })
+  throw new ResurrectTimeoutError(`Transaction ${hash} did not complete within ${pollTimeoutMs}ms`)
 }
 
 /**
@@ -717,10 +669,7 @@ async function pollTransactionAdaptive(
     await delayWithSignal(delay, signal)
   }
 
-  throw new ResurrectError(
-    'CONFIRMATION_TIMEOUT',
-    `Transaction ${hash} did not complete within ${timeoutMs}ms`,
-  )
+  throw new ResurrectTimeoutError(`Transaction ${hash} did not complete within ${timeoutMs}ms`)
 }
 
 /**
@@ -797,6 +746,9 @@ export async function waitForTransactionSSE(
  * @see {@link buildOriginalAfterRestore}, which uses this to copy
  *   operations onto a freshly-built transaction.
  */
+/** Extra simulations allowed after a restore before giving up. */
+const RESIMULATION_ATTEMPTS = 3
+
 const parsedXdrOperationsCache = new WeakMap<Transaction, xdr.Operation[]>()
 
 export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
@@ -806,42 +758,26 @@ export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
   }
 
   const envelope = tx.toEnvelope()
-  const envelopeType = envelope.switch()
 
-  let operations: xdr.Operation[]
-
-  // Handle fee-bump transactions: extract the inner transaction first
-  if (envelopeType.name === 'envelopeTypeTxFeeBump') {
-    const feeBumpEnvelope = envelope.value() as xdr.FeeBumpTransactionEnvelope
-    const innerEnvelope = feeBumpEnvelope.tx().innerTx()
-    const innerType = innerEnvelope.switch()
-
-    if (innerType.name === 'envelopeTypeTxV0') {
-      const innerV0 = innerEnvelope.value() as unknown as xdr.TransactionV0Envelope
-      operations = innerV0.tx().operations()
-    } else if (innerType.name === 'envelopeTypeTx') {
-      const innerV1 = innerEnvelope.value() as xdr.TransactionV1Envelope
-      operations = innerV1.tx().operations()
-    } else {
-      throw new Error(`Unsupported inner transaction envelope type: ${innerType.name}`)
+  switch (envelope.type) {
+    case 'envelopeTypeTxV0':
+      return cacheOperations(tx, envelope.v0.tx.operations)
+    case 'envelopeTypeTx':
+      return cacheOperations(tx, envelope.v1.tx.operations)
+    case 'envelopeTypeTxFeeBump': {
+      const inner = envelope.feeBump.tx.innerTx
+      if (inner.type !== 'envelopeTypeTx') {
+        throw new Error(
+          `Unsupported inner transaction envelope type: ${(inner as { type: string }).type}`,
+        )
+      }
+      return cacheOperations(tx, inner.v1.tx.operations)
     }
-
-    return cacheOperations(tx, operations)
+    default:
+      throw new Error(
+        `Unsupported transaction envelope type: ${(envelope as { type: string }).type}`,
+      )
   }
-
-  // Handle regular V0 transactions
-  if (envelopeType.name === 'envelopeTypeTxV0') {
-    const v0Envelope = envelope.value() as xdr.TransactionV0Envelope
-    operations = v0Envelope.tx().operations()
-  } else if (envelopeType === xdr.EnvelopeType.envelopeTypeTx()) {
-    // Handle regular V1 transactions
-    const v1Envelope = envelope.value() as xdr.TransactionV1Envelope
-    operations = v1Envelope.tx().operations()
-  } else {
-    throw new Error(`Unsupported transaction envelope type: ${envelopeType.name}`)
-  }
-
-  return cacheOperations(tx, operations)
 }
 
 function cacheOperations(tx: Transaction, operations: xdr.Operation[]): xdr.Operation[] {
@@ -916,6 +852,8 @@ export async function buildOriginalAfterRestore(
   fee: string,
   signal?: AbortSignal,
   rebuildTimeBounds?: RebuildTimeBounds,
+  wallet?: WalletAdapter,
+  resimulationDelayMs: number = POLL_INTERVAL_MS,
 ): Promise<Transaction> {
   const now = Math.floor(Date.now() / 1000)
   const bounds = rebuildTimeBounds ?? originalTx.timeBounds
@@ -942,8 +880,11 @@ export async function buildOriginalAfterRestore(
   const account = await runWithSignal(() => server.getAccount(source), signal)
   const operations = extractXdrOperations(originalTx)
 
+  // An already-assembled original declares its old resource fee in `fee`;
+  // assembly below adds the fresh one, so strip the old one first.
+  const inclusionFee = BigInt(fee) - declaredResourceFee(originalTx)
   const builder = new TransactionBuilder(account, {
-    fee,
+    fee: (inclusionFee > 0n ? inclusionFee : BigInt(BASE_FEE)).toString(),
     networkPassphrase,
   })
 
@@ -958,23 +899,36 @@ export async function buildOriginalAfterRestore(
   }
   const rawTx = builder.build()
 
-  const sim = await runWithSignal(() => server.simulateTransaction(rawTx), signal)
+  // The RPC node may lag a ledger behind the confirmed restore, so allow a few
+  // attempts. Never fall back to the raw transaction: without a footprint the
+  // network always rejects it.
+  let sim = await runWithSignal(() => server.simulateTransaction(rawTx), signal)
+  for (let i = 0; i < RESIMULATION_ATTEMPTS && rpc.Api.isSimulationRestore(sim); i++) {
+    await delayWithSignal(resimulationDelayMs, signal)
+    sim = await runWithSignal(() => server.simulateTransaction(rawTx), signal)
+  }
 
   if (rpc.Api.isSimulationRestore(sim)) {
-    // A restore may have succeeded in the ledger but some RPC/test doubles keep
-    // reporting the same archived footprint for the immediate re-simulation.
-    // In that case, continue with the rebuilt original transaction rather than
-    // failing early and blocking the successful resubmission path.
-    return rawTx
+    throw new ResurrectError(
+      'RESTORE_TX_FAILED',
+      'Entries are still archived after the restore transaction confirmed',
+    )
   }
 
   if (rpc.Api.isSimulationError(sim)) {
     throw new Error(`Re-simulation failed after restore: ${sim.error}`)
   }
 
-  const assembled = rpc.assembleTransaction(rawTx, sim)
-
-  return assembled.build()
+  const assembled = rpc.assembleTransaction(rawTx, sim).build()
+  if (!wallet) return assembled
+  const { transaction } = await ensureAddressAuthorization({
+    transaction: assembled,
+    simulation: sim,
+    wallet,
+    networkPassphrase,
+    signal,
+  })
+  return transaction
 }
 
 /**
@@ -1030,7 +984,9 @@ export async function buildFeeBumpTransaction(
     throw new Error('Failed to parse inner transaction XDR')
   }
 
-  const fee = feeBumpFee ?? innerTx.fee
+  // The builder takes a per-operation fee and adds the resource fee itself.
+  const inclusionFee = Number(BigInt(innerTx.fee) - declaredResourceFee(innerTx))
+  const fee = feeBumpFee ?? Math.ceil(inclusionFee / innerTx.operations.length).toString()
 
   const feeBumpTx = TransactionBuilder.buildFeeBumpTransaction(
     Keypair.fromPublicKey(sponsorPublicKey),
@@ -1148,9 +1104,9 @@ export async function buildBatchRestoreTransaction(
 
   for (const response of restoreResponses) {
     const data = response.transactionData.build()
-    const resources = data.resources()
+    const resources = data.resources
 
-    for (const key of resources.footprint().readWrite()) {
+    for (const key of resources.footprint.readWrite) {
       const keyBase64 = key.toXDR('base64')
       if (!seenKeys.has(keyBase64)) {
         seenKeys.add(keyBase64)
@@ -1159,9 +1115,9 @@ export async function buildBatchRestoreTransaction(
     }
 
     totalResourceFee += parseInt(response.minResourceFee, 10)
-    totalInstructions += resources.instructions()
-    totalReadBytes += resources.readBytes()
-    totalWriteBytes += resources.writeBytes()
+    totalInstructions += resources.instructions
+    totalReadBytes += resources.diskReadBytes
+    totalWriteBytes += resources.writeBytes
   }
 
   const combinedSorobanData = new SorobanDataBuilder()
@@ -1178,7 +1134,7 @@ export async function buildBatchRestoreTransaction(
   const restoreFee = calculateRestoreFee(totalResourceFee, config)
 
   const restoreTx = new TransactionBuilder(account, {
-    fee: restoreFee,
+    fee: toBuilderFee(restoreFee, combinedSorobanData, config),
     networkPassphrase,
   })
     .addOperation(Operation.restoreFootprint({}))

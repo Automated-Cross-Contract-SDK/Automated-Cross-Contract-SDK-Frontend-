@@ -63,7 +63,6 @@ function buildStrAppMock(kp: Keypair) {
     getPublicKey: vi.fn().mockResolvedValue({ publicKey: kp.publicKey() }),
     getAppConfiguration: vi.fn().mockResolvedValue({ version: '6.1.0' }),
     signHash: vi.fn().mockImplementation(async (_path: string, hash: Uint8Array) => ({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       signature: (kp as any).sign(hash),
     })),
   }
